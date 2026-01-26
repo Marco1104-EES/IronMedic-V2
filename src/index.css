@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+/* === 全域卷軸美化 (確保高對比可見) === */
+
+/* 1. 設定卷軸寬度 */
+::-webkit-scrollbar {
+  width: 14px; /*稍微加寬，更好抓*/
+}
+
+/* 2. 卷軸的軌道 (底色) - 改用淺灰色，不要全黑 */
+::-webkit-scrollbar-track {
+  background: #e5e7eb; /* 淺灰 (Tailwind gray-200) */
+  border-left: 1px solid #d1d5db; /* 加一條左邊框線，區隔內容 */
+}
+
+/* 3. 卷軸本體 (拉桿) - 改用深藍色，對比強烈 */
+::-webkit-scrollbar-thumb {
+  background: #1e3a8a; /* 您的品牌色 Navy Blue */
+  border-radius: 7px;   /* 圓角 */
+  border: 3px solid #e5e7eb; /* 加上白邊，讓它看起來像浮起來 */
+}
+
+/* 4. 滑鼠移上去時變色 */
+::-webkit-scrollbar-thumb:hover {
+  background: #172554; /* 更深的藍色 */
+}
