@@ -1,270 +1,183 @@
 import React, { useState } from 'react';
-import Papa from 'papaparse';
+import * as XLSX from 'xlsx';
 import { supabase } from '../supabaseClient';
 
 export default function BulkImport() {
+  const [file, setFile] = useState(null);
+  const [previewData, setPreviewData] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [logs, setLogs] = useState([]);
-  const [errors, setErrors] = useState([]); // 儲存檢查到的錯誤
-  const [validRows, setValidRows] = useState([]); // 儲存通過檢查的資料
 
-  // 📥 功能：下載標準範例 CSV
-  const downloadTemplate = () => {
-    // 定義標準標題與一行範例資料
-    const csvContent = "\uFEFFemail,real_name,phone,citizen_id,emt_level\nexample@gmail.com,王小明,0912345678,A123456789,EMT-1";
-    
-    // 建立虛擬下載連結
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    link.setAttribute("href", url);
-    link.setAttribute("download", "會員匯入標準範本.csv");
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  // 🔍 功能：檢查 0 與 O 的混淆 (Regex)
-  const checkConfusingChars = (text) => {
-    if (!text) return false;
-    // 檢查是否包含大寫 O 或小寫 o，這在電話或數字欄位通常是錯的
-    return /[Oo]/.test(text);
-  };
-
-  // 📂 功能：處理檔案上傳與驗證
+  // 1. 讀取 Excel 檔案
   const handleFileUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+    const selectedFile = e.target.files[0];
+    setFile(selectedFile);
 
-    // 重置狀態
-    setUploading(true);
-    setLogs([]);
-    setErrors([]);
-    setValidRows([]);
-
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (results) => {
-        const rows = results.data;
-        const newErrors = [];
-        const cleanRows = [];
-
-        // --- 🕵️‍♂️ 開始逐行檢查 ---
-        rows.forEach((row, index) => {
-          const rowNum = index + 2; // 因為 Excel 第一行是標題，所以資料從第 2 行開始
-          let rowError = [];
-
-          // 1. 檢查必填欄位 (全部都是必須)
-          if (!row.email) rowError.push("缺 Email");
-          if (!row.real_name) rowError.push("缺姓名");
-          if (!row.phone) rowError.push("缺電話");
-          if (!row.citizen_id) rowError.push("缺身分證");
-          if (!row.emt_level) rowError.push("缺 EMT 等級");
-
-          // 2. 檢查 0 與 O 混淆 (針對電話與身分證)
-          // 電話應該只有數字，如果有 O 代表打錯了
-          if (row.phone && checkConfusingChars(row.phone)) {
-            rowError.push("電話含有英文字母 O/o (請檢查是否應為數字 0)");
-          }
-          // 身分證通常只有第一碼是英文，後面如果出現 O 也很可疑 (這裡做簡單檢查)
-          if (row.citizen_id && row.citizen_id.length > 1) {
-             const suffix = row.citizen_id.substring(1); // 取第一碼之後的字
-             if (checkConfusingChars(suffix)) {
-               rowError.push("身分證數字部分含有英文字母 O/o");
-             }
-          }
-
-          if (rowError.length > 0) {
-            newErrors.push({
-              row: rowNum,
-              name: row.real_name || "未知",
-              email: row.email || "未知",
-              reasons: rowError
-            });
-          } else {
-            cleanRows.push(row);
-          }
-        });
-
-        // 設定檢查結果
-        setErrors(newErrors);
-        setValidRows(cleanRows);
-        setUploading(false);
-
-        if (newErrors.length === 0 && cleanRows.length > 0) {
-          setLogs([`✅ 完美！共 ${cleanRows.length} 筆資料格式正確，準備好可以上傳了。`]);
-        } else if (newErrors.length > 0) {
-          setLogs([`❌ 發現 ${newErrors.length} 筆錯誤資料，請修正 Excel 後再重新上傳。`]);
-        }
-      },
-      error: (error) => {
-        setUploading(false);
-        setLogs([`❌ 檔案解析失敗: ${error.message}`]);
-      }
-    });
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const bstr = evt.target.result;
+      const wb = XLSX.read(bstr, { type: 'binary' });
+      const wsname = wb.SheetNames[0];
+      const ws = wb.Sheets[wsname];
+      // 轉成 JSON，header: 0 代表第一列是標題
+      const data = XLSX.utils.sheet_to_json(ws, { header: 0 });
+      setPreviewData(data);
+      addLog(`📄 讀取成功，共 ${data.length} 筆資料`);
+    };
+    reader.readAsBinaryString(selectedFile);
   };
 
-  // 🚀 功能：執行最終上傳 (只上傳正確的資料)
-  const executeUpload = async () => {
-    if (validRows.length === 0) {
-      alert("沒有正確的資料可以上傳！");
-      return;
-    }
+  const addLog = (msg) => setLogs(prev => [...prev, msg]);
 
+  // 2. 開始匯入 (核心邏輯：解析舊表單 -> 寫入新系統)
+  const handleImport = async () => {
+    if (!previewData.length) return;
     setUploading(true);
-    const { error } = await supabase
-      .from('wix_import')
-      .upsert(validRows, { onConflict: 'email' });
+    addLog("🚀 開始匯入資料庫...");
 
-    setUploading(false);
+    let successCount = 0;
+    let errorCount = 0;
 
-    if (error) {
-      alert("上傳資料庫失敗：" + error.message);
-    } else {
-      alert(`🎉 成功匯入 ${validRows.length} 筆資料！`);
-      setLogs(prev => [`🚀 上傳完成！資料庫已更新。`, ...prev]);
-      setValidRows([]); // 清空暫存，避免重複按
+    for (const row of previewData) {
+      try {
+        // --- A. 基本資料 mapping (需依照您真實 Excel 欄位名稱修改) ---
+        // 假設 Excel 欄位是：["姓名", "身分證字號", "Email", "背心尺寸"]
+        const citizenId = row['身分證字號'] || row['ID']; // 容錯抓取
+        const fullName = row['姓名'] || row['Name'];
+        const email = row['Email'] || `${citizenId}@placeholder.com`; // 若無 Email 暫時用假體
+
+        if (!citizenId) continue; // 沒 ID 就跳過
+
+        // --- B. 處理 User Profile (Upsert) ---
+        // 這裡因為 Supabase Auth 需要獨立註冊，我們先假設是純資料匯入
+        // 實務上通常會先檢查 user_metadata，或直接寫入 profiles 表
+        
+        // 模擬：寫入 profiles 表
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles') // 假設您有這張表
+          .upsert({ 
+            citizen_id: citizenId,
+            full_name: fullName, 
+            vest_size: row['背心尺寸']
+          }, { onConflict: 'citizen_id' })
+          .select()
+          .single();
+
+        if (profileError) throw new Error(`Profile Error: ${profileError.message}`);
+
+        // --- C. 處理複雜身分 (Priority Logic) ---
+        // 解析 Excel 的 "身分備註" 欄位
+        const statusNote = row['身分備註'] || ''; 
+        
+        // 1. 帶隊官
+        if (statusNote.includes('帶隊') || statusNote.includes('教官')) {
+            await supabase.from('member_privileges').upsert({
+                user_id: profile.id,
+                role_type: 'leader',
+                is_active: true,
+                valid_year: 2026
+            });
+        }
+
+        // 2. 新會員 (給 2 次扣打)
+        if (statusNote.includes('新會員')) {
+            await supabase.from('member_privileges').upsert({
+                user_id: profile.id,
+                role_type: 'new_member',
+                credits: 2, // 初始 2 次
+                is_active: true
+            });
+        }
+
+        // --- D. 處理三鐵衣效期 (Uniforms) ---
+        // 假設欄位叫 "三鐵衣效期" (格式可能不統一，這裡做簡單處理)
+        const expiryRaw = row['三鐵衣效期']; 
+        if (expiryRaw) {
+            // 這裡通常需要寫一個日期轉換函式，因為 Excel 日期可能是數字或文字
+            // 暫時假設是文字 '2026/12/31'
+            await supabase.from('uniforms').upsert({
+                user_id: profile.id,
+                uniform_type: 'trisuit',
+                expiry_date: expiryRaw, 
+                is_active: true
+            });
+        }
+
+        successCount++;
+
+      } catch (err) {
+        console.error(err);
+        errorCount++;
+        addLog(`❌ ${row['姓名']} 匯入失敗: ${err.message}`);
+      }
     }
+
+    addLog(`✅ 匯入完成！成功: ${successCount}, 失敗: ${errorCount}`);
+    setUploading(false);
   };
 
   return (
-    <div className="bg-white p-6 rounded-xl shadow-md border border-gray-200">
-      
-      {/* 標題與下載範本區 */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-        <h3 className="text-xl font-bold text-navy flex items-center gap-2">
-          📂 會員資料匯入倉儲站
-          <span className="text-xs font-normal text-white bg-green-600 px-2 py-1 rounded-full">CSV 格式</span>
-        </h3>
-        
-        {/* 🔴 紅圈需求：下載標準表格按鈕 */}
-        <button 
-          onClick={downloadTemplate}
-          className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 border border-gray-300 transition"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-          下載標準輸入表格 (.csv)
-        </button>
-      </div>
-      
-      {/* 🟢 綠圈需求：所有欄位說明 (全改為必須) */}
-      <div className="mb-6 overflow-hidden rounded-lg border border-gray-200">
-        <table className="min-w-full text-sm text-left">
-          <thead className="bg-navy text-white">
-            <tr>
-              <th className="px-4 py-2">Excel 標題 (英文)</th>
-              <th className="px-4 py-2">中文說明</th>
-              <th className="px-4 py-2">範例 (請注意 0 與 O)</th>
-              <th className="px-4 py-2 text-center">需要</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200 bg-gray-50">
-            <tr>
-              <td className="px-4 py-2 font-mono text-blue-700 font-bold">email</td>
-              <td className="px-4 py-2">唯一帳號</td>
-              <td className="px-4 py-2 font-mono text-gray-500">marco@gmail.com</td>
-              <td className="px-4 py-2 text-center text-red-600 font-bold">✔ 必須</td>
-            </tr>
-            <tr>
-              <td className="px-4 py-2 font-mono text-blue-700 font-bold">real_name</td>
-              <td className="px-4 py-2">真實姓名</td>
-              <td className="px-4 py-2 text-gray-500">王小明</td>
-              <td className="px-4 py-2 text-center text-red-600 font-bold">✔ 必須</td>
-            </tr>
-            <tr>
-              <td className="px-4 py-2 font-mono text-blue-700 font-bold">phone</td>
-              <td className="px-4 py-2">電話</td>
-              <td className="px-4 py-2 font-mono text-gray-500">0912345678</td>
-              <td className="px-4 py-2 text-center text-red-600 font-bold">✔ 必須</td>
-            </tr>
-            <tr>
-              <td className="px-4 py-2 font-mono text-blue-700 font-bold">citizen_id</td>
-              <td className="px-4 py-2">身分證</td>
-              <td className="px-4 py-2 font-mono text-gray-500">A123456789</td>
-              <td className="px-4 py-2 text-center text-red-600 font-bold">✔ 必須</td>
-            </tr>
-            <tr>
-              <td className="px-4 py-2 font-mono text-blue-700 font-bold">emt_level</td>
-              <td className="px-4 py-2">證照等級</td>
-              <td className="px-4 py-2 text-gray-500">EMT-1</td>
-              <td className="px-4 py-2 text-center text-red-600 font-bold">✔ 必須</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+    <div className="bg-white p-8 rounded-2xl shadow-lg border border-gray-100 max-w-4xl mx-auto mt-8">
+      <h2 className="text-2xl font-bold text-navy mb-6 flex items-center gap-2">
+        📂 呆瓜式資料匯入 (Excel/CSV)
+      </h2>
 
-      {/* 檔案上傳區 */}
-      <div className="flex items-center gap-4 mb-6">
-        <label className="cursor-pointer bg-navy text-white px-6 py-3 rounded-lg hover:bg-blue-900 transition shadow-lg font-bold flex items-center gap-2">
-          <span>📤 選擇 CSV 並驗證</span>
-          <input 
+      <div className="border-2 border-dashed border-gray-300 rounded-xl p-10 text-center hover:bg-gray-50 transition bg-gray-50/50">
+        <input 
             type="file" 
-            accept=".csv"
-            onChange={handleFileUpload}
-            disabled={uploading}
-            className="hidden"
-          />
+            accept=".xlsx, .xls, .csv" 
+            onChange={handleFileUpload} 
+            className="hidden" 
+            id="fileInput"
+        />
+        <label htmlFor="fileInput" className="cursor-pointer flex flex-col items-center">
+            <span className="text-4xl mb-2">📄</span>
+            <span className="text-gray-600 font-bold">點擊選擇或是拖曳「基本資料表」到這裡</span>
+            <span className="text-xs text-gray-400 mt-2">支援 .xlsx, .csv 格式</span>
         </label>
-        
-        {/* 只有當全部正確時，才顯示確認上傳按鈕 */}
-        {validRows.length > 0 && errors.length === 0 && (
-          <button 
-            onClick={executeUpload}
-            disabled={uploading}
-            className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition shadow-lg font-bold animate-pulse"
-          >
-            {uploading ? "上傳中..." : `🚀 確認匯入 ${validRows.length} 筆資料`}
-          </button>
-        )}
       </div>
 
-      {/* ⛔ 錯誤檢核視窗 (如果有錯誤才會出現) */}
-      {errors.length > 0 && (
-        <div className="mb-6 bg-red-50 border-2 border-red-200 rounded-xl p-4">
-          <h4 className="text-red-700 font-bold text-lg mb-2 flex items-center gap-2">
-            ⛔ 檢核失敗：發現 {errors.length} 筆資料有誤
-          </h4>
-          <p className="text-sm text-red-600 mb-4">請修正 Excel 檔案中的以下問題後，重新上傳。</p>
-          
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left border-collapse">
-              <thead className="bg-red-100 text-red-800">
-                <tr>
-                  <th className="p-2 border border-red-200">Excel 列號</th>
-                  <th className="p-2 border border-red-200">姓名</th>
-                  <th className="p-2 border border-red-200">Email</th>
-                  <th className="p-2 border border-red-200">錯誤原因 (請注意 0/O 區分)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {errors.map((err, idx) => (
-                  <tr key={idx} className="bg-white">
-                    <td className="p-2 border border-red-200 text-center font-bold">{err.row}</td>
-                    <td className="p-2 border border-red-200">{err.name}</td>
-                    {/* 使用 font-mono (等寬字體) 讓 0 和 O 看起來明顯不同 */}
-                    <td className="p-2 border border-red-200 font-mono">{err.email}</td>
-                    <td className="p-2 border border-red-200 text-red-600 font-bold">
-                      {err.reasons.join("、")}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+      {previewData.length > 0 && (
+        <div className="mt-8">
+            <div className="flex justify-between items-center mb-4">
+                <span className="text-sm font-bold text-gray-500">預覽前 5 筆資料：</span>
+                <button 
+                    onClick={handleImport} 
+                    disabled={uploading}
+                    className={`px-6 py-2 rounded-lg font-bold text-white shadow-lg transition ${uploading ? 'bg-gray-400' : 'bg-green-600 hover:bg-green-700'}`}
+                >
+                    {uploading ? '處理中...' : `確認匯入 ${previewData.length} 筆資料`}
+                </button>
+            </div>
+            
+            <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                <table className="w-full text-xs text-left text-gray-600">
+                    <thead className="bg-gray-100 uppercase text-gray-700 font-bold">
+                        <tr>
+                            {Object.keys(previewData[0]).slice(0, 6).map(key => (
+                                <th key={key} className="px-4 py-3">{key}</th>
+                            ))}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {previewData.slice(0, 5).map((row, i) => (
+                            <tr key={i} className="border-b hover:bg-gray-50">
+                                {Object.values(row).slice(0, 6).map((val, j) => (
+                                    <td key={j} className="px-4 py-2">{val}</td>
+                                ))}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
         </div>
       )}
 
-      {/* 系統日誌 */}
-      <div className="bg-gray-900 text-green-400 p-4 rounded-lg font-mono text-sm h-32 overflow-y-auto shadow-inner">
-        {logs.length === 0 ? (
-          <div className="text-gray-500 opacity-50 select-none">等待檔案上傳中...</div>
-        ) : (
-          logs.map((log, index) => (
-            <div key={index} className="mb-1 border-b border-gray-800 pb-1 last:border-0">{log}</div>
-          ))
-        )}
+      {/* 執行紀錄終端機 */}
+      <div className="mt-6 bg-black rounded-xl p-4 h-48 overflow-y-auto custom-scrollbar font-mono text-xs text-green-400 shadow-inner">
+          <p className="opacity-50 border-b border-gray-700 pb-2 mb-2">System Logs...</p>
+          {logs.map((log, i) => <div key={i}>{log}</div>)}
+          {logs.length === 0 && <div className="text-gray-600">等待操作...</div>}
       </div>
     </div>
   );
