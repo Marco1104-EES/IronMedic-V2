@@ -1,184 +1,267 @@
-import React, { useState } from 'react';
-import * as XLSX from 'xlsx';
-import { supabase } from '../supabaseClient';
+import { useState } from 'react'
+import { supabase } from '../supabaseClient'
+import * as XLSX from 'xlsx'
+import { Upload, FileText, CheckCircle, AlertCircle, Database, Play } from 'lucide-react'
 
 export default function BulkImport() {
-  const [file, setFile] = useState(null);
-  const [previewData, setPreviewData] = useState([]);
-  const [uploading, setUploading] = useState(false);
-  const [logs, setLogs] = useState([]);
+  const [masterData, setMasterData] = useState([])
+  const [wixData, setWixData] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [logs, setLogs] = useState([])
 
-  // 1. 讀取 Excel 檔案
-  const handleFileUpload = (e) => {
-    const selectedFile = e.target.files[0];
-    setFile(selectedFile);
+  // 📂 處理檔案上傳 (解析 Excel)
+  const handleFileUpload = (e, type) => {
+    const file = e.target.files[0]
+    if (!file) return
 
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      const bstr = evt.target.result;
-      const wb = XLSX.read(bstr, { type: 'binary' });
-      const wsname = wb.SheetNames[0];
-      const ws = wb.Sheets[wsname];
-      // 轉成 JSON，header: 0 代表第一列是標題
-      const data = XLSX.utils.sheet_to_json(ws, { header: 0 });
-      setPreviewData(data);
-      addLog(`📄 讀取成功，共 ${data.length} 筆資料`);
-    };
-    reader.readAsBinaryString(selectedFile);
-  };
-
-  const addLog = (msg) => setLogs(prev => [...prev, msg]);
-
-  // 2. 開始匯入 (核心邏輯：解析舊表單 -> 寫入新系統)
-  const handleImport = async () => {
-    if (!previewData.length) return;
-    setUploading(true);
-    addLog("🚀 開始匯入資料庫...");
-
-    let successCount = 0;
-    let errorCount = 0;
-
-    for (const row of previewData) {
+    const reader = new FileReader()
+    reader.onload = (event) => {
       try {
-        // --- A. 基本資料 mapping (需依照您真實 Excel 欄位名稱修改) ---
-        // 假設 Excel 欄位是：["姓名", "身分證字號", "Email", "背心尺寸"]
-        const citizenId = row['身分證字號'] || row['ID']; // 容錯抓取
-        const fullName = row['姓名'] || row['Name'];
-        const email = row['Email'] || `${citizenId}@placeholder.com`; // 若無 Email 暫時用假體
+        const workbook = XLSX.read(event.target.result, { type: 'binary' })
+        const sheetName = workbook.SheetNames[0]
+        const sheet = workbook.Sheets[sheetName]
+        const jsonData = XLSX.utils.sheet_to_json(sheet)
 
-        if (!citizenId) continue; // 沒 ID 就跳過
-
-        // --- B. 處理 User Profile (Upsert) ---
-        // 這裡因為 Supabase Auth 需要獨立註冊，我們先假設是純資料匯入
-        // 實務上通常會先檢查 user_metadata，或直接寫入 profiles 表
-        
-        // 模擬：寫入 profiles 表
-        const { data: profile, error: profileError } = await supabase
-          .from('profiles') // 假設您有這張表
-          .upsert({ 
-            citizen_id: citizenId,
-            full_name: fullName, 
-            vest_size: row['背心尺寸']
-          }, { onConflict: 'citizen_id' })
-          .select()
-          .single();
-
-        if (profileError) throw new Error(`Profile Error: ${profileError.message}`);
-
-        // --- C. 處理複雜身分 (Priority Logic) ---
-        // 解析 Excel 的 "身分備註" 欄位
-        const statusNote = row['身分備註'] || ''; 
-        
-        // 1. 帶隊官
-        if (statusNote.includes('帶隊') || statusNote.includes('教官')) {
-            await supabase.from('member_privileges').upsert({
-                user_id: profile.id,
-                role_type: 'leader',
-                is_active: true,
-                valid_year: 2026
-            });
+        if (type === 'master') {
+          setMasterData(jsonData)
+          addLog(`✅ 基本資料表讀取成功: ${jsonData.length} 筆`)
+        } else {
+          setWixData(jsonData)
+          addLog(`✅ Wix 資料表讀取成功: ${jsonData.length} 筆`)
         }
-
-        // 2. 新會員 (給 2 次扣打)
-        if (statusNote.includes('新會員')) {
-            await supabase.from('member_privileges').upsert({
-                user_id: profile.id,
-                role_type: 'new_member',
-                credits: 2, // 初始 2 次
-                is_active: true
-            });
-        }
-
-        // --- D. 處理三鐵衣效期 (Uniforms) ---
-        // 假設欄位叫 "三鐵衣效期" (格式可能不統一，這裡做簡單處理)
-        const expiryRaw = row['三鐵衣效期']; 
-        if (expiryRaw) {
-            // 這裡通常需要寫一個日期轉換函式，因為 Excel 日期可能是數字或文字
-            // 暫時假設是文字 '2026/12/31'
-            await supabase.from('uniforms').upsert({
-                user_id: profile.id,
-                uniform_type: 'trisuit',
-                expiry_date: expiryRaw, 
-                is_active: true
-            });
-        }
-
-        successCount++;
-
-      } catch (err) {
-        console.error(err);
-        errorCount++;
-        addLog(`❌ ${row['姓名']} 匯入失敗: ${err.message}`);
+      } catch (error) {
+        console.error(error)
+        addLog(`❌ 檔案讀取失敗: ${error.message}`)
       }
     }
+    reader.readAsBinaryString(file)
+  }
 
-    addLog(`✅ 匯入完成！成功: ${successCount}, 失敗: ${errorCount}`);
-    setUploading(false);
-  };
+  // 📝 增加日誌到畫面
+  const addLog = (msg) => {
+    setLogs((prev) => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev])
+  }
+
+  // 🚀 核心功能：企業級批次匯入引擎
+  const handleImport = async () => {
+    if (!masterData.length) {
+      alert('請先上傳「基本資料表」！')
+      return
+    }
+
+    setLoading(true)
+    const startTime = Date.now()
+    addLog('🚀 開始啟動資料匯入程序...')
+
+    // 1. 建立「工單」 (System Job) - 確保有據可查
+    const { data: job, error: jobError } = await supabase
+      .from('system_jobs')
+      .insert({
+        job_type: 'member_import',
+        status: 'processing',
+        total_count: masterData.length,
+      })
+      .select()
+      .single()
+
+    // 如果建立工單失敗，還是繼續跑，只是會在 Console 報錯 (不擋路)
+    if (jobError) {
+      console.error('⚠️ 無法建立系統日誌 (但不影響匯入):', jobError.message)
+    }
+
+    try {
+      // 2. 準備資料對應 (Mapping) - 在記憶體中極速處理
+      addLog('📂 正在建立資料關聯與清洗...')
+      
+      // 建立 Wix Email 快速查找表 (Hash Map)
+      const wixMap = new Map()
+      if (wixData.length > 0) {
+        wixData.forEach((row) => {
+          const key = String(row['姓名'] || '').trim()
+          const email = row['Login email']?.trim()
+          if (key && email) wixMap.set(key, email)
+        })
+        addLog(`🔹 已建立 ${wixMap.size} 筆 Wix Email 索引`)
+      }
+
+      // 整理 Excel 資料 (格式化 + 防呆)
+      const formattedData = masterData.map((row) => {
+        const name = row['中文姓名']?.trim()
+        
+        // 優先用基本表的 Email，沒有的話去 Wix 找
+        let email = row['e-mail']?.trim()
+        if (!email && name) {
+          email = wixMap.get(name)
+        }
+
+        // 處理 Excel 日期 (可能是數字或文字)
+        let joinDate = row['加入醫護鐵人年月']
+        let formattedJoinDate = null
+        
+        if (typeof joinDate === 'number') {
+          // Excel 序列號轉日期
+          formattedJoinDate = new Date(Math.round((joinDate - 25569) * 86400 * 1000)).toISOString()
+        } else if (typeof joinDate === 'string' && joinDate.length > 0) {
+          // 嘗試解析文字日期 (例如 "2023.05")
+          formattedJoinDate = new Date(joinDate.replace(/\./g, '-')).toISOString()
+        }
+
+        return {
+          // ⚠️ 對應 Supabase 資料庫欄位
+          full_name: name,
+          citizen_id: String(row['身分證字號'] || '').trim(), // 強制轉字串，防止當機
+          email: email || null,
+          phone: String(row['手機'] || '').trim(), // 強制轉字串
+          uniform_size: row['衣服size(可參考醫護鐵人背心尺寸)']?.trim(),
+          join_date: formattedJoinDate,
+          license_type: row['醫療執照種類'],
+          license_expiry: null, // 如果 Excel 有這欄再補上
+          source_file: `import_${new Date().toISOString().split('T')[0]}`,
+        }
+      }).filter((item) => item.citizen_id) // ❌ 過濾掉沒有身分證的無效資料
+
+      addLog(`📄 有效資料共 ${formattedData.length} 筆，準備寫入...`)
+
+      // 3. 🚀 渦輪加速：批次寫入 (Chunking)
+      const BATCH_SIZE = 50 // 一次送 50 筆
+      let successCount = 0
+      let errors = []
+
+      for (let i = 0; i < formattedData.length; i += BATCH_SIZE) {
+        const chunk = formattedData.slice(i, i + BATCH_SIZE)
+        
+        // Upsert: 有就更新，沒有就新增
+        const { error } = await supabase
+          .from('profiles')
+          .upsert(chunk, { 
+            onConflict: 'citizen_id', 
+            ignoreDuplicates: false 
+          })
+
+        if (error) {
+          errors.push({ batch: i, msg: error.message })
+          addLog(`❌ 第 ${i + 1} ~ ${i + chunk.length} 筆寫入失敗: ${error.message}`)
+        } else {
+          successCount += chunk.length
+          // 每 100 筆更新一次畫面，避免刷屏太快
+          if ((i + BATCH_SIZE) % 100 === 0) {
+             addLog(`✅ 進度: 已處理 ${successCount} / ${formattedData.length} 筆...`)
+          }
+        }
+      }
+
+      // 4. 結案：更新工單狀態
+      if (job) {
+        await supabase
+          .from('system_jobs')
+          .update({
+            status: errors.length > 0 ? 'completed_with_errors' : 'completed',
+            success_count: successCount,
+            error_count: formattedData.length - successCount,
+            error_log: errors,
+          })
+          .eq('id', job.id)
+      }
+
+      const duration = ((Date.now() - startTime) / 1000).toFixed(1)
+      addLog(`🎉 匯入完成！耗時 ${duration} 秒`)
+      addLog(`📊 成功: ${successCount} 筆 | 失敗: ${formattedData.length - successCount} 筆`)
+      
+      alert(`匯入完成！\n成功: ${successCount}\n失敗: ${formattedData.length - successCount}\n(詳細請看下方日誌)`)
+
+    } catch (err) {
+      console.error(err)
+      addLog(`⛔ 發生嚴重錯誤: ${err.message}`)
+      if (job) {
+        await supabase.from('system_jobs').update({ status: 'failed', error_log: err.message }).eq('id', job.id)
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
 
   return (
-    <div className="bg-white p-8 rounded-2xl shadow-lg border border-gray-100 max-w-4xl mx-auto mt-8">
-      <h2 className="text-2xl font-bold text-navy mb-6 flex items-center gap-2">
-        📂 呆瓜式資料匯入 (Excel/CSV)
+    <div className="bg-white p-8 rounded-lg shadow-md max-w-4xl mx-auto mt-10">
+      <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center">
+        <Database className="mr-3 text-blue-600" />
+        企業級資料匯入中心 (ERP v4.0)
       </h2>
 
-      <div className="border-2 border-dashed border-gray-300 rounded-xl p-10 text-center hover:bg-gray-50 transition bg-gray-50/50">
-        <input 
-            type="file" 
-            accept=".xlsx, .xls, .csv" 
-            onChange={handleFileUpload} 
-            className="hidden" 
-            id="fileInput"
-        />
-        <label htmlFor="fileInput" className="cursor-pointer flex flex-col items-center">
-            <span className="text-4xl mb-2">📄</span>
-            <span className="text-gray-600 font-bold">點擊選擇或是拖曳「基本資料表」到這裡</span>
-            <span className="text-xs text-gray-400 mt-2">支援 .xlsx, .csv 格式</span>
-        </label>
-      </div>
-
-      {previewData.length > 0 && (
-        <div className="mt-8">
-            <div className="flex justify-between items-center mb-4">
-                <span className="text-sm font-bold text-gray-500">預覽前 5 筆資料：</span>
-                <button 
-                    onClick={handleImport} 
-                    disabled={uploading}
-                    className={`px-6 py-2 rounded-lg font-bold text-white shadow-lg transition ${uploading ? 'bg-gray-400' : 'bg-green-600 hover:bg-green-700'}`}
-                >
-                    {uploading ? '處理中...' : `確認匯入 ${previewData.length} 筆資料`}
-                </button>
-            </div>
+      {/* 檔案上傳區 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+        
+        {/* 基本資料表上傳 */}
+        <div className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${masterData.length ? 'border-green-500 bg-green-50' : 'border-gray-300 hover:border-blue-400'}`}>
+          <div className="flex flex-col items-center">
+            {masterData.length ? <CheckCircle size={40} className="text-green-500 mb-2"/> : <FileText size={40} className="text-gray-400 mb-2"/>}
+            <h3 className="font-bold text-gray-700">1. 基本資料表 (Master)</h3>
+            <p className="text-sm text-gray-500 mb-4">包含身分證、手機、詳細個資</p>
             
-            <div className="overflow-x-auto border border-gray-200 rounded-lg">
-                <table className="w-full text-xs text-left text-gray-600">
-                    <thead className="bg-gray-100 uppercase text-gray-700 font-bold">
-                        <tr>
-                            {Object.keys(previewData[0]).slice(0, 6).map(key => (
-                                <th key={key} className="px-4 py-3">{key}</th>
-                            ))}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {previewData.slice(0, 5).map((row, i) => (
-                            <tr key={i} className="border-b hover:bg-gray-50">
-                                {Object.values(row).slice(0, 6).map((val, j) => (
-                                    <td key={j} className="px-4 py-2">{val}</td>
-                                ))}
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
+            <label className="cursor-pointer bg-white border border-gray-300 px-4 py-2 rounded shadow-sm hover:bg-gray-50 text-sm font-medium">
+              選擇 .xlsx 檔案
+              <input type="file" accept=".xlsx, .xls" className="hidden" onChange={(e) => handleFileUpload(e, 'master')} />
+            </label>
+            {masterData.length > 0 && <span className="text-green-600 text-sm mt-2 font-bold">已載入 {masterData.length} 筆</span>}
+          </div>
         </div>
-      )}
 
-      {/* 執行紀錄終端機 */}
-      <div className="mt-6 bg-black rounded-xl p-4 h-48 overflow-y-auto custom-scrollbar font-mono text-xs text-green-400 shadow-inner">
-          <p className="opacity-50 border-b border-gray-700 pb-2 mb-2">System Logs...</p>
-          {logs.map((log, i) => <div key={i}>{log}</div>)}
-          {logs.length === 0 && <div className="text-gray-600">等待操作...</div>}
+        {/* Wix 資料上傳 */}
+        <div className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${wixData.length ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-blue-400'}`}>
+          <div className="flex flex-col items-center">
+            {wixData.length ? <CheckCircle size={40} className="text-blue-500 mb-2"/> : <Upload size={40} className="text-gray-400 mb-2"/>}
+            <h3 className="font-bold text-gray-700">2. Wix Mail (選用)</h3>
+            <p className="text-sm text-gray-500 mb-4">用來補齊缺失的 Email</p>
+            
+            <label className="cursor-pointer bg-white border border-gray-300 px-4 py-2 rounded shadow-sm hover:bg-gray-50 text-sm font-medium">
+              選擇 .xlsx 檔案
+              <input type="file" accept=".xlsx, .xls" className="hidden" onChange={(e) => handleFileUpload(e, 'wix')} />
+            </label>
+            {wixData.length > 0 && <span className="text-blue-600 text-sm mt-2 font-bold">已載入 {wixData.length} 筆</span>}
+          </div>
+        </div>
       </div>
+
+      {/* 執行按鈕 */}
+      <button
+        onClick={handleImport}
+        disabled={loading || masterData.length === 0}
+        className={`w-full py-4 rounded-lg font-bold text-lg flex items-center justify-center transition-all shadow-lg
+          ${loading || masterData.length === 0 ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:scale-[1.02]'}`}
+      >
+        {loading ? (
+          <>
+            <div className="animate-spin mr-3 border-4 border-white border-t-transparent rounded-full w-6 h-6"></div>
+            資料高速處理中...
+          </>
+        ) : (
+          <>
+            <Play className="mr-2" fill="currentColor" />
+            開始合併匯入
+          </>
+        )}
+      </button>
+
+      {/* 系統日誌區 */}
+      <div className="mt-8 bg-slate-900 rounded-lg p-4 shadow-inner min-h-[200px] max-h-[300px] overflow-y-auto font-mono text-sm text-green-400">
+        <div className="flex items-center justify-between border-b border-slate-700 pb-2 mb-2">
+          <span className="text-gray-400">System Logs</span>
+          <div className="flex items-center space-x-2">
+            <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+            <span className="text-xs text-gray-500">Live</span>
+          </div>
+        </div>
+        
+        {logs.length === 0 ? (
+          <div className="text-gray-600 italic text-center py-4">等待操作...</div>
+        ) : (
+          logs.map((log, index) => (
+            <div key={index} className="mb-1 border-l-2 border-slate-700 pl-2 hover:bg-slate-800 transition-colors">
+              {log}
+            </div>
+          ))
+        )}
+      </div>
+
     </div>
-  );
+  )
 }
