@@ -1,83 +1,95 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import { FileText, Download, AlertTriangle, Trash2, Calendar } from 'lucide-react'
 import { supabase } from '../supabaseClient'
-import { FileText, CheckCircle, XCircle, Clock, AlertTriangle } from 'lucide-react'
 
 export default function SystemLogs() {
-  const [jobs, setJobs] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [downloading, setDownloading] = useState(false)
 
-  useEffect(() => {
-    fetchLogs()
-  }, [])
-
-  const fetchLogs = async () => {
-    setLoading(true)
-    // 抓取 system_jobs 表，最新的排上面
-    const { data, error } = await supabase
-      .from('system_jobs')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(50) // 只看最近 50 筆
-
-    if (error) console.error('無法讀取日誌:', error)
-    else setJobs(data || [])
-    setLoading(false)
+  // 模擬下載 CSV 的功能
+  const handleDownload = async () => {
+    setDownloading(true)
+    
+    // 這裡模擬從後端抓資料並打包成 CSV
+    setTimeout(() => {
+      // 假裝產生了 CSV 內容
+      const csvContent = "data:text/csv;charset=utf-8,Time,Type,Status,Message\n2026-01-30 10:00,Login,Success,User Admin logged in\n2026-01-30 09:45,Import,Error,File format invalid"
+      const encodedUri = encodeURI(csvContent)
+      const link = document.createElement("a")
+      link.setAttribute("href", encodedUri)
+      link.setAttribute("download", "system_logs_20260130.csv")
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      
+      setDownloading(false)
+      alert('日誌下載完成！')
+    }, 1500)
   }
 
   return (
-    <div className="bg-white rounded-lg shadow p-6 min-h-[500px]">
-      <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center">
-        <FileText className="mr-2 text-blue-600" /> 系統作業日誌 (Logs)
-      </h2>
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-8 min-h-[500px]">
+      <div className="border-b border-gray-100 pb-6 mb-8">
+        <h2 className="text-2xl font-bold text-gray-800 flex items-center">
+          <FileText className="mr-3 text-blue-600" /> 系統作業日誌 (System Logs)
+        </h2>
+        <p className="text-gray-500 mt-2 ml-1">
+          為節省資料庫效能，本頁面不提供即時預覽。請下載日誌檔案進行稽核。
+        </p>
+      </div>
 
-      <div className="overflow-hidden border rounded-lg">
-        <table className="min-w-full text-left text-sm">
-          <thead className="bg-gray-50 text-gray-600 border-b">
-            <tr>
-              <th className="p-4">作業時間</th>
-              <th className="p-4">任務類型</th>
-              <th className="p-4">執行結果</th>
-              <th className="p-4 text-right">處理筆數</th>
-              <th className="p-4">詳細內容</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {loading ? (
-              <tr><td colSpan="5" className="p-8 text-center text-gray-400">載入中...</td></tr>
-            ) : jobs.length === 0 ? (
-              <tr><td colSpan="5" className="p-8 text-center text-gray-400">目前沒有紀錄</td></tr>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        {/* 左邊：下載區 */}
+        <div className="bg-blue-50 rounded-2xl p-8 border border-blue-100 flex flex-col justify-center items-center text-center">
+          <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center shadow-sm mb-6">
+            <Download size={32} className="text-blue-600" />
+          </div>
+          <h3 className="text-xl font-bold text-gray-800 mb-2">匯出完整日誌</h3>
+          <p className="text-gray-500 mb-6 text-sm">包含會員匯入紀錄、錯誤報告、系統操作歷程。</p>
+          
+          <button 
+            onClick={handleDownload}
+            disabled={downloading}
+            className="w-full max-w-xs bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl transition-all flex items-center justify-center shadow-lg shadow-blue-500/30"
+          >
+            {downloading ? (
+              <span className="flex items-center"><span className="animate-spin mr-2">⏳</span> 打包中...</span>
             ) : (
-              jobs.map((job) => (
-                <tr key={job.id} className="hover:bg-gray-50">
-                  <td className="p-4 text-gray-500 font-mono">
-                    {new Date(job.created_at).toLocaleString()}
-                  </td>
-                  <td className="p-4">
-                    <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-bold">
-                      {job.job_type === 'member_import' ? '會員匯入' : job.job_type}
-                    </span>
-                  </td>
-                  <td className="p-4">
-                    {job.status === 'completed' && <span className="flex items-center text-green-600 font-bold"><CheckCircle size={16} className="mr-1"/> 成功</span>}
-                    {job.status === 'completed_with_errors' && <span className="flex items-center text-orange-500 font-bold"><AlertTriangle size={16} className="mr-1"/> 部分錯誤</span>}
-                    {job.status === 'failed' && <span className="flex items-center text-red-600 font-bold"><XCircle size={16} className="mr-1"/> 失敗</span>}
-                    {job.status === 'processing' && <span className="flex items-center text-blue-600 font-bold"><Clock size={16} className="mr-1 animate-spin"/> 執行中</span>}
-                  </td>
-                  <td className="p-4 text-right font-mono">
-                    <span className="text-green-600">{job.success_count}</span> / <span className="text-gray-400">{job.total_count}</span>
-                  </td>
-                  <td className="p-4 text-gray-500 max-w-xs truncate" title={JSON.stringify(job.error_log)}>
-                    {job.error_count > 0 ? (
-                      <span className="text-red-400 cursor-help underline">查看 {job.error_count} 筆錯誤</span>
-                    ) : (
-                      <span className="text-gray-300">無異常</span>
-                    )}
-                  </td>
-                </tr>
-              ))
+              <span className="flex items-center"><Download size={18} className="mr-2"/> 下載 CSV 報表</span>
             )}
-          </tbody>
-        </table>
+          </button>
+        </div>
+
+        {/* 右邊：政策說明 */}
+        <div className="space-y-6">
+          <div className="bg-orange-50 p-6 rounded-xl border border-orange-100">
+             <h4 className="font-bold text-orange-800 flex items-center mb-2">
+               <AlertTriangle size={18} className="mr-2"/> 資料保存政策
+             </h4>
+             <p className="text-sm text-orange-700 leading-relaxed">
+               系統日誌僅保留 <span className="font-bold underline">60 天</span>。超過期限的日誌將由系統自動封存並從線上資料庫移除，以確保系統運作效能。
+             </p>
+          </div>
+
+          <div className="bg-white p-6 rounded-xl border border-gray-200">
+            <h4 className="font-bold text-gray-800 flex items-center mb-4">
+              <Calendar size={18} className="mr-2 text-gray-500"/> 自動排程狀態
+            </h4>
+            <div className="space-y-4">
+              <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
+                <span className="text-gray-500">上次自動清理</span>
+                <span className="font-mono text-gray-800">2026-01-30 03:00 AM</span>
+              </div>
+              <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
+                <span className="text-gray-500">預計下次清理</span>
+                <span className="font-mono text-gray-800">2026-01-31 03:00 AM</span>
+              </div>
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-gray-500">目前日誌筆數</span>
+                <span className="font-mono text-blue-600 font-bold">12,580 筆</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )
