@@ -1,20 +1,22 @@
 import { useState, useEffect } from 'react'
-import { useNavigate, Link } from 'react-router-dom' // 引入 Link
+import { useNavigate, Link } from 'react-router-dom' 
 import { supabase } from '../supabaseClient'
 import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
 } from 'recharts'
 import { 
   LayoutDashboard, Users, Database, LogOut, Menu, Calendar, Settings, 
-  Home, TrendingUp, Activity, AlertCircle
+  Home, TrendingUp, Activity, AlertCircle, FileText
 } from 'lucide-react'
 
+// 引入所有子功能元件 (確保這些檔案都在 src/components/ 資料夾內)
 import BulkImport from './BulkImport'
 import MemberCRM from './MemberCRM'
+import SystemLogs from './SystemLogs' // ✨ 新增：系統日誌元件
 
 // --- 內部元件: 儀表板首頁 (DashboardHome) ---
 function DashboardHome() {
-  // 假數據：營收趨勢 (讓畫面看起來專業)
+  // 假數據：營收趨勢
   const revenueData = [
     { name: '1月', 營收: 4000, 報名: 240 },
     { name: '2月', 營收: 3000, 報名: 139 },
@@ -91,13 +93,6 @@ function DashboardHome() {
                 </div>
               </div>
             ))}
-            <div className="flex items-start pb-3 border-b border-gray-50">
-              <div className="w-2 h-2 mt-2 rounded-full bg-red-500 mr-3 flex-shrink-0"></div>
-              <div>
-                <p className="text-sm text-gray-800 font-medium">系統警告：匯入資料格式錯誤</p>
-                <p className="text-xs text-gray-400 mt-1">2 小時前 • 匯入中心</p>
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -135,13 +130,31 @@ export default function AdminDashboard() {
     }
   }
 
+  // ✨ 左側選單設定 (包含新功能：系統作業日誌)
   const menuItems = [
     { id: 'dashboard', icon: <LayoutDashboard size={20} />, label: '戰情儀表板' },
     { id: 'members', icon: <Users size={20} />, label: '會員戰情中心' },    
-    { id: 'import', icon: <Database size={20} />, label: '資料匯入中心' },  
+    { id: 'import', icon: <Database size={20} />, label: '資料匯入中心' },
+    { id: 'logs', icon: <FileText size={20} />, label: '系統作業日誌' }, // ✨ 新增這行
     { id: 'events', icon: <Calendar size={20} />, label: '賽事管理 (建置中)' }, 
     { id: 'settings', icon: <Settings size={20} />, label: '系統設定 (建置中)' }, 
   ]
+
+  // ✨ 內容切換器 (Router Switch)
+  const renderContent = () => {
+    switch (activeTab) {
+      case 'dashboard':
+        return <DashboardHome />
+      case 'members':
+        return <MemberCRM />
+      case 'import':
+        return <BulkImport />
+      case 'logs':            // ✨ 新增對應畫面
+        return <SystemLogs />
+      default:
+        return <div className="p-10 text-center text-gray-500 bg-white rounded-lg shadow">🚧 此功能模組尚在建置中...</div>
+    }
+  }
 
   if (loading) return <div className="p-10 text-center">Loading...</div>
 
@@ -153,7 +166,7 @@ export default function AdminDashboard() {
         {/* Logo */}
         <div className="h-16 flex items-center justify-between px-4 bg-[#020617] border-b border-slate-800">
           {isSidebarOpen ? (
-            <span className="font-bold text-lg tracking-wider text-white">IRON ERP <span className="text-blue-500 text-xs align-top">v4.0</span></span>
+            <span className="font-bold text-lg tracking-wider text-white">IRON ERP <span className="text-blue-500 text-xs align-top">v5.0</span></span>
           ) : (
             <span className="font-bold text-xl mx-auto text-blue-500">I</span>
           )}
@@ -179,7 +192,7 @@ export default function AdminDashboard() {
           ))}
         </nav>
 
-        {/* 👇 關鍵新增：回到前台按鈕 */}
+        {/* 回到前台按鈕 */}
         <div className="px-4 py-2">
           <Link 
             to="/" 
@@ -220,10 +233,7 @@ export default function AdminDashboard() {
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6 md:p-8">
           <div className="max-w-7xl mx-auto">
-            {activeTab === 'dashboard' && <DashboardHome />}
-            {activeTab === 'members' && <MemberCRM />}
-            {activeTab === 'import' && <BulkImport />}
-            {/* 其他 Tab 內容... */}
+            {renderContent()}
           </div>
         </div>
       </main>
