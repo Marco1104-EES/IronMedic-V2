@@ -1,145 +1,266 @@
-import React, { useState, useEffect } from 'react';
-import { supabase } from '../supabaseClient';
+import { useState, useEffect } from 'react'
+import { X, User, Phone, CheckCircle, List, UserPlus, Clock, Ruler, Timer, Hash } from 'lucide-react'
+import { syncToGoogleSheets } from '../api/googleSheets'
+import { supabase } from '../supabaseClient'
+import { useNavigate } from 'react-router-dom'
 
-export default function RegistrationModal({ event, user, onClose, onRefresh }) {
-  const [loading, setLoading] = useState(false);
-  const [expandedRelayIndex, setExpandedRelayIndex] = useState(null);
-  const [usersInRoom, setUsersInRoom] = useState(0);
-  const [myRank, setMyRank] = useState(0);
-  const MAX_CONCURRENT_USERS = 3; 
+export default function RegistrationModal({ event, initialTab = 'register', onClose, onConfirm }) {
+  const [activeTab, setActiveTab] = useState(initialTab) 
+  const [loading, setLoading] = useState(false)
+  const [step, setStep] = useState(1)
+  const [selectedCategory, setSelectedCategory] = useState('')
+  const [participants, setParticipants] = useState([]) 
+  const [userData, setUserData] = useState(null) 
+  const [checkingAuth, setCheckingAuth] = useState(true) 
+  const navigate = useNavigate()
+
+  // 進場資訊
+  const [entryTime, setEntryTime] = useState(null)
+  const [queueNumber, setQueueNumber] = useState(0)
+
+  let categories = []
+  const rawCat = event.category
+  if (Array.isArray(rawCat)) categories = rawCat
+  else if (typeof rawCat === 'string') categories = rawCat.replace(/[{"}]/g, '').split(',')
 
   useEffect(() => {
-    const channel = supabase.channel(`event-${event.id}`);
-    channel.on('presence', { event: 'sync' }, () => {
-        const state = channel.presenceState();
-        const allUsers = [];
-        for (const id in state) allUsers.push(...state[id]);
-        allUsers.sort((a, b) => new Date(a.online_at) - new Date(b.online_at));
-        setUsersInRoom(allUsers.length);
-        const myIndex = allUsers.findIndex(u => u.user_id === user.id);
-        setMyRank(myIndex + 1);
-      }).subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') await channel.track({ user_id: user.id, online_at: new Date().toISOString() });
-      });
-    return () => { supabase.removeChannel(channel); };
-  }, []);
+    fetchCurrentUser() 
+    fetchParticipants()
+    setEntryTime(new Date())
+  }, [activeTab])
 
-  const groups = Array.isArray(event.tags) ? event.tags.map(t => typeof t === 'string' ? { name: t, seats: 50, registered: 0, takenSlots: [] } : { ...t, takenSlots: t.takenSlots || [] }) : [];
-  const isWaiting = myRank > MAX_CONCURRENT_USERS;
+  const fetchCurrentUser = async () => {
+    setCheckingAuth(true)
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.user) {
+      const user = session.user
+      let profile = null
+      const { data: profileById } = await supabase.from('profiles').select('*').eq('id', user.id).single()
+      profile = profileById
+      if (!profile && user.email) {
+        const { data: profileByEmail } = await supabase.from('profiles').select('*').eq('email', user.email).single()
+        profile = profileByEmail
+      }
+      const smartName = profile?.full_name || profile?.real_name || profile?.name || profile?.['姓名'] || profile?.username || user.email?.split('@')[0]
+      setUserData({
+        name: smartName,
+        phone: profile?.phone || profile?.mobile || '09xx-xxx-xxx',
+        email: profile?.email || user.email,
+        size: profile?.uniform_size || profile?.size || 'M',
+        id: user.id
+      })
+    } else { setUserData(null) }
+    setCheckingAuth(false)
+  }
 
-  const handleDirectRegister = async (groupIndex, leg = null) => {
-    if (isWaiting) { alert("目前報名人數過多，請排隊！"); return; }
-    if (loading) return;
-
-    const targetGroup = groups[groupIndex];
-    // 🟢 判斷是否為候補 (已註冊人數 >= 名額)
-    const isWaitlist = (targetGroup.registered || 0) >= targetGroup.seats;
+  const fetchParticipants = async () => {
+    const { data } = await supabase
+      .from('registrations')
+      .select('*')
+      .eq('event_id', event.id)
+      .order('category', { ascending: true }) 
+      .order('created_at', { ascending: false }) 
     
-    // 🟢 候補確認訊息
-    const confirmMsg = leg 
-        ? `確定要報名「${targetGroup.name} - 第 ${leg} 棒」嗎？`
-        : isWaitlist 
-            ? `⚠️ 該組別已額滿，您確定要「排隊候補」嗎？\n(若有釋出名額將依序遞補)`
-            : `確定要報名「${targetGroup.name}」嗎？`;
-        
-    if (!window.confirm(confirmMsg)) return;
+    const list = data || []
+    setParticipants(list)
 
-    setLoading(true);
-    
-    const { data: latestEvent } = await supabase.from('events').select('tags, registered_count').eq('id', event.id).single();
-    const currentTags = latestEvent.tags;
-    const currentGroup = currentTags[groupIndex];
-    
-    // 檢查棒次衝突 (接力賽仍需檢查格子是否被佔用)
-    if (leg && currentGroup.takenSlots.includes(leg)) {
-        alert("此棒次,被選了,換一棒");
-        setLoading(false); onRefresh(); return;
+    if (queueNumber === 0) {
+        setQueueNumber(list.length + 1 + Math.floor(Math.random() * 3))
     }
+  }
 
-    const finalGroupName = leg ? `${targetGroup.name} (第 ${leg} 棒)` : targetGroup.name;
+  const groupedParticipants = participants.reduce((acc, curr) => {
+    const cat = curr.category || '未分類'
+    if (!acc[cat]) acc[cat] = []
+    acc[cat].push(curr)
+    return acc
+  }, {})
 
-    const { error } = await supabase.from('registrations').insert([{
-      event_id: event.id, user_id: user.id, group_name: finalGroupName,
-      full_name: user.user_metadata?.full_name || '會員', email: user.email
-    }]);
+  const handleSubmit = async () => {
+    if (!userData) { alert('請先登入會員才能報名！'); navigate('/login'); return }
+    if (!selectedCategory) { alert('請選擇一個參賽組別'); return }
 
-    if (!error) {
-        const updatedTakenSlots = [...(currentGroup.takenSlots || [])];
-        if (leg) updatedTakenSlots.push(leg);
-        
-        currentTags[groupIndex] = {
-            ...currentGroup,
-            registered: (currentGroup.registered || 0) + 1,
-            takenSlots: updatedTakenSlots
-        };
+    setLoading(true)
+    const cleanCategory = selectedCategory.replace(/"/g, '')
 
-        await supabase.from('events').update({ tags: currentTags, registered_count: (latestEvent.registered_count || 0) + 1 }).eq('id', event.id);
+    try {
+      const { error } = await supabase.from('registrations').insert([{
+        event_id: event.id,
+        event_name: event.name || event.title,
+        user_name: userData.name, 
+        category: cleanCategory
+      }])
 
-        alert(isWaitlist ? `✅ 已加入候補名單：${finalGroupName}` : `🎉 報名成功：${finalGroupName}`);
-        onRefresh(); onClose();
-    } else {
-        alert("報名失敗：" + error.message);
+      if (error) throw error
+
+      syncToGoogleSheets({
+        action: "new_registration",
+        eventTitle: event.name || event.title,
+        userName: userData.name,
+        userPhone: userData.phone,
+        userEmail: userData.email,
+        uniformSize: userData.size,
+        category: cleanCategory
+      }).catch(err => console.error(err))
+
+      setLoading(false)
+      setStep(2)
+      setTimeout(() => onConfirm(), 2000)
+
+    } catch (e) {
+      alert('報名失敗: ' + e.message)
+      setLoading(false)
     }
-    setLoading(false);
-  };
+  }
+
+  // ✨ 極速格式化 (YYYY/MM/DD HH:mm:ss.SSS)
+  const formatTimeDetail = (isoString) => {
+    if (!isoString) return ''
+    const d = new Date(isoString)
+    
+    const YYYY = d.getFullYear()
+    const MM = (d.getMonth()+1).toString().padStart(2,'0')
+    const DD = d.getDate().toString().padStart(2,'0')
+    
+    const HH = d.getHours().toString().padStart(2,'0')
+    const mm = d.getMinutes().toString().padStart(2,'0')
+    const ss = d.getSeconds().toString().padStart(2,'0')
+    const SSS = d.getMilliseconds().toString().padStart(3,'0') // ✨ 毫秒關鍵
+
+    return `${YYYY}/${MM}/${DD} ${HH}:${mm}:${ss}.${SSS}`
+  }
+
+  const formatEntryTime = (dateObj) => {
+    if (!dateObj) return '--:--:--'
+    return `${dateObj.getHours().toString().padStart(2,'0')}:${dateObj.getMinutes().toString().padStart(2,'0')}:${dateObj.getSeconds().toString().padStart(2,'0')}`
+  }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh] animate-fade-in-up">
-        <div className="bg-navy p-4 text-white flex justify-between items-center shrink-0">
-          <div><h3 className="font-bold text-lg">📝 賽事報名</h3><p className="text-xs text-blue-200 mt-1 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>目前 {usersInRoom} 人正在此視窗</p></div>
-          <button onClick={onClose} className="text-white/70 hover:text-white text-xl">✕</button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
+        
+        <div className="bg-slate-900 text-white p-4 flex justify-between items-center shrink-0">
+          <h3 className="font-bold text-lg line-clamp-1">{event.name || event.title}</h3>
+          <button onClick={onClose}><X size={24}/></button>
         </div>
-        {isWaiting && <div className="bg-yellow-500 text-white px-4 py-2 text-sm font-bold text-center animate-pulse">🚧 人數爆滿中！您目前候補第 {myRank - MAX_CONCURRENT_USERS} 位，請稍候...</div>}
-        <div className="p-6 overflow-y-auto">
-          <h4 className="text-xl font-bold text-gray-800 mb-4 border-b pb-2">{event.name}</h4>
-          <div className="space-y-4">
-            {groups.map((group, idx) => {
-              const isFull = (group.registered || 0) >= group.seats;
-              const remaining = group.seats - (group.registered || 0);
-              const isRelay = group.seats <= 50 && event.category_type.includes('接力');
-              const isExpanded = expandedRelayIndex === idx;
-              
-              return (
-                <div key={idx} className={`border rounded-xl transition-all ${isExpanded ? 'border-navy bg-blue-50 ring-1 ring-navy' : 'border-gray-200 hover:border-gray-300'}`}>
-                  <div className="flex justify-between items-center p-4">
-                     <div>
-                        <h5 className="font-bold text-lg text-navy">{group.name}</h5>
-                        {/* 顯示剩餘或候補狀態 */}
-                        <span className={`text-xs font-bold px-2 py-1 rounded inline-block mt-1 ${isFull ? 'bg-orange-100 text-orange-600' : 'bg-gray-100 text-gray-500'}`}>
-                            {isFull ? `額滿 (候補 ${-remaining} 人)` : `剩餘 ${remaining} 席`}
+
+        <div className="flex border-b border-gray-100">
+          <button onClick={() => setActiveTab('register')} className={`flex-1 py-3 text-sm font-bold flex items-center justify-center transition-colors ${activeTab==='register'?'text-blue-600 border-b-2 border-blue-600 bg-blue-50/50':'text-gray-500 hover:bg-gray-50'}`}>
+            <UserPlus size={16} className="mr-2"/> 我要報名
+          </button>
+          <button onClick={() => setActiveTab('list')} className={`flex-1 py-3 text-sm font-bold flex items-center justify-center transition-colors ${activeTab==='list'?'text-blue-600 border-b-2 border-blue-600 bg-blue-50/50':'text-gray-500 hover:bg-gray-50'}`}>
+            <List size={16} className="mr-2"/> 報名名單
+          </button>
+        </div>
+
+        <div className="p-6 overflow-y-auto custom-scrollbar flex-1 bg-gray-50">
+          {activeTab === 'register' && (
+            step === 1 ? (
+              <>
+                <div className="flex gap-3 mb-4">
+                    <div className="flex-1 bg-blue-50 border border-blue-100 rounded-lg p-3 flex flex-col items-center justify-center">
+                        <span className="text-[10px] text-blue-500 font-bold uppercase tracking-wide flex items-center mb-1">
+                            <Timer size={10} className="mr-1"/> 進場時間
                         </span>
-                     </div>
-                     <div>
-                        {/* 🟢 按鈕邏輯修改：額滿仍然可以點擊，只是樣式不同 */}
-                        {isRelay ? (
-                            <button onClick={() => setExpandedRelayIndex(isExpanded ? null : idx)} disabled={isWaiting} className={`px-4 py-2 rounded-lg font-bold border transition ${isExpanded ? 'bg-navy text-white' : 'bg-white text-navy border-navy hover:bg-blue-50'}`}>
-                                {isExpanded ? '收合 ▲' : '選擇棒次 ▼'}
-                            </button>
-                        ) : (
-                            <button onClick={() => handleDirectRegister(idx)} disabled={isWaiting || loading} className={`px-5 py-2 rounded-lg font-bold shadow-md transition transform active:scale-95 text-white ${isFull ? 'bg-orange-500 hover:bg-orange-600' : 'bg-navy hover:bg-blue-900'}`}>
-                                {loading ? '處理中...' : isFull ? '排隊候補' : '確認報名 🚀'}
-                            </button>
-                        )}
-                     </div>
-                  </div>
-                  {isRelay && isExpanded && (
-                      <div className="px-4 pb-4 pt-2 border-t border-blue-200">
-                          <p className="text-xs font-bold text-gray-500 mb-2">請直接點擊下方方塊進行報名：</p>
-                          <div className="flex flex-wrap gap-2">
-                              {Array.from({ length: group.seats }, (_, i) => i + 1).map(leg => {
-                                  const isTaken = group.takenSlots?.includes(leg);
-                                  return <button key={leg} disabled={isTaken || isWaiting || loading} onClick={() => handleDirectRegister(idx, leg)} className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold text-sm transition-all transform hover:scale-105 ${isTaken ? 'bg-gray-200 text-gray-400 cursor-not-allowed decoration-slice' : 'bg-white border-2 border-navy text-navy hover:bg-navy hover:text-white shadow-sm'}`}>{leg}</button>;
-                              })}
+                        <span className="text-xl font-mono font-bold text-blue-900 tracking-tight">
+                            {formatEntryTime(entryTime)}
+                        </span>
+                    </div>
+                    <div className="flex-1 bg-amber-50 border border-amber-100 rounded-lg p-3 flex flex-col items-center justify-center">
+                        <span className="text-[10px] text-amber-600 font-bold uppercase tracking-wide flex items-center mb-1">
+                            <Hash size={10} className="mr-1"/> 目前順位
+                        </span>
+                        <span className="text-xl font-mono font-bold text-amber-900 tracking-tight">
+                            #{queueNumber}
+                        </span>
+                    </div>
+                </div>
+
+                <div className="bg-white p-4 rounded-xl shadow-sm mb-4 border border-gray-100">
+                  <h4 className="font-bold text-gray-800 mb-3 text-sm flex items-center"><Ruler size={16} className="mr-2 text-blue-600"/> 選擇參賽組別</h4>
+                  <div className="space-y-2">
+                    {categories.map((cat, idx) => {
+                      const cleanCat = cat.replace(/"/g, '')
+                      return (
+                        <label key={idx} className={`flex items-center justify-between p-3 border rounded-lg cursor-pointer transition-all ${selectedCategory === cleanCat ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500' : 'border-gray-200 hover:border-gray-300'}`}>
+                          <div className="flex items-center">
+                            <input type="radio" name="category" value={cleanCat} onChange={(e) => setSelectedCategory(e.target.value)} className="mr-3 w-4 h-4 text-blue-600"/>
+                            <span className="text-gray-700 font-bold text-sm">{cleanCat}</span>
                           </div>
-                      </div>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                <div className="bg-white p-4 rounded-xl mb-6 border border-gray-100 shadow-sm">
+                  <h4 className="font-bold text-gray-800 mb-3 text-sm border-b pb-2">報名者資料 (自動帶入)</h4>
+                  {checkingAuth ? (
+                    <div className="text-center py-2 text-gray-400 text-xs">讀取中...</div>
+                  ) : userData ? (
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between"><span className="text-gray-500">姓名</span><span className="font-bold text-blue-700 text-base">{userData.name}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-500">電話</span><span className="font-bold text-gray-800">{userData.phone}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-500">Email</span><span className="font-bold text-gray-800 truncate max-w-[200px]">{userData.email}</span></div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-4 text-gray-500"><p className="text-sm">您尚未登入</p><button onClick={()=>navigate('/login')} className="text-blue-600 font-bold underline mt-1 text-sm">前往登入</button></div>
                   )}
                 </div>
-              );
-            })}
-          </div>
+
+                <button onClick={handleSubmit} disabled={loading || !userData} className={`w-full font-bold py-3.5 rounded-xl shadow-lg flex justify-center items-center transition-all ${loading || !userData ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}>
+                  {loading ? <span className="animate-spin mr-2">⏳</span> : '確認送出報名 (Submit)'}
+                </button>
+              </>
+            ) : (
+              <div className="text-center py-10 bg-white rounded-xl shadow-sm">
+                <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce"><CheckCircle size={32} /></div>
+                <h3 className="text-xl font-bold text-gray-800 mb-2">報名成功！</h3>
+                <p className="text-gray-500 text-sm">系統已記錄您的成交時間。<br/>請至「報名名單」查看詳細毫秒數。</p>
+              </div>
+            )
+          )}
+
+          {activeTab === 'list' && (
+            <div className="space-y-6">
+              <div className="flex justify-between items-center mb-2">
+                <h4 className="font-bold text-gray-800">已報名勇者名單</h4>
+                <span className="bg-slate-200 text-slate-700 text-xs px-2 py-1 rounded-full font-bold">{participants.length} 人</span>
+              </div>
+              
+              {participants.length === 0 ? (
+                <div className="text-center py-12 bg-white rounded-xl border border-dashed border-gray-300"><p className="text-gray-400 text-sm">目前還沒有人報名<br/>快來搶頭香！</p></div>
+              ) : (
+                Object.keys(groupedParticipants).map((groupName, idx) => (
+                  <div key={idx} className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+                    <div className="bg-slate-50 px-4 py-2 border-b border-gray-100 flex justify-between items-center">
+                      <span className="font-bold text-slate-700 text-sm">{groupName.replace(/"/g, '')}</span>
+                      <span className="text-xs text-slate-500 bg-white border px-1.5 py-0.5 rounded">{groupedParticipants[groupName].length} 人</span>
+                    </div>
+                    <div className="divide-y divide-gray-50">
+                      {groupedParticipants[groupName].map((p, pIdx) => (
+                        <div key={pIdx} className="p-3 flex items-center justify-between hover:bg-blue-50/50 transition-colors">
+                           <div className="flex items-center">
+                              <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-xs mr-3 border border-blue-200">
+                                {p.user_name?.[0]}
+                              </div>
+                              <span className="font-bold text-gray-700 text-sm">{p.user_name}</span>
+                           </div>
+                           {/* ✨ 精確到毫秒的時間顯示區 */}
+                           <div className="flex items-center text-[10px] text-gray-500 font-mono tracking-tight">
+                              <Clock size={10} className="mr-1 text-gray-400"/>
+                              {formatTimeDetail(p.created_at)}
+                           </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
-  );
+  )
 }

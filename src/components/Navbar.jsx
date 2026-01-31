@@ -1,128 +1,148 @@
 import { Link, useNavigate } from 'react-router-dom'
-import { LogIn, LayoutDashboard, User, LogOut, Home, ChevronDown } from 'lucide-react'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
+import { LogOut, User, LayoutDashboard, Home, Users } from 'lucide-react'
+import UserAvatar from './UserAvatar' // 引入超酷頭像
 
 export default function Navbar() {
-  const [user, setUser] = useState(null)
-  const [isMenuOpen, setIsMenuOpen] = useState(false)
-  const [profile, setProfile] = useState(null)
-  const menuRef = useRef(null)
   const navigate = useNavigate()
+  const [user, setUser] = useState(null)
+  const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [onlineUsers, setOnlineUsers] = useState(128)
+  
+  // ✨ 讀取頭像設定
+  const [avatarStyle, setAvatarStyle] = useState(1)
 
   useEffect(() => {
-    // 1. 抓取使用者 & 詳細資料
-    const getUserData = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      setUser(user)
-      if (user) {
-        const { data } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .single()
-        setProfile(data)
-      }
+    checkUser()
+    // 監聽 localStorage 變化 (為了即時更新)
+    const updateStyle = () => {
+       const saved = localStorage.getItem('avatar_style')
+       if (saved) setAvatarStyle(parseInt(saved))
     }
-    getUserData()
+    updateStyle()
+    window.addEventListener('storage', updateStyle) // 監聽
 
-    // 點擊外面關閉選單
-    const handleClickOutside = (event) => {
-      if (menuRef.current && !menuRef.current.contains(event.target)) {
-        setIsMenuOpen(false)
-      }
+    const interval = setInterval(() => {
+      setOnlineUsers(prev => Math.max(100, Math.min(200, prev + Math.floor(Math.random() * 5) - 2)))
+    }, 3000)
+
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('storage', updateStyle)
     }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
+
+  const checkUser = async () => {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.user) {
+      setUser(session.user)
+      // 這裡也可以再次確認 localStorage，確保登入後同步
+      const saved = localStorage.getItem('avatar_style')
+      if (saved) setAvatarStyle(parseInt(saved))
+    }
+  }
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
-    window.location.reload()
+    setUser(null)
+    setDropdownOpen(false)
+    navigate('/login')
   }
 
+  const displayName = user?.email ? user.email.split('@')[0] : '會員'
+  const initial = displayName.charAt(0).toUpperCase()
+
   return (
-    <nav className="bg-white shadow-sm sticky top-0 z-50 border-b border-gray-100">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between h-18 py-3">
+    <nav className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
+      <div className="max-w-7xl mx-auto px-4">
+        <div className="flex justify-between h-16">
           
-          {/* Logo 區 */}
-          <div className="flex items-center">
+          {/* 左側：Logo + 首頁 */}
+          <div className="flex items-center gap-6">
             <Link to="/" className="flex items-center group">
-              <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-xl mr-3 shadow-lg group-hover:scale-105 transition-transform">
-                I
+              <div className="bg-blue-600 text-white p-1.5 rounded-lg mr-2 group-hover:bg-blue-700 transition-colors">
+                <span className="font-bold text-lg tracking-tighter">I</span>
               </div>
               <div className="flex flex-col">
-                <span className="text-2xl font-bold bg-gradient-to-r from-blue-700 to-indigo-800 bg-clip-text text-transparent">
-                  IRON MEDIC
-                </span>
-                <span className="text-xs text-gray-500 font-medium tracking-wider">醫護鐵人賽事系統</span>
+                <span className="font-bold text-xl text-blue-900 leading-none">IRON MEDIC</span>
+                <span className="text-[10px] text-gray-500 tracking-wider">醫護鐵人賽事系統</span>
               </div>
+            </Link>
+            <Link to="/" className="hidden md:flex items-center text-gray-600 hover:text-blue-600 font-bold text-sm">
+              <Home size={16} className="mr-1.5"/> 賽事首頁
             </Link>
           </div>
 
-          {/* 右側功能區 */}
-          <div className="flex items-center space-x-6">
-            <Link to="/" className="hidden md:flex items-center text-gray-500 hover:text-blue-600 font-medium transition-colors">
-              <Home size={18} className="mr-2" />
-              賽事首頁
-            </Link>
+          {/* 右側：線上人數 + 會員 */}
+          <div className="flex items-center gap-4">
+            
+            <div className="hidden md:flex items-center bg-green-50 px-3 py-1.5 rounded-full border border-green-100 shadow-sm">
+               <div className="relative mr-2">
+                 <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
+                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                   <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                 </span>
+                 <Users size={14} className="text-green-700"/>
+               </div>
+               <span className="text-xs font-bold text-green-800 font-mono">線上: {onlineUsers}</span>
+            </div>
+
+            <div className="hidden md:block h-6 w-px bg-gray-200"></div>
 
             {user ? (
-              // --- 已登入：顯示頭像下拉選單 ---
-              <div className="relative" ref={menuRef}>
+              <div className="relative">
                 <button 
-                  onClick={() => setIsMenuOpen(!isMenuOpen)}
-                  className="flex items-center space-x-3 focus:outline-none hover:bg-gray-50 p-2 rounded-xl transition-colors"
+                  onClick={() => setDropdownOpen(!dropdownOpen)}
+                  className="flex items-center space-x-3 focus:outline-none hover:bg-gray-50 p-1 rounded-xl transition-all border border-transparent hover:border-gray-200"
                 >
-                  <div className="text-right hidden md:block">
-                    <div className="text-sm font-bold text-gray-800">{profile?.full_name || '會員'}</div>
-                    <div className="text-xs text-gray-500">會員中心</div>
+                  {/* ✨ 黃金版位：名字在左，文字靠右 */}
+                  <div className="text-right hidden sm:block mr-1">
+                    <div className="text-[10px] text-blue-500 font-black uppercase tracking-widest">IRON MEMBER</div>
+                    <div className="text-sm font-bold text-gray-800 leading-none">{displayName}</div>
                   </div>
-                  <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center text-white font-bold shadow ring-2 ring-white">
-                    {profile?.full_name?.[0] || user.email?.[0]?.toUpperCase()}
-                  </div>
-                  <ChevronDown size={16} className="text-gray-400" />
+                  
+                  {/* ✨ 酷炫頭像 (使用新元件) */}
+                  <UserAvatar styleType={avatarStyle} text={initial} size="md" />
                 </button>
 
-                {/* 下拉選單本體 */}
-                {isMenuOpen && (
-                  <div className="absolute right-0 mt-3 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 animate-fade-in-down transform origin-top-right">
-                    <div className="px-4 py-3 border-b border-gray-100 mb-2">
-                      <p className="text-sm font-bold text-gray-800">登入帳號</p>
-                      <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                {dropdownOpen && (
+                  <div className="absolute right-0 mt-3 w-60 bg-white rounded-xl shadow-xl py-2 border border-gray-100 animate-fade-in-down origin-top-right z-50">
+                    <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+                      <p className="text-xs text-gray-500">登入帳號</p>
+                      <p className="text-sm font-bold text-gray-800 truncate">{user.email}</p>
                     </div>
                     
-                    <Link to="/profile" className="flex items-center px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-colors">
-                      <User size={16} className="mr-3" />
-                      個人檔案 / 參賽紀錄
+                    <Link to="/profile" className="block px-4 py-3 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 flex items-center transition-colors">
+                      <User size={16} className="mr-3"/> 
+                      <div>
+                        <span className="block font-bold">個人檔案 / 數位ID</span>
+                        <span className="text-xs text-gray-400">更換您的頭像風格</span>
+                      </div>
                     </Link>
 
-                    {/* 只有管理員才顯示這顆 */}
-                    <Link to="/admin" className="flex items-center px-4 py-2.5 text-sm text-purple-700 hover:bg-purple-50 transition-colors">
-                      <LayoutDashboard size={16} className="mr-3" />
-                      進入企業後台
-                    </Link>
+                    {(user.email?.includes('admin') || user.email?.includes('medic') || user.email?.includes('marco')) && (
+                      <Link to="/admin" className="block px-4 py-3 text-sm text-purple-600 hover:bg-purple-50 font-bold flex items-center transition-colors">
+                        <LayoutDashboard size={16} className="mr-3"/> 進入企業後台
+                      </Link>
+                    )}
 
                     <button 
                       onClick={handleLogout}
-                      className="w-full flex items-center px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors border-t border-gray-100 mt-2"
+                      className="block w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50 flex items-center border-t border-gray-100 mt-1"
                     >
-                      <LogOut size={16} className="mr-3" />
-                      登出系統
+                      <LogOut size={16} className="mr-3"/> 登出系統
                     </button>
                   </div>
                 )}
               </div>
             ) : (
-              // --- 未登入：顯示登入按鈕 ---
-              <Link 
-                to="/login" 
-                className="flex items-center bg-gray-900 text-white px-5 py-2.5 rounded-full font-medium hover:bg-gray-800 transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
-              >
-                <LogIn size={18} className="mr-2" />
-                立即登入
-              </Link>
+              <div className="flex items-center gap-2">
+                <Link to="/login" className="text-sm font-bold text-gray-600 hover:text-blue-600 px-3 py-2">登入</Link>
+                <Link to="/login" className="bg-blue-600 text-white text-sm font-bold px-4 py-2 rounded-lg hover:bg-blue-700 shadow-md transition-all hover:shadow-lg hover:-translate-y-0.5">
+                  註冊
+                </Link>
+              </div>
             )}
           </div>
         </div>
