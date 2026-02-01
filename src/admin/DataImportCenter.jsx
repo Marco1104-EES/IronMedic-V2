@@ -28,7 +28,7 @@ export default function DataImportCenter() {
     setLogs([]) 
     
     // --- 經典 V4.0 匯入劇本 ---
-    addLog('啟動 ERP v4.0 核心匯入引擎...', 'info')
+    addLog('啟動 EPR 核心匯入引擎...', 'info')
     
     setTimeout(() => addLog(`[讀取] 主檔: ${fileMaster.name} (${(fileMaster.size/1024).toFixed(1)} KB)`, 'info'), 500)
     
@@ -50,7 +50,7 @@ export default function DataImportCenter() {
                 addLog('✅ 匯入完成！成功: 1239 筆 | 失敗: 0 筆', 'success')
                 addLog('正在重建全文檢索索引...', 'info')
                 setTimeout(() => {
-                    addLog('🚀 任務結束。資料已同步至會員戰情中心。', 'success')
+                    addLog('🚀 任務結束。資料已同步至會員資訊中心。', 'success')
                     setProcessing(false)
                 }, 1000)
             } else {
@@ -65,7 +65,7 @@ export default function DataImportCenter() {
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-black text-gray-800 flex items-center">
-            <FileSpreadsheet className="mr-3 text-blue-600"/> 企業級資料匯入中心 (ERP v4.0)
+            <FileSpreadsheet className="mr-3 text-blue-600"/> 資料匯入中心 (EPR)
           </h2>
           <p className="text-gray-500 text-sm mt-1 font-bold">雙核心引擎：主檔直入 + Wix 補丁修復</p>
         </div>

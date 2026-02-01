@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { supabase } from '../supabaseClient' // 🟢 確保路徑正確
-import { Search, User, Mail, Phone, Shield, Filter, Download, ChevronsLeft, ChevronsRight, MoreHorizontal, CheckCircle } from 'lucide-react'
+import { supabase } from '../supabaseClient'
+import { Search, User, Mail, Phone, Shield, Filter, Download, ChevronsLeft, ChevronsRight, CheckCircle } from 'lucide-react'
 
 export default function MemberCRM() {
   const [members, setMembers] = useState([])
@@ -37,16 +37,16 @@ export default function MemberCRM() {
       <div className="flex flex-col md:flex-row justify-between items-end md:items-center gap-4">
         <div>
           <h2 className="text-2xl font-black text-gray-800 flex items-center">
-            <User className="mr-3 text-blue-600"/> 會員情報中心 (CRM)
+            <User className="mr-3 text-blue-600"/> 會員資訊中心 (CRM)
           </h2>
-          <p className="text-gray-500 text-sm mt-1 font-bold">目前總兵力: <span className="text-blue-600">{members.length}</span> 人</p>
+          <p className="text-gray-500 text-sm mt-1 font-bold">目前總人數: <span className="text-blue-600">{members.length}</span> 人</p>
         </div>
         <div className="flex gap-2">
            <button onClick={() => setFilterType(filterType === 'all' ? 'admin' : 'all')} className={`flex items-center px-4 py-2 border rounded-lg text-sm font-bold transition-all ${filterType === 'admin' ? 'bg-purple-100 text-purple-700 border-purple-300' : 'bg-white text-gray-700 hover:bg-gray-50'}`}>
              <Filter size={16} className="mr-2"/> {filterType === 'all' ? '篩選管理員' : '顯示全部'}
            </button>
            <button className="flex items-center px-4 py-2 bg-slate-800 text-white rounded-lg text-sm font-bold hover:bg-slate-700 shadow-md">
-             <Download size={16} className="mr-2"/> 匯出戰力名單
+             <Download size={16} className="mr-2"/> 匯出人員名單
            </button>
         </div>
       </div>
@@ -57,7 +57,7 @@ export default function MemberCRM() {
             <Search size={18} className="absolute left-4 top-3.5 text-gray-400"/>
             <input 
               type="text" 
-              placeholder="輸入代號、Email 或電話進行搜索..." 
+              placeholder="輸入姓名、Email 或電話進行搜索..." 
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-12 pr-4 py-3 bg-transparent rounded-lg focus:bg-gray-50 outline-none text-sm font-medium transition-colors"
@@ -76,12 +76,12 @@ export default function MemberCRM() {
                 <th className="p-4">聯絡方式</th>
                 <th className="p-4">裝備尺寸</th>
                 <th className="p-4">權限等級</th>
-                <th className="p-4 text-right">入伍日期</th>
+                <th className="p-4 text-right">加入日期</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan="6" className="p-10 text-center text-gray-400"><span className="animate-pulse">讀取情報數據中...</span></td></tr>
+                <tr><td colSpan="6" className="p-10 text-center text-gray-400"><span className="animate-pulse">讀取資訊中...</span></td></tr>
               ) : filteredMembers.length === 0 ? (
                 <tr><td colSpan="6" className="p-10 text-center text-gray-400">查無此人</td></tr>
               ) : (

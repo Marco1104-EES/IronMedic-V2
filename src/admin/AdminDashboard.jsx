@@ -1,15 +1,11 @@
 import { useState, useEffect } from 'react'
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom'
 import { supabase } from '../supabaseClient' 
-
-// 🟢 修正：補齊所有漏掉的圖示 (Server, HardDrive, Home)
 import { 
   LayoutDashboard, FileText, Settings, LogOut, Plus, Upload, AlertTriangle, 
   Activity, Database, Users, Globe, Zap, Clock, Shield, UserCog, User, Home,
   Server, HardDrive 
 } from 'lucide-react'
-
-// 圖表引擎
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 
 // 子頁面引入
@@ -37,7 +33,7 @@ const MOCK_YEARLY_STATS = {
   '2023': { users: 200, events: 4, revenue: 30000, growth: 'N/A' },
 };
 
-// --- 1. 戰情首頁元件 ---
+// --- 1. 營運總覽首頁 (原：戰情總覽) ---
 function AdminHome() {
   const navigate = useNavigate()
   const [stats, setStats] = useState({ users: 0, events: 0, registrations: 0, errors: 0 })
@@ -68,13 +64,13 @@ function AdminHome() {
         <div className="flex-1 bg-slate-900 rounded-xl p-4 border-l-4 border-green-500 shadow-lg flex items-center justify-between">
            <div>
              <p className="text-slate-400 text-xs font-bold uppercase tracking-wider">系統狀態 (SYSTEM)</p>
-             <h2 className="text-white text-xl font-black tracking-tight">OPERATIONAL</h2>
+             <h2 className="text-white text-xl font-black tracking-tight">正常運作 (OPERATIONAL)</h2>
            </div>
            <Activity className="text-green-500 animate-pulse" size={30} />
         </div>
         <div className="flex-1 bg-slate-900 rounded-xl p-4 border-l-4 border-blue-500 shadow-lg flex items-center justify-between">
            <div>
-             <p className="text-slate-400 text-xs font-bold uppercase tracking-wider">戰略年度 (YEAR)</p>
+             <p className="text-slate-400 text-xs font-bold uppercase tracking-wider">統計年度 (YEAR)</p>
              <div className="flex gap-2 mt-1">
                 {['2026','2025','2024','2023'].map(yr => (
                   <button 
@@ -91,7 +87,7 @@ function AdminHome() {
         </div>
         <div className="flex-1 bg-slate-900 rounded-xl p-4 border-l-4 border-purple-500 shadow-lg flex items-center justify-between">
            <div>
-             <p className="text-slate-400 text-xs font-bold uppercase tracking-wider">DB 負載 (LOAD)</p>
+             <p className="text-slate-400 text-xs font-bold uppercase tracking-wider">資料庫負載 (LOAD)</p>
              <h2 className="text-white text-xl font-black tracking-tight">{dbUsage.toFixed(2)}%</h2>
            </div>
            <Database className="text-purple-500" size={30} />
@@ -103,9 +99,9 @@ function AdminHome() {
         <div className="bg-slate-900 rounded-2xl p-6 border border-slate-800 shadow-xl">
            <div className="flex justify-between items-center mb-6">
              <h3 className="text-white font-bold flex items-center">
-               <Zap size={18} className="mr-2 text-green-400"/> Database Requests
+               <Zap size={18} className="mr-2 text-green-400"/> 資料庫請求量 (24H)
              </h3>
-             <span className="text-xs text-slate-500 bg-slate-800 px-2 py-1 rounded">24 Hours</span>
+             <span className="text-xs text-slate-500 bg-slate-800 px-2 py-1 rounded">即時監控</span>
            </div>
            <div className="h-64 w-full">
              <ResponsiveContainer width="100%" height="100%">
@@ -129,8 +125,8 @@ function AdminHome() {
         <div className="grid grid-cols-1 gap-6">
            <div className="bg-slate-900 rounded-2xl p-6 border border-slate-800 shadow-xl flex flex-col justify-center">
               <div className="flex justify-between items-center mb-4">
-                 <h3 className="text-white font-bold flex items-center"><Shield size={18} className="mr-2 text-green-400"/> Auth Transactions</h3>
-                 <span className="text-green-400 font-mono text-xl font-bold">Health: 100%</span>
+                 <h3 className="text-white font-bold flex items-center"><Shield size={18} className="mr-2 text-green-400"/> 身份驗證狀態 (Auth)</h3>
+                 <span className="text-green-400 font-mono text-xl font-bold">健康度: 100%</span>
               </div>
               <div className="h-24 w-full">
                 <ResponsiveContainer width="100%" height="100%">
@@ -142,10 +138,10 @@ function AdminHome() {
            </div>
 
            <div className="bg-slate-900 rounded-2xl p-6 border border-slate-800 shadow-xl">
-              <h3 className="text-white font-bold flex items-center mb-4"><Server size={18} className="mr-2 text-blue-400"/> {selectedYear} 戰略分析</h3>
+              <h3 className="text-white font-bold flex items-center mb-4"><Server size={18} className="mr-2 text-blue-400"/> {selectedYear} 年度營運分析</h3>
               <div className="grid grid-cols-3 gap-4 text-center">
                  <div className="bg-slate-800 p-3 rounded-lg">
-                    <p className="text-slate-400 text-xs">會員數</p>
+                    <p className="text-slate-400 text-xs">會員總數</p>
                     <p className="text-white text-xl font-bold">{MOCK_YEARLY_STATS[selectedYear]?.users || stats.users}</p>
                  </div>
                  <div className="bg-slate-800 p-3 rounded-lg">
@@ -153,7 +149,7 @@ function AdminHome() {
                     <p className="text-white text-xl font-bold">{MOCK_YEARLY_STATS[selectedYear]?.events || stats.events}</p>
                  </div>
                  <div className="bg-slate-800 p-3 rounded-lg border border-green-500/30">
-                    <p className="text-green-400 text-xs">成長率</p>
+                    <p className="text-green-400 text-xs">年度成長</p>
                     <p className="text-green-400 text-xl font-bold">{MOCK_YEARLY_STATS[selectedYear]?.growth || '-'}</p>
                  </div>
               </div>
@@ -165,14 +161,14 @@ function AdminHome() {
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
          <div className="flex justify-between items-center mb-6">
             <h3 className="text-lg font-bold text-gray-800 flex items-center">
-              <Globe size={20} className="mr-2 text-blue-600"/> SEO & Traffic Intelligence
+              <Globe size={20} className="mr-2 text-blue-600"/> SEO 與流量情報 (Traffic)
             </h3>
             <button className="text-xs bg-blue-50 text-blue-600 px-3 py-1 rounded-full font-bold hover:bg-blue-100">查看報表</button>
          </div>
          
          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
-               <p className="text-xs text-gray-500 font-bold">SEO HEALTH</p>
+               <p className="text-xs text-gray-500 font-bold">SEO 健康分數</p>
                <div className="mt-2 flex items-end">
                   <span className="text-3xl font-black text-gray-800">92</span>
                   <span className="text-sm text-green-500 font-bold mb-1 ml-2">優異</span>
@@ -180,30 +176,29 @@ function AdminHome() {
                <div className="w-full bg-gray-200 h-1.5 mt-2 rounded-full"><div className="bg-green-500 h-1.5 rounded-full" style={{width: '92%'}}></div></div>
             </div>
             
-            {/* 這裡使用了 HardDrive 做裝飾 */}
             <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
                <div className="flex justify-between items-start">
-                 <p className="text-xs text-gray-500 font-bold">RESOURCE LIMIT</p>
+                 <p className="text-xs text-gray-500 font-bold">資源使用率</p>
                  <HardDrive size={14} className="text-gray-400"/>
                </div>
                <div className="mt-2 flex items-end">
                   <span className="text-3xl font-black text-gray-800">0.4%</span>
-                  <span className="text-sm text-green-500 font-bold mb-1 ml-2">SAFE</span>
+                  <span className="text-sm text-green-500 font-bold mb-1 ml-2">安全</span>
                </div>
             </div>
 
             <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
-               <p className="text-xs text-gray-500 font-bold">RANKING</p>
+               <p className="text-xs text-gray-500 font-bold">搜尋排名 (Avg)</p>
                <div className="mt-2 flex items-end">
                   <span className="text-3xl font-black text-gray-800">8.4</span>
                   <span className="text-sm text-blue-500 font-bold mb-1 ml-2">-0.2</span>
                </div>
             </div>
             <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
-               <p className="text-xs text-gray-500 font-bold">REGISTRATIONS</p>
+               <p className="text-xs text-gray-500 font-bold">累積報名總數</p>
                <div className="mt-2 flex items-end">
                   <span className="text-3xl font-black text-blue-600">{stats.registrations}</span>
-                  <span className="text-sm text-gray-400 font-bold mb-1 ml-2">Total</span>
+                  <span className="text-sm text-gray-400 font-bold mb-1 ml-2">人次</span>
                </div>
             </div>
          </div>
@@ -213,29 +208,29 @@ function AdminHome() {
   )
 }
 
-// --- 2. 艦長側邊欄 ---
+// --- 2. 側邊欄 (文字優化版) ---
 function Sidebar({ menuItems, currentPath, onNavigate, onLogout }) {
   const MENU_GROUPS = [
     {
-      title: "戰情指揮 (COMMAND)",
+      title: "後臺資訊中心", // 原：戰情指揮
       items: [
         menuItems.find(i => i.path === '/admin') 
       ]
     },
     {
-      title: "賽事作戰 (OPERATIONS)",
+      title: "賽事作業", // 原：賽事作戰
       items: [
         menuItems.find(i => i.path === '/admin/events') 
       ]
     },
     {
-      title: "人員情報 (INTELLIGENCE)",
+      title: "會員資訊中心", // 原：人員情報
       items: [
         menuItems.find(i => i.path === '/admin/users') 
       ]
     },
     {
-      title: "系統核心 (SYSTEM)",
+      title: "系統核心", // 原：系統核心
       items: [
         menuItems.find(i => i.path === '/admin/import'), 
         menuItems.find(i => i.path === '/admin/permissions'), 
@@ -252,8 +247,8 @@ function Sidebar({ menuItems, currentPath, onNavigate, onLogout }) {
               <span className="font-black text-xl">I</span>
             </div>
             <div>
-              <h1 className="text-lg font-bold tracking-wider text-white leading-none">IRON MEDIC</h1>
-              <p className="text-[10px] text-blue-400 mt-1 tracking-widest font-mono">NUCLEAR CLASS v14.2</p>
+              <h1 className="text-lg font-bold tracking-wider text-white leading-none">IronMedic</h1>
+              <p className="text-[12px] text-blue-400 mt-1 tracking-widest font-mono">後臺管理系統</p>
             </div>
           </div>
         </div>
@@ -261,7 +256,7 @@ function Sidebar({ menuItems, currentPath, onNavigate, onLogout }) {
         <nav className="flex-1 py-6 px-4 space-y-6 overflow-y-auto custom-scrollbar">
           {MENU_GROUPS.map((group, idx) => (
             <div key={idx}>
-              <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3 px-2">{group.title}</h4>
+              <h4 className="text-[12px] font-bold text-slate-500 uppercase tracking-widest mb-3 px-2">{group.title}</h4>
               <div className="space-y-1">
                 {group.items.filter(Boolean).map((item) => {
                   const isActive = currentPath === item.path
@@ -302,11 +297,11 @@ export default function AdminDashboard() {
   const location = useLocation()
   const [viewRole, setViewRole] = useState('god')
 
-  // 定義路由與選單 (包含 CRM 與 Import)
+  // 定義路由與選單名稱
   const BASE_MENU_ITEMS = [
-    { icon: LayoutDashboard, label: '戰情總覽', path: '/admin' },
+    { icon: LayoutDashboard, label: '營運總覽', path: '/admin' }, // 原：戰情總覽
     { icon: FileText, label: '賽事管理', path: '/admin/events' },
-    { icon: Users, label: '會員情報中心', path: '/admin/users' }, 
+    { icon: Users, label: '會員資訊中心', path: '/admin/users' }, // 原：會員情報中心
     { icon: Upload, label: '資料匯入中心', path: '/admin/import' },
     { icon: Settings, label: '權限設定 (IAM)', path: '/admin/permissions' },
     { icon: AlertTriangle, label: '系統日誌', path: '/admin/logs' },
@@ -317,7 +312,8 @@ export default function AdminDashboard() {
     navigate('/login')
   }
 
-  const currentTitle = BASE_MENU_ITEMS.find(i => i.path === location.pathname)?.label || '戰略指揮中心'
+  // 取得目前頁面標題
+  const currentTitle = BASE_MENU_ITEMS.find(i => i.path === location.pathname)?.label || '後臺管理中心'
 
   return (
     <div className="flex min-h-screen bg-[#0f172a] font-sans">
