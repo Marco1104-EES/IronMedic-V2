@@ -1,20 +1,16 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
-import { Search, Shield, User, Save, CheckCircle, AlertTriangle, Loader2, Users, Crown, Zap, Activity, Filter, X } from 'lucide-react'
+import { Search, Shield, User, Save, CheckCircle, AlertTriangle, Loader2, Users, Crown, Zap, Activity, X } from 'lucide-react'
 import { ROLES, ROLE_CONFIG } from '../lib/roles'
 
 export default function UserPermission() {
-  const [users, setUsers] = useState([]) // 顯示在列表的用戶
+  const [users, setUsers] = useState([])
   const [selectedUser, setSelectedUser] = useState(null)
   const [loading, setLoading] = useState(false)
-  
-  // 🔍 篩選狀態
   const [searchTerm, setSearchTerm] = useState('')
-  const [filterRole, setFilterRole] = useState('ALL') // ALL, SUPER_ADMIN, EVENT_MANAGER...
-
+  const [filterRole, setFilterRole] = useState('ALL')
   const [currentUserEmail, setCurrentUserEmail] = useState('')
   
-  // 📊 全域戰略統計 (真實數據)
   const [stats, setStats] = useState({
     SUPER_ADMIN: 0,
     EVENT_MANAGER: 0,
@@ -22,7 +18,7 @@ export default function UserPermission() {
     USER: 0
   })
 
-  // 👑 絕對白名單
+  // 白名單 (管理員)
   const VIP_EMAILS = [
       'marco1104@gmail.com', 
       'mark780502@gmail.com'
@@ -30,11 +26,10 @@ export default function UserPermission() {
 
   useEffect(() => {
     checkCurrentUser()
-    fetchGlobalStats() // 先抓統計
-    fetchUsers()       // 再抓列表
+    fetchGlobalStats()
+    fetchUsers()
   }, [])
 
-  // 當篩選條件改變時，重新抓取列表
   useEffect(() => {
     const delaySearch = setTimeout(() => {
         fetchUsers()
@@ -47,12 +42,9 @@ export default function UserPermission() {
     if (user) setCurrentUserEmail(user.email)
   }
 
-  const isCommander = VIP_EMAILS.includes(currentUserEmail);
+  const isAdmin = VIP_EMAILS.includes(currentUserEmail);
 
-  // 🌍 1. 抓取全域統計 (不受搜尋影響)
   const fetchGlobalStats = async () => {
-      // 這裡用一個高效的 RPC 或者分組查詢會更好，但為了簡單，我們先抓全表的 role
-      // 如果人數破萬，建議改用 Supabase Database Function
       const { data, error } = await supabase.from('profiles').select('role')
       if (error) return;
 
@@ -63,7 +55,6 @@ export default function UserPermission() {
       setStats(newStats)
   }
 
-  // 🔍 2. 抓取列表 (受搜尋與卡片篩選影響)
   const fetchUsers = async () => {
     setLoading(true)
     try {
@@ -73,17 +64,14 @@ export default function UserPermission() {
         .order('role', { ascending: true }) 
         .order('created_at', { ascending: false })
       
-      // A. 卡片篩選 (如果有點擊上方卡片)
       if (filterRole !== 'ALL') {
           query = query.eq('role', filterRole)
       }
 
-      // B. 文字搜尋
       if (searchTerm) {
         query = query.or(`full_name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%`)
       }
 
-      // 限制數量 (避免一次拉太多)
       query = query.limit(100)
 
       const { data, error } = await query
@@ -100,13 +88,13 @@ export default function UserPermission() {
 
   const handleUpdateRole = async (newRole) => {
     if (!selectedUser) return
-    if (!isCommander) {
-        alert("權限不足：只有最高指揮官可以晉升人員。")
+    if (!isAdmin) {
+        alert("權限不足：只有超級管理員可以變更權限。")
         return
     }
 
     if (selectedUser.email === currentUserEmail && newRole !== 'SUPER_ADMIN') {
-        if (!window.confirm("警告：您正在移除自己的最高指揮權！確定嗎？")) return;
+        if (!window.confirm("警告：您正在移除自己的管理權限！確定嗎？")) return;
     }
 
     try {
@@ -123,37 +111,33 @@ export default function UserPermission() {
           details: { target: selectedUser.email, by: currentUserEmail }
       }])
 
-      alert(`授勳完成！${selectedUser.full_name} -> ${ROLE_CONFIG[newRole]?.label}`)
+      alert(`權限更新完成！${selectedUser.full_name} -> ${ROLE_CONFIG[newRole]?.label}`)
       
-      // 更新本地
       const updatedUser = { ...selectedUser, role: newRole }
       setSelectedUser(updatedUser)
       setUsers(prev => prev.map(u => u.id === selectedUser.id ? updatedUser : u))
       
-      // 重要：更新全域統計
       fetchGlobalStats() 
 
     } catch (error) {
-      alert("授勳失敗：" + error.message)
+      alert("更新失敗：" + error.message)
     }
   }
 
-  // 點擊卡片切換篩選
   const toggleFilter = (role) => {
       if (filterRole === role) {
-          setFilterRole('ALL') // 取消篩選
+          setFilterRole('ALL')
       } else {
-          setFilterRole(role)  // 套用篩選
+          setFilterRole(role)
       }
   }
 
   return (
     <div className="space-y-6 animate-fade-in pb-20">
       
-      {/* 📊 互動式戰略儀表板 (點擊可篩選) */}
+      {/* 頂部：權限概況 (點擊篩選) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           
-          {/* 指揮官卡片 */}
           <button 
             onClick={() => toggleFilter('SUPER_ADMIN')}
             className={`p-4 rounded-xl border shadow-sm transition-all text-left group
@@ -163,7 +147,7 @@ export default function UserPermission() {
                 }`}
           >
               <div className="flex justify-between items-center mb-2">
-                  <span className={`text-xs font-bold uppercase tracking-wider ${filterRole === 'SUPER_ADMIN' ? 'text-red-100' : 'text-red-600'}`}>最高指揮官</span>
+                  <span className={`text-xs font-bold uppercase tracking-wider ${filterRole === 'SUPER_ADMIN' ? 'text-red-100' : 'text-red-600'}`}>超級管理員</span>
                   <Crown size={16} className={filterRole === 'SUPER_ADMIN' ? 'text-white' : 'text-red-500'}/>
               </div>
               <div className={`text-2xl font-black ${filterRole === 'SUPER_ADMIN' ? 'text-white' : 'text-slate-800'}`}>
@@ -171,7 +155,6 @@ export default function UserPermission() {
               </div>
           </button>
 
-          {/* 賽事官卡片 */}
           <button 
             onClick={() => toggleFilter('EVENT_MANAGER')}
             className={`p-4 rounded-xl border shadow-sm transition-all text-left group
@@ -189,7 +172,6 @@ export default function UserPermission() {
               </div>
           </button>
 
-          {/* 醫護鐵人卡片 */}
           <button 
             onClick={() => toggleFilter('VERIFIED_MEDIC')}
             className={`p-4 rounded-xl border shadow-sm transition-all text-left group
@@ -207,7 +189,6 @@ export default function UserPermission() {
               </div>
           </button>
 
-          {/* 一般會員卡片 */}
           <button 
             onClick={() => toggleFilter('USER')}
             className={`p-4 rounded-xl border shadow-sm transition-all text-left group
@@ -231,15 +212,12 @@ export default function UserPermission() {
         {/* 左側列表 */}
         <div className="w-full lg:w-1/3 bg-white rounded-2xl shadow-xl border border-slate-200 flex flex-col overflow-hidden">
             <div className="p-4 border-b border-slate-100 bg-slate-50">
-                
-                {/* 顯示目前的篩選狀態 */}
                 {filterRole !== 'ALL' && (
                     <div className="mb-2 flex items-center justify-between bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg text-xs font-bold">
                         <span>正在篩選: {ROLE_CONFIG[filterRole]?.label}</span>
                         <button onClick={() => setFilterRole('ALL')} className="hover:text-blue-900"><X size={14}/></button>
                     </div>
                 )}
-
                 <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                     <input 
@@ -284,11 +262,11 @@ export default function UserPermission() {
             </div>
         </div>
 
-        {/* 右側控制台 (不變，保持功能) */}
+        {/* 右側控制台 */}
         <div className="flex-1 bg-white rounded-2xl shadow-xl border border-slate-200 p-8 flex flex-col justify-center items-center relative overflow-hidden">
             {selectedUser ? (
                 <div className="w-full max-w-2xl animate-scale-in flex flex-col h-full">
-                    {/* 1. 用戶檔案卡 */}
+                    {/* 用戶檔案卡 */}
                     <div className="flex items-center p-6 bg-slate-50 rounded-2xl border border-slate-100 mb-6">
                         <div className={`w-20 h-20 rounded-2xl flex items-center justify-center font-black text-3xl text-white shadow-lg mr-6 ${ROLE_CONFIG[selectedUser.role]?.color.split(' ')[0].replace('text', 'bg') || 'bg-slate-400'}`}>
                             {selectedUser.full_name?.[0]?.toUpperCase() || 'U'}
@@ -301,17 +279,17 @@ export default function UserPermission() {
                             </span>
                         </div>
                         <div className="ml-auto text-right hidden md:block">
-                            <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Current Status</p>
+                            <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Status</p>
                             <div className="flex items-center justify-end text-green-500 font-bold text-sm">
                                 <Activity size={14} className="mr-1"/> Active
                             </div>
                         </div>
                     </div>
 
-                    {/* 2. 權限賦予區 */}
+                    {/* 權限設定區 */}
                     <div className="flex-1 overflow-y-auto pr-2">
                         <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center">
-                            <Shield size={14} className="mr-2"/> 權限層級賦予 (Role Assignment)
+                            <Shield size={14} className="mr-2"/> 權限變更 (Change Permission)
                         </p>
                         
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -323,14 +301,14 @@ export default function UserPermission() {
                                     <button
                                         key={roleKey}
                                         onClick={() => handleUpdateRole(roleKey)}
-                                        disabled={isCurrent || !isCommander}
+                                        disabled={isCurrent || !isAdmin}
                                         className={`
                                             relative flex flex-col p-4 rounded-xl border-2 transition-all duration-200 text-left
                                             ${isCurrent 
                                                 ? `border-${config.color.split('-')[1]}-500 bg-${config.color.split('-')[1]}-50 ring-2 ring-${config.color.split('-')[1]}-200` 
                                                 : 'border-slate-100 hover:border-blue-300 hover:shadow-md bg-white'
                                             }
-                                            ${!isCommander ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                                            ${!isAdmin ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
                                         `}
                                     >
                                         <div className="flex justify-between items-start mb-2">
@@ -341,7 +319,7 @@ export default function UserPermission() {
                                         </div>
                                         <div className="text-xs text-slate-400 font-mono mb-2">{roleKey}</div>
                                         <div className="mt-auto pt-2 text-[10px] text-slate-500 border-t border-slate-100">
-                                            {roleKey === 'SUPER_ADMIN' && '擁有系統最高指揮權。'}
+                                            {roleKey === 'SUPER_ADMIN' && '擁有系統最高權限。'}
                                             {roleKey === 'EVENT_MANAGER' && '可建立賽事、管理報名。'}
                                             {roleKey === 'VERIFIED_MEDIC' && '通過審核的醫護鐵人。'}
                                             {roleKey === 'USER' && '一般註冊會員。'}
@@ -357,8 +335,8 @@ export default function UserPermission() {
                     <div className="w-24 h-24 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 border-4 border-slate-100">
                         <Search size={32} className="text-slate-300"/>
                     </div>
-                    <h3 className="text-xl font-bold mb-2 text-slate-400">等待指令</h3>
-                    <p className="text-sm text-slate-400">請從左側清單選擇一名人員進行授勳</p>
+                    <h3 className="text-xl font-bold mb-2 text-slate-400">待命狀態</h3>
+                    <p className="text-sm text-slate-400">請從左側清單選擇一名人員進行設定</p>
                 </div>
             )}
         </div>

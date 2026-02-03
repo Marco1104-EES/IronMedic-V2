@@ -11,20 +11,20 @@ export default function AdminLayout({ children }) {
   const location = useLocation()
   const navigate = useNavigate()
 
-  // 🛠️ 修正導航目標：絕對不要連到 /home (那是前台)
+  // 🛠️ 企業級標準導航命名
   const menuItems = [
-    // 1. 營運總覽 -> 連到 /admin/dashboard
-    { icon: LayoutDashboard, label: '營運總覽', path: '/admin/dashboard' },
-    // 2. 賽事管理 -> 連到 /admin/events (如果您還沒做這頁，暫時連到 users 避免白屏)
-    { icon: Trophy, label: '賽事管理', path: '/admin/events' }, 
-    // 3. 會員中心 -> 連到 /admin/users
-    { icon: Users, label: '會員資訊中心', path: '/admin/users' },
-    // 4. 資料匯入 -> 連到 /admin/import
+    // 1. 營運總覽 -> 系統運作全方位
+    { icon: LayoutDashboard, label: '系統運作全方位', path: '/admin/dashboard' },
+    // 2. 賽事管理 -> 賽事管理系統
+    { icon: Trophy, label: '賽事管理系統', path: '/admin/events' }, 
+    // 3. 會員中心 -> 會員資料中心
+    { icon: Users, label: '會員資料中心', path: '/admin/users' },
+    // 4. 資料匯入 -> 資料匯入中心
     { icon: Upload, label: '資料匯入中心', path: '/admin/import' },
-    // 5. 權限設定 -> 連到 /admin/permissions
-    { icon: Shield, label: '權限設定 (IAM)', path: '/admin/permissions' },
-    // 6. 系統日誌 -> 連到 /admin/logs
-    { icon: Terminal, label: '系統日誌', path: '/admin/logs' },
+    // 5. 權限設定 -> 權限管理 (IAM)
+    { icon: Shield, label: '權限管理 (IAM)', path: '/admin/permissions' },
+    // 6. 系統日誌 -> 系統操作日誌
+    { icon: Terminal, label: '系統操作日誌', path: '/admin/logs' },
   ]
 
   const handleLogout = async () => {
@@ -58,7 +58,8 @@ export default function AdminLayout({ children }) {
           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-black mr-3">I</div>
           <div>
             <h1 className="text-white font-black text-lg leading-none">IRON MEDIC</h1>
-            <span className="text-[10px] text-blue-400 font-bold tracking-wider">後臺管理系統</span>
+            {/* 修正：ENTERPRISE SYSTEM (取代後臺管理系統) */}
+            <span className="text-[10px] text-blue-400 font-bold tracking-wider">ENTERPRISE SYSTEM</span>
           </div>
           <button onClick={closeMobileMenu} className="md:hidden ml-auto text-slate-400 hover:text-white"><X size={20} /></button>
         </div>
@@ -89,8 +90,9 @@ export default function AdminLayout({ children }) {
 
         {/* 底部按鈕 */}
         <div className="absolute bottom-0 left-0 right-0 p-4 bg-[#0f172a] border-t border-slate-800 space-y-2">
+            {/* 修正：返回賽事介面 */}
             <Link to="/home" className="flex items-center justify-center w-full py-2 rounded-lg bg-slate-800 text-slate-400 hover:text-white text-xs font-bold transition-all">
-                <Home size={14} className="mr-2"/> 返回前台大廳
+                <Home size={14} className="mr-2"/> 返回賽事介面
             </Link>
             <button onClick={handleLogout} className="flex items-center justify-center w-full py-2 rounded-lg border border-red-900/30 text-red-400 hover:bg-red-900/20 text-xs font-bold transition-all">
                 <LogOut size={14} className="mr-2"/> 安全登出

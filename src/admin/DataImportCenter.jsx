@@ -31,7 +31,7 @@ export default function DataImportCenter() {
       addLog(`📥 已下載檔案: ${filename}`, 'success');
   }
 
-  // 🧠 核子潛艦核心：深海讀取 (讀取所有行，不預設表頭)
+  // 核心引擎：原始資料讀取 (讀取所有行，不預設表頭)
   const readExcelRaw = (file) => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -49,7 +49,7 @@ export default function DataImportCenter() {
     });
   };
 
-  // 🕵️‍♂️ 獵殺表頭 (Header Hunter)
+  // 🕵️‍♂️ 定位表頭 (Header Detection)
   const findHeaderRow = (rows) => {
       // 掃描前 20 行，尋找包含關鍵字的行
       const keywords = ['姓名', 'Name', 'name', 'Email', 'email', '信箱', '電話', 'Phone', '身分證', 'ID'];
@@ -92,18 +92,18 @@ export default function DataImportCenter() {
       return match ? (row[match] || '').toString().trim() : '';
   }
 
-  // 🔍 階段一：深海解析
+  // 🔍 階段一：資料解析
   const handlePreview = async () => {
     if (!fileMaster) { alert("請至少上傳 Master 檔！"); return; }
     
     setProcessing(true); setLogs([]); setValidData([]); setInvalidData([]);
-    addLog('啟動 V2.2 核子潛艦引擎 (Deep Scan Mode)...', 'warning');
+    addLog('啟動資料分析引擎 (Deep Analysis Mode)...', 'warning');
 
     try {
         // 1. 讀取 Master (Raw Mode)
         const masterRows = await readExcelRaw(fileMaster);
         const masterHeaderIdx = findHeaderRow(masterRows);
-        addLog(`>> 鎖定 Master 表頭在第 ${masterHeaderIdx + 1} 行`, 'info');
+        addLog(`>> 定位 Master 表頭在第 ${masterHeaderIdx + 1} 行`, 'info');
         
         const { data: masterData, headers: masterHeaders } = parseRowsToObjects(masterRows, masterHeaderIdx);
         addLog(`>> 成功提取資料: ${masterData.length} 筆 (偵測欄位: ${masterHeaders.slice(0,5).join(', ')}...)`, 'success');
@@ -127,7 +127,7 @@ export default function DataImportCenter() {
                 if (n && e) wixMap[n] = e;
             });
 
-            // 3. 暴力修補 (Fuzzy Patching)
+            // 3. 模糊比對修補 (Fuzzy Patching)
             finalData = masterData.map(row => {
                 let name = findValue(row, ['姓名', 'Name', '選手']).replace(/\s+/g, '');
                 // 處理 "陳彥良 基本救命術..." -> 只取前三個字當 Key 來比對 (或是把職稱去掉)
@@ -153,7 +153,7 @@ export default function DataImportCenter() {
                 }
                 return row;
             });
-            addLog(`>> 暴力修補: 強制救回 ${patchedCount} 筆 Email`, 'info');
+            addLog(`>> 模糊比對修補: 自動修復 ${patchedCount} 筆 Email`, 'info');
         }
 
         // 4. 標準化與分流
@@ -194,25 +194,25 @@ export default function DataImportCenter() {
         
         if (invalidList.length > 0) {
             setViewMode('invalid');
-            addLog(`⚠️ 攔截到 ${invalidList.length} 筆問題資料 (已隔離)`, 'warning');
+            addLog(`⚠️ 偵測到 ${invalidList.length} 筆異常資料 (已隔離)`, 'warning');
         } else {
             setViewMode('valid');
-            addLog(`✅ 全艦正常！共 ${validList.length} 筆資料鎖定。`, 'success');
+            addLog(`✅ 資料檢查正常！共 ${validList.length} 筆資料待匯入。`, 'success');
         }
 
     } catch (err) {
-        addLog(`❌ 引擎故障: ${err.message}`, 'error');
+        addLog(`❌ 分析錯誤: ${err.message}`, 'error');
         console.error(err);
     } finally {
         setProcessing(false);
     }
   }
 
-  // 💾 階段二：寫入資料庫 (防爆版)
+  // 💾 階段二：寫入資料庫 (批次處理)
   const handleConfirmImport = async () => {
       if (validData.length === 0) return;
       setProcessing(true);
-      addLog('發射數據魚雷 (Writing to DB)...', 'warning');
+      addLog('開始寫入資料庫 (Writing to DB)...', 'warning');
 
       try {
           const recordsToUpsert = validData.map(({ _id, original_source, ...rest }) => ({
@@ -224,7 +224,7 @@ export default function DataImportCenter() {
           let sCount = 0;
           let failedCount = 0;
 
-          // 使用 for...of 迴圈確保順序與防爆
+          // 使用 for...of 迴圈確保順序與安全性
           for (let i = 0; i < recordsToUpsert.length; i += BATCH) {
               const batch = recordsToUpsert.slice(i, i + BATCH);
               try {
@@ -237,22 +237,22 @@ export default function DataImportCenter() {
 
                   if (!data || data.length === 0) {
                       // RLS 攔截，但不中斷整個流程
-                      addLog(`⚠️ 魚雷被攔截 (RLS): 第 ${i/BATCH + 1} 波攻擊無效`, 'error');
+                      addLog(`⚠️ 寫入遭拒 (RLS): 第 ${i/BATCH + 1} 批次無效`, 'error');
                       failedCount += batch.length;
                   } else {
                       sCount += data.length;
                       // 減少 Log 刷屏，每 200 筆回報一次
-                      if (sCount % 200 === 0) addLog(`>> 命中確認: ${sCount} / ${recordsToUpsert.length}`, 'info');
+                      if (sCount % 200 === 0) addLog(`>> 寫入確認: ${sCount} / ${recordsToUpsert.length}`, 'info');
                   }
               } catch (batchErr) {
-                  addLog(`❌ 第 ${i/BATCH + 1} 波發射失敗: ${batchErr.message}`, 'error');
+                  addLog(`❌ 第 ${i/BATCH + 1} 批次寫入失敗: ${batchErr.message}`, 'error');
                   failedCount += batch.length;
-                  // 繼續下一批，不自殺
+                  // 繼續下一批，不中斷
               }
           }
 
           if (sCount > 0) {
-              addLog(`🚀 戰役結束！成功部署: ${sCount} 名戰士。`, 'success');
+              addLog(`🚀 匯入作業結束！成功匯入: ${sCount} 筆資料。`, 'success');
               // 記錄到系統日誌
               const { data: { user } } = await supabase.auth.getUser();
               await supabase.from('system_logs').insert([{ 
@@ -262,11 +262,11 @@ export default function DataImportCenter() {
               }]);
               setTimeout(() => setValidData([]), 3000);
           } else {
-              addLog(`💀 全面防禦：資料庫拒絕了所有寫入。請檢查 Supabase Policy。`, 'error');
+              addLog(`💀 寫入失敗：資料庫拒絕了所有寫入。請檢查 Supabase Policy。`, 'error');
           }
 
       } catch (err) {
-          addLog(`❌ 系統崩潰: ${err.message}`, 'error');
+          addLog(`❌ 系統錯誤: ${err.message}`, 'error');
       } finally {
           setProcessing(false);
       }
@@ -276,16 +276,19 @@ export default function DataImportCenter() {
     <div className="space-y-8 animate-fade-in pb-20">
       <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
         <div>
+          {/* 修正：移除版本號 */}
           <h2 className="text-2xl font-black text-slate-800 flex items-center">
-            <FileSpreadsheet className="mr-3 text-blue-600"/> 資料匯入中心 V2.2
+            <FileSpreadsheet className="mr-3 text-blue-600"/> 資料匯入中心
           </h2>
-          <p className="text-slate-500 text-sm mt-1 font-bold">Deep Scan 深海獵殺版 (表頭自動鎖定 + 模糊補丁)</p>
+          {/* 修正：企業級副標題 */}
+          <p className="text-slate-500 text-sm mt-1 font-bold">資料分析比對清除 (表頭自動鎖定 + 模糊補丁)</p>
         </div>
         
         {(validData.length > 0 || invalidData.length > 0) && (
             <div className="flex gap-2">
+                 {/* 修正：下載匯入報告 */}
                  <button onClick={() => exportExcel([...validData, ...invalidData], 'IronMedic_Full_Report')} className="px-4 py-2 bg-slate-800 text-white rounded-lg text-xs font-bold flex items-center hover:bg-slate-700 transition-colors">
-                     <Download size={14} className="mr-2"/> 下載戰後報告書 ({validData.length + invalidData.length})
+                     <Download size={14} className="mr-2"/> 下載匯入報告 ({validData.length + invalidData.length})
                  </button>
             </div>
         )}
@@ -294,7 +297,8 @@ export default function DataImportCenter() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
          <div className="lg:col-span-1 space-y-6">
              <div className="bg-white rounded-2xl shadow-xl border border-blue-100 p-6">
-                <h3 className="font-bold text-slate-700 mb-4 flex items-center"><Search size={18} className="mr-2 text-purple-500"/> 深海檔案掃描</h3>
+                {/* 修正：匯入資料分析 */}
+                <h3 className="font-bold text-slate-700 mb-4 flex items-center"><Search size={18} className="mr-2 text-purple-500"/> 匯入資料分析</h3>
                 
                 <div className={`border-2 border-dashed rounded-xl p-4 text-center mb-3 transition-all ${fileMaster ? 'border-green-500 bg-green-50' : 'border-slate-300 hover:border-blue-400'}`}>
                     <input type="file" id="m-up" className="hidden" accept=".xlsx" onChange={(e) => setFileMaster(e.target.files[0])}/>
@@ -317,14 +321,16 @@ export default function DataImportCenter() {
                 </div>
 
                 {validData.length === 0 && invalidData.length === 0 ? (
+                    /* 修正：啟動分析檢查 */
                     <button onClick={handlePreview} disabled={processing || !fileMaster} className="w-full py-3 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-500 shadow-md disabled:opacity-50 flex justify-center items-center transition-all">
                         {processing ? <RefreshCw size={20} className="animate-spin mr-2"/> : <Eye size={20} className="mr-2"/>}
-                        啟動深海掃描 (Deep Scan)
+                        啟動分析檢查 (Start Analysis)
                     </button>
                 ) : (
                     <div className="space-y-3">
+                        {/* 修正：確認匯入 */}
                         <button onClick={handleConfirmImport} disabled={processing || validData.length === 0} className="w-full py-3 rounded-xl font-black text-white bg-green-600 hover:bg-green-500 shadow-lg disabled:opacity-50 flex justify-center items-center animate-pulse">
-                            {processing ? '魚雷發射中...' : <><Save size={20} className="mr-2"/> 確認寫入 ({validData.length})</>}
+                            {processing ? '資料寫入中...' : <><Save size={20} className="mr-2"/> 確認匯入 ({validData.length})</>}
                         </button>
                         <button onClick={() => {setValidData([]); setInvalidData([]); setLogs([])}} className="w-full py-2 rounded-xl font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 flex justify-center items-center">
                             <X size={18} className="mr-2"/> 清除重來
@@ -334,7 +340,8 @@ export default function DataImportCenter() {
              </div>
              
              <div className="bg-[#0f172a] rounded-xl border border-slate-700 p-4 h-64 overflow-hidden flex flex-col shadow-inner">
-                <div className="text-slate-400 text-xs font-bold border-b border-slate-700 pb-2 mb-2 flex items-center"><Terminal size={12} className="mr-2"/> 聲納日誌 (Sonar Logs)</div>
+                {/* 修正：操作紀錄日誌 */}
+                <div className="text-slate-400 text-xs font-bold border-b border-slate-700 pb-2 mb-2 flex items-center"><Terminal size={12} className="mr-2"/> 操作紀錄日誌 (Operation Logs)</div>
                 <div className="flex-1 overflow-y-auto custom-scrollbar font-mono text-xs space-y-1">
                     {logs.map((l, i) => (
                         <div key={i} className={`flex ${l.type === 'error' ? 'text-red-400' : l.type === 'success' ? 'text-green-400' : l.type === 'warning' ? 'text-yellow-400' : 'text-blue-300'}`}>
@@ -350,15 +357,17 @@ export default function DataImportCenter() {
              <div className="flex border-b border-slate-200">
                  <button 
                     onClick={() => setViewMode('valid')}
+                    /* 修正：有效資料 */
                     className={`flex-1 py-4 text-sm font-bold flex items-center justify-center transition-all ${viewMode === 'valid' ? 'bg-white text-green-600 border-b-2 border-green-600' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}
                  >
-                    <ShieldCheck size={18} className="mr-2"/> 鎖定目標 ({validData.length})
+                    <ShieldCheck size={18} className="mr-2"/> 有效資料 ({validData.length})
                  </button>
                  <button 
                     onClick={() => setViewMode('invalid')}
+                    /* 修正：異常資料 */
                     className={`flex-1 py-4 text-sm font-bold flex items-center justify-center transition-all ${viewMode === 'invalid' ? 'bg-red-50 text-red-600 border-b-2 border-red-600' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}
                  >
-                    <FileWarning size={18} className="mr-2"/> 異常訊號 ({invalidData.length})
+                    <FileWarning size={18} className="mr-2"/> 異常資料 ({invalidData.length})
                  </button>
              </div>
 
@@ -381,7 +390,7 @@ export default function DataImportCenter() {
                                     ))}
                                 </tbody>
                             </table>
-                        ) : <div className="h-full flex flex-col items-center justify-center text-slate-400"><ShieldCheck size={48} className="mb-2 opacity-20"/>聲納掃描中...</div>}
+                        ) : <div className="h-full flex flex-col items-center justify-center text-slate-400"><ShieldCheck size={48} className="mb-2 opacity-20"/>資料分析中...</div>}
                      </>
                  )}
 
@@ -389,7 +398,8 @@ export default function DataImportCenter() {
                      <div className="space-y-4">
                         {invalidData.length > 0 && (
                             <div className="bg-red-100 border border-red-200 text-red-800 p-3 rounded-lg flex justify-between items-center">
-                                <span className="text-xs font-bold flex items-center"><AlertTriangle size={14} className="mr-2"/> 這些目標無法鎖定 (缺姓名或 Email)</span>
+                                {/* 修正：這些資料無法匯入 */}
+                                <span className="text-xs font-bold flex items-center"><AlertTriangle size={14} className="mr-2"/> 這些資料無法匯入 (缺姓名或 Email)</span>
                                 <button onClick={() => exportExcel(invalidData, 'IronMedic_Missed_Targets')} className="bg-red-600 text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-red-700 flex items-center shadow-sm">
                                     <Download size={12} className="mr-1"/> 下載異常清單
                                 </button>
@@ -411,7 +421,7 @@ export default function DataImportCenter() {
                                     ))}
                                 </tbody>
                             </table>
-                        ) : <div className="h-full flex flex-col items-center justify-center text-slate-400"><CheckCircle size={48} className="mb-2 opacity-20"/>太棒了！無異常訊號。</div>}
+                        ) : <div className="h-full flex flex-col items-center justify-center text-slate-400"><CheckCircle size={48} className="mb-2 opacity-20"/>太棒了！無異常資料。</div>}
                      </div>
                  )}
              </div>

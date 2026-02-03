@@ -3,7 +3,7 @@ import { supabase } from '../supabaseClient'
 import { VIP_ROSTER, DEFAULT_USER } from '../constants/roleConfig'
 import { 
   Search, User, Mail, Phone, Shield, Edit2, Save, X, 
-  ChevronLeft, ChevronRight, Loader2, AlertTriangle, Database, Calendar, MapPin, HeartPulse
+  Loader2, Database, Calendar, MapPin, HeartPulse
 } from 'lucide-react'
 
 export default function MemberCRM() {
@@ -116,8 +116,9 @@ export default function MemberCRM() {
     <div className="space-y-6 animate-fade-in pb-20">
       <div className="flex justify-between items-end">
         <div>
+          {/* 修正：移除 V3.1 版本號，改為標準名稱 */}
           <h2 className="text-2xl font-black text-slate-800 flex items-center">
-            <User className="mr-3 text-blue-600"/> 會員戰情中心 V3.1
+            <User className="mr-3 text-blue-600"/> 會員資料中心
           </h2>
           <p className="text-xs font-mono text-slate-500 mt-2 bg-slate-100 p-2 rounded flex items-center">
              <Database size={12} className="mr-2"/> {debugMsg}
