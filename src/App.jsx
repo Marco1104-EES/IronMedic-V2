@@ -1,22 +1,29 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom' // 🟢 補回 BrowserRouter
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { supabase } from './supabaseClient'
 
-// ⬇️ 路徑確認：指揮官在 pages，零件在 components
-import Navbar from './components/Navbar' 
+// 🏗️ Layouts
+import AdminLayout from './layouts/AdminLayout' 
+import UserLayout from './layouts/UserLayout'   
+
+// 📄 Pages (已移除 UserProfile)
 import Login from './pages/Login'        
 import Home from './pages/Home'          
-import UserProfile from './pages/UserProfile' 
-import AdminDashboard from './admin/AdminDashboard'
 
-// Loading 畫面
+// 🛡️ Admin Modules
+import DashboardHome from './admin/DashboardHome'
+import EventManagement from './admin/EventManagement'
+import MemberCRM from './admin/MemberCRM'           
+import DataImportCenter from './admin/DataImportCenter' 
+import UserPermission from './admin/UserPermission' 
+import SystemLogs from './admin/SystemLogs'         
+
 const LoadingScreen = () => (
   <div className="min-h-screen bg-[#020617] flex items-center justify-center">
     <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
   </div>
 )
 
-// 守衛
 const PrivateRoute = ({ children }) => {
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -26,6 +33,10 @@ const PrivateRoute = ({ children }) => {
       setSession(session)
       setLoading(false)
     })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session)
+    })
+    return () => subscription.unsubscribe()
   }, [])
 
   if (loading) return <LoadingScreen />
@@ -35,37 +46,73 @@ const PrivateRoute = ({ children }) => {
 
 function App() {
   return (
-    // 🟢 關鍵修正：因為 main.jsx 沒有包，這裡必須包 BrowserRouter
     <BrowserRouter>
       <Routes>
-          {/* 1. 唯一入口：Login */}
+          {/* 1. 登入 */}
           <Route path="/login" element={<Login />} />
           
-          {/* 2. 賽事首頁 (需登入) */}
+          {/* 2. 前台 (只剩首頁) */}
           <Route path="/home" element={
             <PrivateRoute>
-              <Navbar /> 
-              <Home />
+              <UserLayout>
+                <Home />
+              </UserLayout>
+            </PrivateRoute>
+          } />
+          
+          {/* 3. 後台戰情室 */}
+          <Route path="/admin/dashboard" element={
+            <PrivateRoute>
+              <AdminLayout>
+                <DashboardHome />
+              </AdminLayout>
             </PrivateRoute>
           } />
 
-          {/* 3. 會員中心 (需登入) */}
-          <Route path="/profile" element={
+          <Route path="/admin/events" element={
             <PrivateRoute>
-              <Navbar />
-              <UserProfile />
+              <AdminLayout>
+                <EventManagement />
+              </AdminLayout>
             </PrivateRoute>
           } />
-          
-          {/* 4. 後台戰情室 (需登入) */}
-          <Route path="/admin/*" element={
+
+          <Route path="/admin/users" element={
             <PrivateRoute>
-              <AdminDashboard />
+              <AdminLayout>
+                <MemberCRM />
+              </AdminLayout>
             </PrivateRoute>
           } />
-          
-          {/* 導向設定 */}
+
+          <Route path="/admin/import" element={
+            <PrivateRoute>
+              <AdminLayout>
+                <DataImportCenter />
+              </AdminLayout>
+            </PrivateRoute>
+          } />
+
+          <Route path="/admin/permissions" element={
+            <PrivateRoute>
+              <AdminLayout>
+                <UserPermission />
+              </AdminLayout>
+            </PrivateRoute>
+          } />
+
+          <Route path="/admin/logs" element={
+            <PrivateRoute>
+              <AdminLayout>
+                <SystemLogs />
+              </AdminLayout>
+            </PrivateRoute>
+          } />
+
+          {/* 導向邏輯 */}
+          <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
           <Route path="/" element={<Navigate to="/home" replace />} />
+          {/* 任何未定義路徑 (包含原本的 /profile) 都會被踢回首頁 */}
           <Route path="*" element={<Navigate to="/home" replace />} />
       </Routes>
     </BrowserRouter>

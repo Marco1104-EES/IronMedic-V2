@@ -1,113 +1,116 @@
-import { useState, useEffect } from 'react'
-import { Link, Outlet, useNavigate } from 'react-router-dom'
+import { useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 import { 
-  LayoutDashboard, 
-  Calendar, 
-  Users, 
-  Bell, 
-  FileText, 
-  LogOut,
-  Menu 
+  LayoutDashboard, Trophy, Users, Upload, Shield, Terminal, 
+  Menu, X, LogOut, Home 
 } from 'lucide-react'
 
-export default function AdminLayout() {
-  const [isAdmin, setIsAdmin] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const [isSidebarOpen, setSidebarOpen] = useState(true)
+export default function AdminLayout({ children }) {
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const location = useLocation()
   const navigate = useNavigate()
 
-  useEffect(() => {
-    checkAdmin()
-  }, [])
-
-  const checkAdmin = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      navigate('/login')
-      return
-    }
-
-    // 檢查權限
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .single()
-
-    if (profile?.role === 'admin' || profile?.role === 'super_admin') {
-      setIsAdmin(true)
-    } else {
-      alert('您沒有權限進入戰情室！')
-      navigate('/')
-    }
-    setLoading(false)
-  }
+  // 🛠️ 修正導航目標：絕對不要連到 /home (那是前台)
+  const menuItems = [
+    // 1. 營運總覽 -> 連到 /admin/dashboard
+    { icon: LayoutDashboard, label: '營運總覽', path: '/admin/dashboard' },
+    // 2. 賽事管理 -> 連到 /admin/events (如果您還沒做這頁，暫時連到 users 避免白屏)
+    { icon: Trophy, label: '賽事管理', path: '/admin/events' }, 
+    // 3. 會員中心 -> 連到 /admin/users
+    { icon: Users, label: '會員資訊中心', path: '/admin/users' },
+    // 4. 資料匯入 -> 連到 /admin/import
+    { icon: Upload, label: '資料匯入中心', path: '/admin/import' },
+    // 5. 權限設定 -> 連到 /admin/permissions
+    { icon: Shield, label: '權限設定 (IAM)', path: '/admin/permissions' },
+    // 6. 系統日誌 -> 連到 /admin/logs
+    { icon: Terminal, label: '系統日誌', path: '/admin/logs' },
+  ]
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
     navigate('/login')
   }
 
-  if (loading) return <div className="p-10 text-center">驗證權限中...</div>
-
-  // 側邊欄選單項目
-  const menuItems = [
-    { icon: <LayoutDashboard size={20} />, label: '戰情儀表板', path: '/admin' },
-    { icon: <Calendar size={20} />, label: '賽事管理', path: '/admin/events' },
-    { icon: <Users size={20} />, label: '會員 CRM', path: '/admin/users' },
-    { icon: <Bell size={20} />, label: '廣播中心', path: '/admin/broadcast' },
-    { icon: <FileText size={20} />, label: '稽核日誌', path: '/admin/logs' },
-  ]
+  const closeMobileMenu = () => setIsMobileMenuOpen(false)
 
   return (
-    <div className="flex h-screen bg-gray-100">
-      {/* 🔴 左側 Sidebar */}
-      <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'} bg-slate-900 text-white transition-all duration-300 flex flex-col`}>
-        <div className="p-4 flex items-center justify-between border-b border-slate-700">
-          {isSidebarOpen && <span className="font-bold text-xl tracking-wider">IRON ADMIN</span>}
-          <button onClick={() => setSidebarOpen(!isSidebarOpen)} className="p-1 hover:bg-slate-800 rounded">
-            <Menu size={20} />
-          </button>
+    <div className="flex h-screen bg-slate-50 overflow-hidden">
+      
+      {/* 手機版遮罩 */}
+      {isMobileMenuOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 md:hidden"
+          onClick={closeMobileMenu}
+        />
+      )}
+
+      {/* 側邊欄 Sidebar */}
+      <aside 
+        className={`
+          fixed inset-y-0 left-0 z-50 w-64 bg-[#0f172a] text-slate-300 transition-transform duration-300 ease-in-out shadow-2xl
+          md:static md:translate-x-0 
+          ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}
+        `}
+      >
+        {/* Logo */}
+        <div className="h-16 flex items-center px-6 border-b border-slate-800 bg-[#0f172a]">
+          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-black mr-3">I</div>
+          <div>
+            <h1 className="text-white font-black text-lg leading-none">IRON MEDIC</h1>
+            <span className="text-[10px] text-blue-400 font-bold tracking-wider">後臺管理系統</span>
+          </div>
+          <button onClick={closeMobileMenu} className="md:hidden ml-auto text-slate-400 hover:text-white"><X size={20} /></button>
         </div>
 
-        <nav className="flex-1 py-6 space-y-2">
-          {menuItems.map((item) => (
-            <Link 
-              key={item.path} 
-              to={item.path} 
-              className="flex items-center px-4 py-3 text-gray-300 hover:bg-slate-800 hover:text-white transition-colors"
-            >
-              {item.icon}
-              {isSidebarOpen && <span className="ml-4">{item.label}</span>}
-            </Link>
-          ))}
+        {/* 選單列表 */}
+        <nav className="p-4 space-y-2 overflow-y-auto h-[calc(100vh-140px)] custom-scrollbar">
+          {menuItems.map((item) => {
+            const isActive = location.pathname === item.path
+            return (
+              <Link 
+                key={item.path} 
+                to={item.path}
+                onClick={closeMobileMenu}
+                className={`
+                  flex items-center px-4 py-3 rounded-xl transition-all duration-200 font-bold text-sm
+                  ${isActive 
+                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/50' 
+                    : 'hover:bg-slate-800 hover:text-white'
+                  }
+                `}
+              >
+                <item.icon size={18} className="mr-3" />
+                {item.label}
+              </Link>
+            )
+          })}
         </nav>
 
-        <div className="p-4 border-t border-slate-700">
-          <button onClick={handleLogout} className="flex items-center w-full text-red-400 hover:text-red-300">
-            <LogOut size={20} />
-            {isSidebarOpen && <span className="ml-4">登出系統</span>}
-          </button>
+        {/* 底部按鈕 */}
+        <div className="absolute bottom-0 left-0 right-0 p-4 bg-[#0f172a] border-t border-slate-800 space-y-2">
+            <Link to="/home" className="flex items-center justify-center w-full py-2 rounded-lg bg-slate-800 text-slate-400 hover:text-white text-xs font-bold transition-all">
+                <Home size={14} className="mr-2"/> 返回前台大廳
+            </Link>
+            <button onClick={handleLogout} className="flex items-center justify-center w-full py-2 rounded-lg border border-red-900/30 text-red-400 hover:bg-red-900/20 text-xs font-bold transition-all">
+                <LogOut size={14} className="mr-2"/> 安全登出
+            </button>
         </div>
       </aside>
 
-      {/* 🔵 右側內容區 */}
-      <main className="flex-1 overflow-y-auto">
-        <header className="bg-white shadow-sm h-16 flex items-center px-6 justify-between">
-          <h2 className="text-xl font-semibold text-gray-800">管理控制台</h2>
-          <div className="flex items-center space-x-4">
-            <span className="text-sm text-gray-500">超級管理員</span>
-            <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold">
-              A
-            </div>
-          </div>
+      {/* 主內容區 */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-slate-50">
+        <header className="md:hidden flex items-center bg-white border-b border-slate-200 px-4 h-16 shrink-0 sticky top-0 z-30">
+          <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 -ml-2 text-slate-600"><Menu size={24} /></button>
+          <span className="ml-3 font-black text-slate-800 text-lg">IRON MEDIC</span>
         </header>
-        
-        <div className="p-8">
-          <Outlet /> {/* 這裡會顯示各個子頁面 */}
-        </div>
-      </main>
+
+        <main className="flex-1 overflow-auto p-4 md:p-8 custom-scrollbar">
+          <div className="max-w-7xl mx-auto min-h-full">
+             {children}
+          </div>
+        </main>
+      </div>
     </div>
   )
 }

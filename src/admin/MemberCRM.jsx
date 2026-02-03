@@ -19,7 +19,6 @@ export default function MemberCRM() {
   
   const [debugMsg, setDebugMsg] = useState('系統就緒')
 
-  // 🔥 搜尋與分頁邏輯
   useEffect(() => {
     const delaySearch = setTimeout(() => {
         fetchMembers()
@@ -71,7 +70,6 @@ export default function MemberCRM() {
       setEditForm({ ...member })
   }
 
-  // 💾 儲存編輯：包含所有新欄位
   const saveEdit = async () => {
       try {
           const { error } = await supabase
@@ -82,7 +80,6 @@ export default function MemberCRM() {
                 email: editForm.email,
                 uniform_size: editForm.uniform_size,
                 id_number: editForm.id_number,
-                // 新增欄位
                 birth_date: editForm.birth_date,
                 address: editForm.address,
                 emergency_contact: editForm.emergency_contact,
@@ -110,7 +107,6 @@ export default function MemberCRM() {
 
   const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE) || 1
 
-  // 📅 日期格式化工具
   const formatDate = (dateStr) => {
       if (!dateStr) return '-'
       return new Date(dateStr).toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' })
@@ -149,10 +145,10 @@ export default function MemberCRM() {
             <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-xs border-b border-slate-200">
               <tr>
                 <th className="p-4 w-16">#</th>
-                <th className="p-4">加入日期</th> {/* 新增：匯入/加入時間 */}
+                <th className="p-4">加入日期</th>
                 <th className="p-4">成員資訊</th>
                 <th className="p-4">聯絡方式 / 身分證</th>
-                <th className="p-4">緊急聯絡 / 證照</th> {/* 新增：重要個資 */}
+                <th className="p-4">緊急聯絡 / 證照</th>
                 <th className="p-4">尺寸</th>
                 <th className="p-4 text-center">操作</th>
               </tr>
@@ -171,10 +167,7 @@ export default function MemberCRM() {
                     <tr key={m.id} className="hover:bg-slate-50 transition-colors group">
                       <td className="p-4 text-slate-400 font-mono text-xs">{page * ITEMS_PER_PAGE + idx + 1}</td>
                       
-                      {/* 加入日期 (created_at) */}
-                      <td className="p-4 text-slate-500 font-mono text-xs whitespace-nowrap">
-                          {formatDate(m.created_at)}
-                      </td>
+                      <td className="p-4 text-slate-500 font-mono text-xs whitespace-nowrap">{formatDate(m.created_at)}</td>
 
                       <td className="p-4">
                         <div className="flex items-center">
@@ -188,7 +181,6 @@ export default function MemberCRM() {
                                 <p className="font-bold text-slate-800 text-base">{m.full_name || '未命名'}</p>
                             )}
                             <p className="text-[10px] text-slate-400 font-mono">ID: {m.id.slice(0,6)}</p>
-                            {/* 生日編輯區 */}
                             <div className="flex items-center text-[10px] text-slate-500 mt-1">
                                 <Calendar size={10} className="mr-1"/>
                                 {isEditing ? <input type="date" className="border rounded p-0.5 w-24" value={editForm.birth_date || ''} onChange={e=>setEditForm({...editForm, birth_date: e.target.value})} /> : (m.birth_date || '-')}
@@ -211,7 +203,6 @@ export default function MemberCRM() {
                             <Shield size={12} className="mr-2"/> 
                             {isEditing ? <input className="border rounded p-1 w-32" value={editForm.id_number} placeholder="身分證" onChange={e=>setEditForm({...editForm, id_number: e.target.value})} /> : (m.id_number || '未登錄')}
                           </div>
-                          {/* 地址編輯區 */}
                           <div className="flex items-center text-slate-400 text-[10px]">
                             <MapPin size={10} className="mr-2"/> 
                             {isEditing ? <input className="border rounded p-1 w-40" value={editForm.address || ''} placeholder="通訊地址" onChange={e=>setEditForm({...editForm, address: e.target.value})} /> : (m.address || '')}
@@ -219,7 +210,6 @@ export default function MemberCRM() {
                         </div>
                       </td>
 
-                      {/* 緊急聯絡人與證照 */}
                       <td className="p-4">
                           <div className="flex flex-col space-y-1">
                               <div className="flex items-center text-xs text-red-500 font-bold">
@@ -267,26 +257,11 @@ export default function MemberCRM() {
           </table>
         </div>
         
-        {/* 分頁器 */}
         <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-between items-center sticky bottom-0">
-            <span className="text-xs text-slate-500 font-bold">
-                第 {page + 1} 頁 / 共 {totalPages} 頁 (總數: {totalCount})
-            </span>
+            <span className="text-xs text-slate-500 font-bold">第 {page + 1} 頁 / 共 {totalPages} 頁 (總數: {totalCount})</span>
             <div className="flex gap-2">
-                <button 
-                    disabled={page === 0}
-                    onClick={() => setPage(p => Math.max(0, p - 1))}
-                    className="px-4 py-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 disabled:opacity-50 text-sm font-bold text-slate-600 shadow-sm"
-                >
-                    上一頁
-                </button>
-                <button 
-                    disabled={page >= totalPages - 1}
-                    onClick={() => setPage(p => p + 1)}
-                    className="px-4 py-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 disabled:opacity-50 text-sm font-bold text-slate-600 shadow-sm"
-                >
-                    下一頁
-                </button>
+                <button disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))} className="px-4 py-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 disabled:opacity-50 text-sm font-bold text-slate-600 shadow-sm">上一頁</button>
+                <button disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)} className="px-4 py-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 disabled:opacity-50 text-sm font-bold text-slate-600 shadow-sm">下一頁</button>
             </div>
         </div>
       </div>
