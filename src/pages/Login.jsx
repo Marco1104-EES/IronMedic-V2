@@ -3,58 +3,56 @@ import { supabase } from '../supabaseClient'
 import { useNavigate } from 'react-router-dom'
 import { 
   Shield, Activity, Share, Smartphone, Download, 
-  MoreHorizontal, PlusSquare, ArrowDown 
+  MoreHorizontal, ArrowDown, ExternalLink, PlusSquare
 } from 'lucide-react'
 
 export default function Login() {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
   
-  // 🟢 環境與安裝狀態偵測
+  // 🟢 環境狀態
   const [isInAppBrowser, setIsInAppBrowser] = useState(false)
   const [isIOS, setIsIOS] = useState(false)
-  const [deferredPrompt, setDeferredPrompt] = useState(null) // Android 安裝事件
-  const [showIOSGuide, setShowIOSGuide] = useState(false)    // iOS 動畫指引開關
-  const [isStandalone, setIsStandalone] = useState(false)    // 是否已經是 App 模式
+  const [deferredPrompt, setDeferredPrompt] = useState(null) 
+  const [showIOSGuide, setShowIOSGuide] = useState(false)
+  const [isStandalone, setIsStandalone] = useState(false)
 
   useEffect(() => {
-    const userAgent = navigator.userAgent || navigator.vendor || window.opera
+    const ua = navigator.userAgent || navigator.vendor || window.opera
     
-    // 1. 偵測內建瀏覽器 (LINE, FB, IG) - 用於顯示阻擋頁
-    if (/Line|FBAN|FBAV|Instagram/i.test(userAgent)) {
+    // 1. 偵測內建瀏覽器
+    if (/Line|FBAN|FBAV|Instagram/i.test(ua)) {
         setIsInAppBrowser(true)
     }
 
-    // 2. 偵測 iOS - 用於顯示特定的教學箭頭
-    if (/iPad|iPhone|iPod/.test(userAgent) && !window.MSStream) {
+    // 2. 偵測 iOS
+    if (/iPad|iPhone|iPod/.test(ua) && !window.MSStream) {
         setIsIOS(true)
     }
 
-    // 3. 偵測 Android PWA 安裝事件 (這是核心魔法)
+    // 3. 偵測 Android 安裝事件
     const handleBeforeInstallPrompt = (e) => {
       e.preventDefault()
-      setDeferredPrompt(e) // 把安裝事件存起來，綁定到我們的按鈕上
+      setDeferredPrompt(e)
     }
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
 
-    // 4. 偵測是否已經是 App 模式 (如果是，就隱藏下載按鈕)
+    // 4. 偵測 App 模式
     if (window.matchMedia('(display-mode: standalone)').matches) {
       setIsStandalone(true)
     }
 
     // 5. 檢查登入
-    const checkUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
+    supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) navigate('/home')
-    }
-    checkUser()
+    })
 
     return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
   }, [navigate])
 
   const handleLogin = async () => {
     if (isInAppBrowser) {
-        alert("請依照畫面指示，切換至 Chrome/Safari 開啟以進行登入")
+        alert("請依照畫面指示，切換瀏覽器以進行登入")
         return
     }
     setLoading(true)
@@ -65,158 +63,182 @@ export default function Login() {
       })
       if (error) throw error
     } catch (error) {
-      alert('登入連線異常: ' + error.message)
+      alert('登入異常: ' + error.message)
       setLoading(false)
     }
   }
 
-  // 🚀 智慧安裝按鈕邏輯
+  // 🚀 超級防呆安裝邏輯
   const handleInstallApp = async () => {
     if (isIOS) {
-        // iOS 戰術：開啟全螢幕遮罩 + 跳動箭頭
         setShowIOSGuide(true)
     } else if (deferredPrompt) {
-        // Android 戰術：直接觸發系統安裝窗
         deferredPrompt.prompt()
         const { outcome } = await deferredPrompt.userChoice
-        if (outcome === 'accepted') {
-            setDeferredPrompt(null)
-        }
+        if (outcome === 'accepted') setDeferredPrompt(null)
     } else {
-        // 電腦版或不支援的環境
-        alert("請使用 Chrome (Android) 或 Safari (iOS) 的「加入主畫面」功能來安裝 App。")
+        alert("若您使用 Android，請點擊瀏覽器選單中的「安裝應用程式」。\n若您使用 iOS，請使用 Safari 的「加入主畫面」。")
     }
   }
 
   return (
     <div className="min-h-screen bg-[#0f172a] flex flex-col items-center justify-center p-4 relative overflow-hidden">
       
-      {/* 背景裝飾 */}
-      <div className="absolute inset-0 opacity-10 pointer-events-none">
-          <div className="absolute top-0 left-0 w-96 h-96 bg-blue-500 rounded-full mix-blend-multiply filter blur-3xl animate-blob"></div>
-          <div className="absolute top-0 right-0 w-96 h-96 bg-purple-500 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-2000"></div>
-          <div className="absolute bottom-0 left-20 w-96 h-96 bg-pink-500 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-4000"></div>
+      {/* 背景光暈 */}
+      <div className="absolute inset-0 opacity-20 pointer-events-none">
+          <div className="absolute top-0 left-0 w-80 h-80 bg-blue-600 rounded-full mix-blend-screen filter blur-[100px] animate-pulse"></div>
+          <div className="absolute bottom-0 right-0 w-80 h-80 bg-purple-600 rounded-full mix-blend-screen filter blur-[100px] animate-pulse"></div>
       </div>
 
-      {/* 🍎 iOS 視覺強迫引導遮罩 (Super Foolproof Guide) */}
+      {/* 🍎 iOS 視覺強迫引導遮罩 (正中央戰術版) */}
       {showIOSGuide && (
           <div 
-            className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex flex-col items-center justify-end pb-8 animate-fade-in"
-            onClick={() => setShowIOSGuide(false)} // 點擊任意處關閉
+            className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-lg flex flex-col items-center justify-center animate-fade-in"
+            onClick={() => setShowIOSGuide(false)}
           >
-              <div className="text-white text-center mb-4 px-6">
-                  <p className="text-xl font-black mb-2 text-yellow-400">👇 點擊下方按鈕</p>
-                  <p className="text-sm text-slate-300">
-                      找到 <Share className="inline w-4 h-4 mx-1"/> 分享圖示 <br/>
-                      然後選擇 <span className="font-bold text-white border border-white/30 px-1 rounded">加入主畫面</span>
-                  </p>
+              <div className="relative z-10 text-center px-4 w-full max-w-sm space-y-8 mt-[-10vh]">
+                  
+                  {/* 第一段說明 */}
+                  <div className="space-y-3 text-slate-300 text-lg font-bold">
+                      <p>找到全畫面中，網址列</p>
+                      <div className="flex items-center justify-center gap-2 text-white text-xl bg-white/10 py-3 rounded-xl border border-white/10">
+                          <Share className="w-6 h-6 text-blue-400" />
+                          <span>分享畫面</span>
+                      </div>
+                      <p>按下後，選擇</p>
+                  </div>
+
+                  {/* 核心目標：加入主畫面 (特大號) */}
+                  <div className="animate-pulse">
+                      <div className="inline-flex items-center justify-center gap-3 bg-white/10 border-2 border-yellow-400/50 text-white px-8 py-6 rounded-3xl backdrop-blur-xl shadow-[0_0_30px_rgba(250,204,21,0.3)]">
+                          <PlusSquare className="w-10 h-10 text-yellow-400" />
+                          <span className="text-4xl font-black tracking-widest text-yellow-400 drop-shadow-md">
+                              加入主畫面
+                          </span>
+                      </div>
+                  </div>
               </div>
-              
-              {/* 跳動箭頭動畫 - 指向 Safari 底部中間的分享鈕 */}
-              <div className="animate-bounce">
-                  <ArrowDown size={48} className="text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.5)]"/>
-              </div>
-              
-              <div className="mt-8 text-xs text-slate-500 font-mono">點擊畫面任意處關閉</div>
+
+              {/* 超長手繪風箭頭 SVG (指向底部) */}
+              <svg className="absolute bottom-0 left-0 w-full h-[40%] pointer-events-none z-0" viewBox="0 0 400 400" fill="none" preserveAspectRatio="none">
+                {/* 箭頭路徑：從中間偏上(文字區) 指向 底部中間(瀏覽器Bar) */}
+                <path d="M200,20 C 200,150 200,250 200,380" stroke="white" strokeWidth="4" strokeLinecap="round" strokeDasharray="10 10" className="opacity-50" />
+                {/* 箭頭頭部 */}
+                <path d="M200,380 L 180,350 M 200,380 L 220,350" stroke="white" strokeWidth="4" strokeLinecap="round" className="animate-bounce" />
+                 {/* 底部波紋 */}
+                <circle cx="200" cy="380" r="20" fill="white" opacity="0.2" className="animate-ping"/>
+              </svg>
+
+              <div className="absolute bottom-10 text-sm text-slate-500 font-mono">點擊任意處關閉</div>
           </div>
       )}
 
-      <div className="max-w-md w-full bg-white/10 backdrop-blur-lg rounded-2xl border border-white/20 shadow-2xl p-8 relative z-10">
+      {/* 主卡片 */}
+      <div className="max-w-md w-full bg-white/10 backdrop-blur-xl rounded-3xl border border-white/10 shadow-2xl p-8 relative z-10">
         
         {/* Logo */}
         <div className="flex flex-col items-center mb-8">
-          <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg mb-4 transform rotate-3 hover:rotate-0 transition-all duration-300">
-            <span className="text-3xl font-black text-white">I</span>
+          <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg mb-4">
+            <span className="text-4xl font-black text-white">I</span>
           </div>
-          <h1 className="text-3xl font-black text-white tracking-wider">IRON MEDIC</h1>
-          <p className="text-blue-200 text-sm font-mono mt-2 tracking-widest">ENTERPRISE SYSTEM</p>
+          <h1 className="text-4xl font-black text-white tracking-wider">IRON MEDIC</h1>
+          <div className="flex items-center mt-2 space-x-2">
+            <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 text-[10px] font-bold tracking-widest border border-blue-500/30">ENTERPRISE SYSTEM</span>
+          </div>
         </div>
 
-        {/* 🛑 LINE/FB 阻擋頁 */}
+        {/* 🔄 狀態分流 */}
         {isInAppBrowser ? (
-            <div className="bg-slate-800/90 border border-blue-500/30 rounded-xl p-6 text-center animate-fade-in">
-                <div className="w-12 h-12 bg-blue-600/20 rounded-full flex items-center justify-center mx-auto mb-3 animate-pulse">
-                    <Smartphone className="text-blue-400" size={24}/>
-                </div>
-                
-                <h3 className="text-xl font-bold text-white mb-2">啟動 App 安全模式</h3>
-                <p className="text-slate-300 text-sm mb-6 leading-relaxed">
-                    為確保 Google 帳號安全，<br/>請切換至系統瀏覽器。
+            <div className="bg-slate-900/80 border border-red-500/30 rounded-2xl p-6 text-center animate-fade-in">
+                <Smartphone className="text-red-400 w-12 h-12 mx-auto mb-4 animate-pulse"/>
+                <h3 className="text-xl font-bold text-white mb-2">請切換瀏覽器</h3>
+                <p className="text-slate-400 text-sm mb-6">
+                    LINE / FB 瀏覽器不支援安全驗證。<br/>
+                    請點擊右上角選單，選擇：
                 </p>
-                
-                <div className="bg-black/40 p-4 rounded-lg text-left text-sm text-white space-y-3 border border-white/5">
+                <div className="bg-black/40 p-4 rounded-xl text-left text-sm text-white space-y-3 border border-white/10">
                     <div className="flex items-center">
-                        <span className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center mr-3 text-xs font-bold shadow-sm">1</span>
-                        <span className="flex items-center">
-                            點擊右上角的 
-                            {isIOS ? <MoreHorizontal size={16} className="mx-1.5 text-blue-300"/> : <MoreHorizontal size={16} className="mx-1.5 text-blue-300"/>} 
-                            圖示
-                        </span>
+                        <span className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center mr-3 text-xs font-bold">1</span>
+                        <span>點擊 {isIOS ? <Share className="inline w-4 h-4"/> : <MoreHorizontal className="inline w-4 h-4"/>} 選單</span>
                     </div>
                     <div className="flex items-center">
-                        <span className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center mr-3 text-xs font-bold shadow-sm">2</span>
-                        <span className="flex items-center">
-                            選擇 <span className="mx-1.5 font-bold text-blue-300 border-b border-blue-300/50">{isIOS ? '以瀏覽器開啟' : '以其他應用程式開啟'}</span>
-                        </span>
+                        <span className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center mr-3 text-xs font-bold">2</span>
+                        <span>選擇 <span className="font-bold text-yellow-400">以瀏覽器開啟</span></span>
                     </div>
                 </div>
             </div>
         ) : (
-            /* ✅ 正常登入區 */
-            <div className="space-y-4">
+            <div className="space-y-6">
                 
+                <div className="grid grid-cols-2 gap-4">
+                    <div className="flex flex-col items-center p-4 bg-white/5 rounded-2xl border border-white/10 text-center">
+                        <Shield className="text-green-400 mb-2" size={28} />
+                        <h3 className="text-white font-bold text-sm">企業級資安</h3>
+                    </div>
+                    <div className="flex flex-col items-center p-4 bg-white/5 rounded-2xl border border-white/10 text-center">
+                        <Activity className="text-blue-400 mb-2" size={28} />
+                        <h3 className="text-white font-bold text-sm">即時戰情同步</h3>
+                    </div>
+                </div>
+
                 {/* 1. Google 登入 (Web 版) */}
                 <button
                     onClick={handleLogin}
                     disabled={loading}
-                    className="w-full bg-white hover:bg-blue-50 text-slate-900 font-bold py-4 rounded-xl transition-all transform active:scale-95 flex items-center justify-center shadow-xl shadow-blue-900/10 relative overflow-hidden"
+                    className="w-full bg-white hover:bg-slate-50 text-slate-900 font-bold py-5 rounded-2xl transition-all active:scale-95 flex items-center justify-center shadow-lg"
                 >
                     {loading ? (
                         <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-slate-900"></div>
                     ) : (
                         <>
-                            <img src="https://www.google.com/favicon.ico" alt="G" className="w-5 h-5 mr-3" />
-                            <span className="text-base">Google 帳號登入 (Web)</span>
+                            <img src="https://www.google.com/favicon.ico" alt="G" className="w-6 h-6 mr-3" />
+                            <span className="text-xl">Google 登入 / 註冊</span>
                         </>
                     )}
                 </button>
+                
+                {/* 電腦網頁版適用提示 */}
+                <p className="text-center text-red-400/80 font-bold text-lg tracking-widest mt-[-10px]">
+                    電腦網頁版適用
+                </p>
 
-                {/* 2. PWA 安裝按鈕 (超級顯眼版) */}
-                {/* 只有在非 App 模式且 (是 Android 或 iOS) 時才顯示 */}
-                {!isStandalone && (isIOS || deferredPrompt) && (
+                {/* 2. PWA 安裝按鈕 (巨像化 40% UP) */}
+                {!isStandalone && (
                     <button
                         onClick={handleInstallApp}
-                        className="w-full bg-blue-600/20 backdrop-blur-md border border-blue-400/50 text-white font-bold py-4 rounded-xl transition-all transform active:scale-95 flex items-center justify-center shadow-lg group hover:bg-blue-600/30"
+                        // 調整：py-10 (巨大高度), rounded-3xl
+                        className="w-full bg-gradient-to-r from-blue-600/90 to-purple-600/90 hover:from-blue-600 hover:to-purple-600 border-2 border-blue-400/50 text-white py-10 rounded-3xl transition-all active:scale-95 flex items-center justify-center shadow-2xl group relative overflow-hidden ring-4 ring-blue-500/20 mt-4"
                     >
-                        <Download className="w-5 h-5 mr-2 animate-bounce" />
-                        <div className="flex flex-col items-start text-left leading-none">
-                            <span className="text-sm font-black tracking-wide">
-                                {isIOS ? '下載 iOS App' : '一鍵安裝 Android App'}
+                        {/* 光掃動畫 */}
+                        <div className="absolute top-0 left-[-100%] w-full h-full bg-gradient-to-r from-transparent via-white/30 to-transparent skew-x-12 group-hover:animate-shine"></div>
+                        
+                        <div className="mr-6 bg-white/20 p-4 rounded-2xl backdrop-blur-sm">
+                            <Download className="w-10 h-10 text-white drop-shadow-md" />
+                        </div>
+                        <div className="flex flex-col items-start leading-tight">
+                            <span className="text-3xl font-black tracking-wide drop-shadow-md">
+                                {isIOS ? '下載 iOS App' : '一鍵安裝 App'}
                             </span>
-                            <span className="text-[10px] text-blue-200 mt-1">
-                                {isIOS ? '點擊查看安裝教學' : '獲得最佳全螢幕體驗'}
+                            <span className="text-base text-blue-100 opacity-90 mt-2 font-bold flex items-center">
+                                <Download size={16} className="mr-1"/> 支援「加入主畫面」安裝 App
                             </span>
                         </div>
                     </button>
                 )}
-                
-                <div className="flex justify-center gap-4 mt-2">
-                    <div className="flex flex-col items-center text-center">
-                        <Shield className="text-green-400 mb-1" size={16} />
-                        <span className="text-[10px] text-slate-400">SSL 加密防護</span>
-                    </div>
-                    <div className="flex flex-col items-center text-center">
-                        <Activity className="text-blue-400 mb-1" size={16} />
-                        <span className="text-[10px] text-slate-400">即時同步</span>
-                    </div>
+
+                <div className="text-center">
+                    <p className="text-slate-500 text-xs mt-4">
+                        登入即代表您同意本系統之隱私權政策
+                    </p>
                 </div>
+
             </div>
         )}
 
       </div>
       
-      <div className="absolute bottom-4 text-slate-600 text-[10px] font-mono tracking-widest">
-          V2.1.0 PWA ENTERPRISE
+      <div className="absolute bottom-6 text-slate-500 text-[10px] font-mono tracking-[0.2em]">
+          V2.4.0 COLOSSUS
       </div>
     </div>
   )
