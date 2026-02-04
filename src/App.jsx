@@ -2,15 +2,11 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { supabase } from './supabaseClient'
 
-// 🏗️ Layouts
 import AdminLayout from './layouts/AdminLayout' 
 import UserLayout from './layouts/UserLayout'   
-
-// 📄 Pages (已移除 UserProfile)
 import Login from './pages/Login'        
 import Home from './pages/Home'          
 
-// 🛡️ Admin Modules
 import DashboardHome from './admin/DashboardHome'
 import EventManagement from './admin/EventManagement'
 import MemberCRM from './admin/MemberCRM'           
@@ -20,7 +16,7 @@ import SystemLogs from './admin/SystemLogs'
 
 const LoadingScreen = () => (
   <div className="min-h-screen bg-[#020617] flex items-center justify-center">
-    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-blue-500"></div>
   </div>
 )
 
@@ -40,79 +36,76 @@ const PrivateRoute = ({ children }) => {
   }, [])
 
   if (loading) return <LoadingScreen />
-  
   return session ? children : <Navigate to="/login" replace />
+}
+
+// 🔴 修改版 AdminRoute：包含 VIP 白名單檢查
+const AdminRoute = ({ children }) => {
+  const [session, setSession] = useState(null)
+  const [authorized, setAuthorized] = useState(false)
+  const [loading, setLoading] = useState(true)
+
+  // 👑 緊急恢復：路由層級的白名單
+  const VIP_EMAILS = [
+      'marco1104@gmail.com', 
+      'mark780502@gmail.com',
+      'pianopub1130@gmail.com'
+  ]
+
+  useEffect(() => {
+    const checkAdmin = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      
+      if (!session) {
+          setLoading(false)
+          return 
+      }
+      setSession(session)
+
+      // 1. 先查白名單 (最快)
+      if (VIP_EMAILS.includes(session.user.email)) {
+          setAuthorized(true)
+          setLoading(false)
+          return
+      }
+
+      // 2. 再查資料庫
+      const { data } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', session.user.id)
+        .single()
+      
+      if (data?.role === 'SUPER_ADMIN' || data?.role === 'EVENT_MANAGER') {
+          setAuthorized(true)
+      }
+      setLoading(false)
+    }
+    checkAdmin()
+  }, [])
+
+  if (loading) return <LoadingScreen />
+  
+  if (!session) return <Navigate to="/login" replace />
+  return authorized ? children : <Navigate to="/home" replace />
 }
 
 function App() {
   return (
     <BrowserRouter>
       <Routes>
-          {/* 1. 登入 */}
           <Route path="/login" element={<Login />} />
+          <Route path="/home" element={<PrivateRoute><UserLayout><Home /></UserLayout></PrivateRoute>} />
           
-          {/* 2. 前台 (只剩首頁) */}
-          <Route path="/home" element={
-            <PrivateRoute>
-              <UserLayout>
-                <Home />
-              </UserLayout>
-            </PrivateRoute>
-          } />
-          
-          {/* 3. 後台戰情室 */}
-          <Route path="/admin/dashboard" element={
-            <PrivateRoute>
-              <AdminLayout>
-                <DashboardHome />
-              </AdminLayout>
-            </PrivateRoute>
-          } />
+          <Route path="/admin/dashboard" element={<AdminRoute><AdminLayout><DashboardHome /></AdminLayout></AdminRoute>} />
+          <Route path="/admin/events" element={<AdminRoute><AdminLayout><EventManagement /></AdminLayout></AdminRoute>} />
+          <Route path="/admin/users" element={<AdminRoute><AdminLayout><MemberCRM /></AdminLayout></AdminRoute>} />
+          <Route path="/admin/import" element={<AdminRoute><AdminLayout><DataImportCenter /></AdminLayout></AdminRoute>} />
+          <Route path="/admin/permissions" element={<AdminRoute><AdminLayout><UserPermission /></AdminLayout></AdminRoute>} />
+          <Route path="/admin/logs" element={<AdminRoute><AdminLayout><SystemLogs /></AdminLayout></AdminRoute>} />
 
-          <Route path="/admin/events" element={
-            <PrivateRoute>
-              <AdminLayout>
-                <EventManagement />
-              </AdminLayout>
-            </PrivateRoute>
-          } />
-
-          <Route path="/admin/users" element={
-            <PrivateRoute>
-              <AdminLayout>
-                <MemberCRM />
-              </AdminLayout>
-            </PrivateRoute>
-          } />
-
-          <Route path="/admin/import" element={
-            <PrivateRoute>
-              <AdminLayout>
-                <DataImportCenter />
-              </AdminLayout>
-            </PrivateRoute>
-          } />
-
-          <Route path="/admin/permissions" element={
-            <PrivateRoute>
-              <AdminLayout>
-                <UserPermission />
-              </AdminLayout>
-            </PrivateRoute>
-          } />
-
-          <Route path="/admin/logs" element={
-            <PrivateRoute>
-              <AdminLayout>
-                <SystemLogs />
-              </AdminLayout>
-            </PrivateRoute>
-          } />
-
-          {/* 導向邏輯 */}
           <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
           <Route path="/" element={<Navigate to="/home" replace />} />
-          {/* 任何未定義路徑 (包含原本的 /profile) 都會被踢回首頁 */}
           <Route path="*" element={<Navigate to="/home" replace />} />
       </Routes>
     </BrowserRouter>
