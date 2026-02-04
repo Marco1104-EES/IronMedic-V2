@@ -215,4 +215,9 @@ export default function Login() {
 
       </div>
       
-      <div className="absolute bottom-4 text-slate-
+      <div className="absolute bottom-4 text-slate-600 text-[10px] font-mono tracking-widest">
+          V2.1.0 PWA ENTERPRISE
+      </div>
+    </div>
+  )
+}
