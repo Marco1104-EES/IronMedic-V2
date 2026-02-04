@@ -1,23 +1,30 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
 import { useNavigate } from 'react-router-dom'
-import { Shield, Activity, AlertTriangle, ExternalLink } from 'lucide-react'
+import { Shield, Activity, Share, ExternalLink, Smartphone, Download, MoreHorizontal } from 'lucide-react'
 
 export default function Login() {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
+  
+  // 偵測環境
   const [isInAppBrowser, setIsInAppBrowser] = useState(false)
+  const [isIOS, setIsIOS] = useState(false)
 
-  // 🕵️‍♂️ 偵測是否為 LINE / Facebook / Instagram 等內建瀏覽器
   useEffect(() => {
     const userAgent = navigator.userAgent || navigator.vendor || window.opera
-    // 常見的內建瀏覽器關鍵字
+    
+    // 1. 偵測內建瀏覽器 (LINE, FB, IG)
     if (/Line|FBAN|FBAV|Instagram/i.test(userAgent)) {
         setIsInAppBrowser(true)
     }
-  }, [])
 
-  useEffect(() => {
+    // 2. 偵測 iOS (為了顯示不同的教學圖示)
+    if (/iPad|iPhone|iPod/.test(userAgent) && !window.MSStream) {
+        setIsIOS(true)
+    }
+
+    // 3. 檢查登入狀態
     const checkUser = async () => {
       const { data: { session } } = await supabase.auth.getSession()
       if (session) {
@@ -28,6 +35,12 @@ export default function Login() {
   }, [navigate])
 
   const handleLogin = async () => {
+    // 雙重防禦：如果按鈕沒被隱藏，點擊時再次檢查
+    if (isInAppBrowser) {
+        alert("請依照畫面指示，切換至 Chrome/Safari 開啟以進行登入")
+        return
+    }
+
     setLoading(true)
     try {
       const { error } = await supabase.auth.signInWithOAuth({
@@ -46,7 +59,7 @@ export default function Login() {
   return (
     <div className="min-h-screen bg-[#0f172a] flex flex-col items-center justify-center p-4 relative overflow-hidden">
       
-      {/* 背景裝飾 (動態網格) */}
+      {/* 背景裝飾 (動態網格) - 您的原始設計保留 */}
       <div className="absolute inset-0 opacity-10 pointer-events-none">
           <div className="absolute top-0 left-0 w-96 h-96 bg-blue-500 rounded-full mix-blend-multiply filter blur-3xl animate-blob"></div>
           <div className="absolute top-0 right-0 w-96 h-96 bg-purple-500 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-2000"></div>
@@ -61,72 +74,96 @@ export default function Login() {
             <span className="text-3xl font-black text-white">I</span>
           </div>
           <h1 className="text-3xl font-black text-white tracking-wider">IRON MEDIC</h1>
-          <p className="text-blue-200 text-sm font-mono mt-2">醫護鐵人賽事系統</p>
+          <p className="text-blue-200 text-sm font-mono mt-2 tracking-widest">ENTERPRISE SYSTEM</p>
         </div>
 
-        {/* 🛑 防禦機制：如果是 LINE/FB 開啟，顯示引導教學，隱藏登入按鈕 */}
+        {/* 🚀 PWA 戰術引導層：如果是 LINE/FB，顯示此區塊 */}
         {isInAppBrowser ? (
-            <div className="bg-red-500/20 border border-red-500/50 rounded-xl p-6 text-center animate-pulse">
-                <AlertTriangle className="w-12 h-12 text-red-400 mx-auto mb-3" />
-                <h3 className="text-xl font-bold text-white mb-2">無法在此環境登入</h3>
-                <p className="text-red-100 text-sm mb-4 leading-relaxed">
-                    Google 安全政策限制：<br/>
-                    無法在 LINE / Facebook 內建瀏覽器中進行驗證。
+            <div className="bg-slate-800/80 border border-blue-500/30 rounded-xl p-6 text-center animate-fade-in">
+                <div className="w-12 h-12 bg-blue-600/20 rounded-full flex items-center justify-center mx-auto mb-3 animate-pulse">
+                    <Smartphone className="text-blue-400" size={24}/>
+                </div>
+                
+                <h3 className="text-xl font-bold text-white mb-2">啟動 App 安全模式</h3>
+                <p className="text-slate-300 text-sm mb-6 leading-relaxed">
+                    為確保 Google 帳號安全與資料同步，<br/>
+                    請切換至系統瀏覽器以繼續。
                 </p>
-                <div className="bg-black/30 p-3 rounded-lg text-left text-sm text-white">
-                    <p className="font-bold mb-2 text-yellow-400">⚡️ 請依照以下步驟操作：</p>
-                    <ol className="list-decimal pl-5 space-y-1 text-slate-200">
-                        <li>點擊螢幕右上角的 <span className="font-bold border border-white/30 px-1 rounded">⋮</span> 或 <span className="font-bold border border-white/30 px-1 rounded">分享</span> 圖示</li>
-                        <li>選擇 <span className="font-bold text-white flex items-center inline-flex"><ExternalLink size={12} className="mr-1"/> 以瀏覽器開啟</span> (Safari/Chrome)</li>
-                        <li>在新開啟的視窗中登入</li>
-                    </ol>
+                
+                {/* 動態教學區：根據 iOS/Android 顯示不同指引 */}
+                <div className="bg-black/40 p-4 rounded-lg text-left text-sm text-white space-y-3 border border-white/5">
+                    <div className="flex items-center">
+                        <span className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center mr-3 text-xs font-bold shadow-sm">1</span>
+                        <span className="flex items-center">
+                            點擊右上角的 
+                            {isIOS ? <Share size={16} className="mx-1.5 text-blue-300"/> : <MoreHorizontal size={16} className="mx-1.5 text-blue-300"/>} 
+                            圖示
+                        </span>
+                    </div>
+                    <div className="flex items-center">
+                        <span className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center mr-3 text-xs font-bold shadow-sm">2</span>
+                        <span className="flex items-center">
+                            選擇 
+                            <span className="mx-1.5 font-bold text-blue-300 border-b border-blue-300/50">
+                                {isIOS ? '以瀏覽器開啟' : '以其他應用程式開啟'}
+                            </span>
+                        </span>
+                    </div>
+                    <div className="flex items-center">
+                        <span className="w-6 h-6 rounded-full bg-green-600 flex items-center justify-center mr-3 text-xs font-bold shadow-sm">3</span>
+                        <span>登入後可選擇「加入主畫面」</span>
+                    </div>
+                </div>
+
+                <div className="mt-4 flex justify-center text-xs text-slate-500 font-mono items-center">
+                    <Shield size={10} className="mr-1"/> Google OAuth 2.0 Security
                 </div>
             </div>
         ) : (
-            /* ✅ 正常環境：顯示 Google 登入按鈕 */
+            /* ✅ 正常環境：顯示登入按鈕 */
             <div className="space-y-6">
-                <div className="space-y-4">
-                    <div className="flex items-center p-4 bg-white/5 rounded-xl border border-white/10">
-                        <Shield className="text-green-400 mr-4" size={24} />
-                        <div>
-                            <h3 className="text-white font-bold text-sm">系統防護</h3>
-                            <p className="text-slate-400 text-xs">SSL 加密傳輸 / Google 安全驗證</p>
-                        </div>
+                <div className="grid grid-cols-2 gap-4">
+                    <div className="flex flex-col items-center p-3 bg-white/5 rounded-xl border border-white/10 text-center">
+                        <Shield className="text-green-400 mb-2" size={24} />
+                        <h3 className="text-white font-bold text-xs">企業級資安</h3>
                     </div>
-                    <div className="flex items-center p-4 bg-white/5 rounded-xl border border-white/10">
-                        <Activity className="text-blue-400 mr-4" size={24} />
-                        <div>
-                            <h3 className="text-white font-bold text-sm">即時同步</h3>
-                            <p className="text-slate-400 text-xs">賽事狀態 / 資格審核即時更新</p>
-                        </div>
+                    <div className="flex flex-col items-center p-3 bg-white/5 rounded-xl border border-white/10 text-center">
+                        <Activity className="text-blue-400 mb-2" size={24} />
+                        <h3 className="text-white font-bold text-xs">即時戰情同步</h3>
                     </div>
                 </div>
 
                 <button
                     onClick={handleLogin}
                     disabled={loading}
-                    className="w-full bg-white hover:bg-slate-100 text-slate-900 font-bold py-4 rounded-xl transition-all transform active:scale-95 flex items-center justify-center shadow-lg group relative overflow-hidden"
+                    className="w-full bg-white hover:bg-blue-50 text-slate-900 font-bold py-4 rounded-xl transition-all transform active:scale-95 flex items-center justify-center shadow-xl shadow-blue-900/20 group relative overflow-hidden"
                 >
                     {loading ? (
                         <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-slate-900"></div>
                     ) : (
                         <>
                             <img src="https://www.google.com/favicon.ico" alt="G" className="w-5 h-5 mr-3" />
-                            <span className="text-lg">使用 Google 帳號登入</span>
+                            <span className="text-lg">Google 登入 / 註冊</span>
                         </>
                     )}
                 </button>
                 
-                <p className="text-center text-slate-500 text-xs">
-                    登入即代表您同意本系統之<br/>隱私權政策與服務條款
-                </p>
+                <div className="text-center space-y-2">
+                    <p className="text-slate-500 text-xs">
+                        登入即代表您同意本系統之隱私權政策
+                    </p>
+                    {/* PWA 提示 (如果是正常瀏覽器，提示可以安裝) */}
+                    <div className="inline-flex items-center text-[10px] text-blue-300/70 bg-blue-900/20 px-2 py-1 rounded-full">
+                        <Download size={10} className="mr-1"/> 支援「加入主畫面」安裝 App
+                    </div>
+                </div>
             </div>
         )}
 
       </div>
       
-      <div className="absolute bottom-4 text-slate-600 text-xs font-mono">
-          V17.0 ENTERPRISE EDITION
+      <div className="absolute bottom-4 text-slate-600 text-[10px] font-mono tracking-widest">
+          V2.0.1 PWA READY
       </div>
     </div>
   )
