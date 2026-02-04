@@ -1,147 +1,132 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
 import { useNavigate } from 'react-router-dom'
-import { Mail, Zap, Loader2, ShieldCheck } from 'lucide-react'
+import { Shield, Activity, AlertTriangle, ExternalLink } from 'lucide-react'
 
 export default function Login() {
-  const [loading, setLoading] = useState(false)
-  const [verifying, setVerifying] = useState(true) // 身分識別中
-  const [email, setEmail] = useState('')
   const navigate = useNavigate()
+  const [loading, setLoading] = useState(false)
+  const [isInAppBrowser, setIsInAppBrowser] = useState(false)
 
-  // 🛡️ 核心攔截邏輯
+  // 🕵️‍♂️ 偵測是否為 LINE / Facebook / Instagram 等內建瀏覽器
   useEffect(() => {
-    const checkSession = async () => {
+    const userAgent = navigator.userAgent || navigator.vendor || window.opera
+    // 常見的內建瀏覽器關鍵字
+    if (/Line|FBAN|FBAV|Instagram/i.test(userAgent)) {
+        setIsInAppBrowser(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    const checkUser = async () => {
       const { data: { session } } = await supabase.auth.getSession()
-      
       if (session) {
-        // 🟢 已登入：彈射到「賽事首頁」，不是後台！
-        console.log('指揮官/會員已登入，前往賽事大廳...')
-        navigate('/home', { replace: true }) 
-      } else {
-        // 🔴 未登入：顯示登入框
-        setVerifying(false)
+        navigate('/home')
       }
     }
-
-    checkSession()
+    checkUser()
   }, [navigate])
 
-  const handleLogin = async (e) => {
-    e.preventDefault()
+  const handleLogin = async () => {
     setLoading(true)
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          emailRedirectTo: `${window.location.origin}/home`, // 登入成功後也去 home
-        },
-      })
-      if (error) throw error
-      alert('🚀 魔法連結已發射！請檢查您的信箱。')
-    } catch (error) {
-      alert(error.error_description || error.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleGoogleLogin = async () => {
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/home`, // Google 登入後也去 home
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'consent',
-          },
+          redirectTo: `${window.location.origin}/home`,
         },
       })
       if (error) throw error
     } catch (error) {
-      alert(error.message)
+      alert('登入連線異常: ' + error.message)
+      setLoading(false)
     }
   }
 
-  // ✨ 身分識別中的過場畫面
-  if (verifying) {
-    return (
-      <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center justify-center">
-        <div className="bg-white p-8 rounded-2xl shadow-xl flex flex-col items-center animate-pulse">
-           <ShieldCheck size={48} className="text-blue-600 mb-4"/>
-           <h2 className="text-xl font-bold text-gray-800">正在驗證身份...</h2>
-           <p className="text-xs text-gray-400 mt-2 font-mono">SECURITY CHECK IN PROGRESS</p>
-        </div>
-      </div>
-    )
-  }
-
-  // --- 登入介面 ---
   return (
-    <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center p-4">
-      <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 transform transition-all hover:scale-[1.01]">
+    <div className="min-h-screen bg-[#0f172a] flex flex-col items-center justify-center p-4 relative overflow-hidden">
+      
+      {/* 背景裝飾 (動態網格) */}
+      <div className="absolute inset-0 opacity-10 pointer-events-none">
+          <div className="absolute top-0 left-0 w-96 h-96 bg-blue-500 rounded-full mix-blend-multiply filter blur-3xl animate-blob"></div>
+          <div className="absolute top-0 right-0 w-96 h-96 bg-purple-500 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-2000"></div>
+          <div className="absolute bottom-0 left-20 w-96 h-96 bg-pink-500 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-4000"></div>
+      </div>
+
+      <div className="max-w-md w-full bg-white/10 backdrop-blur-lg rounded-2xl border border-white/20 shadow-2xl p-8 relative z-10">
         
-        <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-slate-900 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg shadow-blue-900/20">
-            <Zap className="text-yellow-400 fill-yellow-400" size={32} />
+        {/* Logo 區 */}
+        <div className="flex flex-col items-center mb-8">
+          <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg mb-4 transform rotate-3 hover:rotate-0 transition-all duration-300">
+            <span className="text-3xl font-black text-white">I</span>
           </div>
-          <h1 className="text-2xl font-black text-gray-900 tracking-tight">醫護鐵人賽事系統</h1>
-          <p className="text-sm text-gray-500 mt-2 font-bold">請先登入以繼續</p>
+          <h1 className="text-3xl font-black text-white tracking-wider">IRON MEDIC</h1>
+          <p className="text-blue-200 text-sm font-mono mt-2">醫護鐵人賽事系統</p>
         </div>
 
-        <button
-          onClick={handleGoogleLogin}
-          className="w-full flex items-center justify-center bg-white border-2 border-gray-200 text-gray-700 font-bold py-3 px-4 rounded-xl hover:bg-gray-50 hover:border-gray-300 transition-all mb-6 group"
-        >
-          <img 
-            src="https://www.google.com/favicon.ico" 
-            alt="Google" 
-            className="w-5 h-5 mr-3 group-hover:scale-110 transition-transform"
-          />
-          使用 Google 帳號登入
-        </button>
-
-        <div className="relative mb-6">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-gray-200"></div>
-          </div>
-          <div className="relative flex justify-center text-sm">
-            <span className="px-4 bg-white text-gray-400 font-mono text-xs">或使用 Email</span>
-          </div>
-        </div>
-
-        <form onSubmit={handleLogin} className="space-y-4">
-          <div>
-            <div className="relative">
-              <input
-                type="email"
-                placeholder="請輸入您的 Email"
-                className="w-full pl-4 pr-4 py-3.5 bg-gray-50 border-2 border-transparent focus:bg-white focus:border-blue-500 rounded-xl outline-none transition-all text-sm font-bold text-gray-800 placeholder:font-normal"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
+        {/* 🛑 防禦機制：如果是 LINE/FB 開啟，顯示引導教學，隱藏登入按鈕 */}
+        {isInAppBrowser ? (
+            <div className="bg-red-500/20 border border-red-500/50 rounded-xl p-6 text-center animate-pulse">
+                <AlertTriangle className="w-12 h-12 text-red-400 mx-auto mb-3" />
+                <h3 className="text-xl font-bold text-white mb-2">無法在此環境登入</h3>
+                <p className="text-red-100 text-sm mb-4 leading-relaxed">
+                    Google 安全政策限制：<br/>
+                    無法在 LINE / Facebook 內建瀏覽器中進行驗證。
+                </p>
+                <div className="bg-black/30 p-3 rounded-lg text-left text-sm text-white">
+                    <p className="font-bold mb-2 text-yellow-400">⚡️ 請依照以下步驟操作：</p>
+                    <ol className="list-decimal pl-5 space-y-1 text-slate-200">
+                        <li>點擊螢幕右上角的 <span className="font-bold border border-white/30 px-1 rounded">⋮</span> 或 <span className="font-bold border border-white/30 px-1 rounded">分享</span> 圖示</li>
+                        <li>選擇 <span className="font-bold text-white flex items-center inline-flex"><ExternalLink size={12} className="mr-1"/> 以瀏覽器開啟</span> (Safari/Chrome)</li>
+                        <li>在新開啟的視窗中登入</li>
+                    </ol>
+                </div>
             </div>
-          </div>
+        ) : (
+            /* ✅ 正常環境：顯示 Google 登入按鈕 */
+            <div className="space-y-6">
+                <div className="space-y-4">
+                    <div className="flex items-center p-4 bg-white/5 rounded-xl border border-white/10">
+                        <Shield className="text-green-400 mr-4" size={24} />
+                        <div>
+                            <h3 className="text-white font-bold text-sm">系統防護</h3>
+                            <p className="text-slate-400 text-xs">SSL 加密傳輸 / Google 安全驗證</p>
+                        </div>
+                    </div>
+                    <div className="flex items-center p-4 bg-white/5 rounded-xl border border-white/10">
+                        <Activity className="text-blue-400 mr-4" size={24} />
+                        <div>
+                            <h3 className="text-white font-bold text-sm">即時同步</h3>
+                            <p className="text-slate-400 text-xs">賽事狀態 / 資格審核即時更新</p>
+                        </div>
+                    </div>
+                </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-blue-900/20 flex items-center justify-center transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed"
-          >
-            {loading ? (
-              <>
-                <Loader2 className="animate-spin mr-2" size={20} />
-                發射連結...
-              </>
-            ) : (
-              <>
-                寄送魔法連結 ✨
-              </>
-            )}
-          </button>
-        </form>
+                <button
+                    onClick={handleLogin}
+                    disabled={loading}
+                    className="w-full bg-white hover:bg-slate-100 text-slate-900 font-bold py-4 rounded-xl transition-all transform active:scale-95 flex items-center justify-center shadow-lg group relative overflow-hidden"
+                >
+                    {loading ? (
+                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-slate-900"></div>
+                    ) : (
+                        <>
+                            <img src="https://www.google.com/favicon.ico" alt="G" className="w-5 h-5 mr-3" />
+                            <span className="text-lg">使用 Google 帳號登入</span>
+                        </>
+                    )}
+                </button>
+                
+                <p className="text-center text-slate-500 text-xs">
+                    登入即代表您同意本系統之<br/>隱私權政策與服務條款
+                </p>
+            </div>
+        )}
+
+      </div>
+      
+      <div className="absolute bottom-4 text-slate-600 text-xs font-mono">
+          V17.0 ENTERPRISE EDITION
       </div>
     </div>
   )
