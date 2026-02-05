@@ -9,34 +9,27 @@ export default function Navbar() {
   const [userRole, setUserRole] = useState(null)
   const navigate = useNavigate()
 
-  const CREATOR_EMAIL = 'marco1104@gmail.com'
-
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
           setUser(session.user)
-          fetchUserRole(session.user)
+          fetchUserRole(session.user.id)
       }
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null)
-      if (session?.user) fetchUserRole(session.user)
+      if (session?.user) fetchUserRole(session.user.id)
     })
 
     return () => subscription.unsubscribe()
   }, [])
 
-  const fetchUserRole = async (currentUser) => {
-      if (currentUser.email === CREATOR_EMAIL) {
-          setUserRole('SUPER_ADMIN')
-          return
-      }
-      
+  const fetchUserRole = async (uid) => {
       const { data } = await supabase
           .from('profiles')
           .select('role')
-          .eq('id', currentUser.id)
+          .eq('id', uid)
           .single()
       
       if (data) setUserRole(data.role)

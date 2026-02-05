@@ -5,7 +5,7 @@ import {
   Crown, Zap, HelpCircle, ArrowLeft, Lock 
 } from 'lucide-react'
 
-// 🎨 角色定義
+// 🎨 顯示設定
 const ROLE_DISPLAY = {
     SUPER_ADMIN: { label: '最高指揮官', color: 'text-red-600 border-red-200 bg-red-50', icon: Crown },
     EVENT_MANAGER: { label: '賽事管理員', color: 'text-blue-600 border-blue-200 bg-blue-50', icon: Shield },
@@ -26,17 +26,17 @@ export default function UserPermission() {
   const ITEMS_PER_PAGE = 50
 
   const [currentUserEmail, setCurrentUserEmail] = useState('')
-  const [currentUserRole, setCurrentUserRole] = useState('')
   const [showMobileDetail, setShowMobileDetail] = useState(false)
 
   const [stats, setStats] = useState({
     SUPER_ADMIN: 0, EVENT_MANAGER: 0, VERIFIED_MEDIC: 0, USER: 0, UNASSIGNED: 0
   })
 
+  // 艦長信箱 (僅用於防止自己被改壞)
   const CREATOR_EMAIL = 'marco1104@gmail.com'
 
   useEffect(() => {
-    checkCurrentUserAndRole()
+    checkCurrentUser()
     fetchExactStats()
   }, [])
 
@@ -48,23 +48,12 @@ export default function UserPermission() {
     return () => clearTimeout(delaySearch)
   }, [searchTerm, filterRole])
 
-  // 1. 權限檢查 (包含 MedicMarco 的正常檢查)
-  const checkCurrentUserAndRole = async () => {
+  const checkCurrentUser = async () => {
     const { data: { user } } = await supabase.auth.getUser()
-    if (user) {
-        setCurrentUserEmail(user.email)
-        if (user.email === CREATOR_EMAIL) {
-            setCurrentUserRole('SUPER_ADMIN') 
-        } else {
-            const { data } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-            if (data) setCurrentUserRole(data.role)
-        }
-    }
+    if (user) setCurrentUserEmail(user.email)
   }
 
-  const canManageUsers = currentUserEmail === CREATOR_EMAIL || currentUserRole === 'SUPER_ADMIN'
-
-  // 2. 統計 (修復 NaN 與 0)
+  // 統計邏輯 (修正：正確計算未篩選)
   const fetchExactStats = async () => {
       try {
           const [resAdmin, resManager, resMedic, resUser, resNull] = await Promise.all([
@@ -72,7 +61,7 @@ export default function UserPermission() {
               supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'EVENT_MANAGER'),
               supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'VERIFIED_MEDIC'),
               supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'USER'),
-              // 抓出所有 role 不在上述名單的 (含 NULL)
+              // 抓取 NULL 或 空字串
               supabase.from('profiles').select('*', { count: 'exact', head: true }).or('role.is.null,role.eq.""')
           ])
 
@@ -88,7 +77,7 @@ export default function UserPermission() {
       }
   }
 
-  // 3. 列表載入 (防崩潰 + 分頁)
+  // 列表載入
   const fetchUsers = async (pageIndex = 0, isReset = false) => {
     setLoading(true)
     try {
@@ -120,8 +109,8 @@ export default function UserPermission() {
 
       const processedData = data.map(u => ({
           ...u,
-          // 🔥 這裡就是防止崩潰的關鍵：無效 role 強制轉 UNASSIGNED
-          role: (!u.role || !ROLE_DISPLAY[u.role]) ? 'UNASSIGNED' : u.role 
+          // 防崩潰：如果 role 是 null，轉為 UNASSIGNED
+          role: (!u.role || u.role === '') ? 'UNASSIGNED' : u.role 
       }))
 
       if (isReset) {
@@ -144,22 +133,20 @@ export default function UserPermission() {
       setShowMobileDetail(true) 
   }
 
+  // ★ 權限更新 (關鍵：現在資料庫 RLS 開了，這裡就會成功)
   const handleUpdateRole = async (newRole) => {
     if (!selectedUser) return
     
+    // 防止改到艦長
     if (selectedUser.email === CREATOR_EMAIL) {
-        alert("⛔ 無法變更艦長 (Creator) 的權限。")
+        alert("⛔ 無法變更最高權限擁有者。")
         return
-    }
-
-    if (!canManageUsers) { 
-        alert("權限不足：您不是超級管理員。")
-        return 
     }
 
     const oldRoleKey = selectedUser.role || 'UNASSIGNED'
     if (oldRoleKey === newRole) return
 
+    // 樂觀更新 UI
     const updatedUser = { ...selectedUser, role: newRole }
     setSelectedUser(updatedUser)
     setUsers(prev => prev.map(u => u.id === selectedUser.id ? updatedUser : u))
@@ -175,18 +162,22 @@ export default function UserPermission() {
     }
 
     try {
+      // 寫入資料庫
       const dbRole = newRole === 'UNASSIGNED' ? null : newRole
       const { error } = await supabase.from('profiles').update({ role: dbRole }).eq('id', selectedUser.id)
-      if (error) throw error
       
+      if (error) throw error // 如果 SQL RLS 沒過，這裡會拋出錯誤
+      
+      // 記錄日誌
       await supabase.from('system_logs').insert([{
           level: 'CRITICAL',
-          message: `權限變更: ${selectedUser.full_name} (${oldRoleKey} -> ${newRole})`,
+          message: `權限變更: ${selectedUser.full_name || selectedUser.email} (${oldRoleKey} -> ${newRole})`,
           details: { target: selectedUser.email, by: currentUserEmail }
       }])
 
     } catch (error) { 
-      alert("更新失敗：" + error.message) 
+      // 失敗回滾
+      alert("更新失敗 (資料庫拒絕)：" + error.message) 
       const revertedUser = { ...selectedUser, role: selectedUser.role }
       setSelectedUser(revertedUser)
       setUsers(prev => prev.map(u => u.id === selectedUser.id ? revertedUser : u))
@@ -198,7 +189,6 @@ export default function UserPermission() {
       setFilterRole(prev => prev === role ? 'ALL' : role) 
   }
 
-  // 🔥 防呆取值
   const getSafeConfig = (roleKey) => {
       return ROLE_DISPLAY[roleKey] || ROLE_DISPLAY.UNASSIGNED
   }
@@ -210,7 +200,6 @@ export default function UserPermission() {
               const config = getSafeConfig(roleKey)
               const Icon = config.icon
               const isActive = filterRole === roleKey
-              
               return (
                   <button key={roleKey} onClick={() => toggleFilter(roleKey)} 
                       className={`min-w-[140px] p-4 rounded-xl border shadow-sm text-left group flex-shrink-0 transition-all duration-200
@@ -238,11 +227,10 @@ export default function UserPermission() {
             <div className="p-4 border-b border-slate-100 bg-slate-50">
                 <div className="relative">
                     <Search className="absolute left-3 top-3 text-slate-400" size={16} />
-                    <input type="text" placeholder="搜尋姓名..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-9 pr-3 py-3 bg-white border border-slate-200 rounded-xl font-bold focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"/>
+                    <input type="text" placeholder="搜尋姓名、Email..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-9 pr-3 py-3 bg-white border border-slate-200 rounded-xl font-bold focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"/>
                     {loading && <Loader2 className="absolute right-3 top-3 animate-spin text-blue-500" size={16}/>}
                 </div>
             </div>
-            
             <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar">
                 {users.length === 0 && !loading ? (
                     <div className="text-center py-20 text-slate-400 text-sm font-bold">暫無資料</div>
@@ -252,7 +240,6 @@ export default function UserPermission() {
                             const config = getSafeConfig(user.role) 
                             const isSelected = selectedUser?.id === user.id
                             const isCreator = user.email === CREATOR_EMAIL
-                            
                             return (
                                 <button key={user.id} onClick={() => handleUserClick(user)} className={`w-full text-left p-3 rounded-xl flex items-center transition-all ${isSelected ? 'bg-slate-800 text-white shadow-lg' : 'hover:bg-slate-50 border border-transparent'}`}>
                                     <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-black text-sm mr-3 relative ${isSelected ? 'bg-white text-slate-900' : config.color.split(' ')[0].replace('text', 'bg') + ' text-white'}`}>
@@ -310,8 +297,11 @@ export default function UserPermission() {
                             const Icon = config.icon
                             const currentRole = selectedUser.role || 'UNASSIGNED'
                             const isCurrent = currentRole === roleKey
+                            
+                            // 權限鎖：只有 Marco 或 SUPER_ADMIN 可以改別人
+                            // 但我們這裡先讓前端盡量開放，依賴 RLS 擋住
                             const isCreatorTarget = selectedUser.email === CREATOR_EMAIL
-                            const isDisabled = isCreatorTarget || !canManageUsers
+                            const isDisabled = isCreatorTarget
 
                             return (
                                 <button key={roleKey} onClick={() => handleUpdateRole(roleKey)} disabled={isCurrent || isDisabled} 
