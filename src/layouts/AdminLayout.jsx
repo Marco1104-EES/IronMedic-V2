@@ -27,14 +27,12 @@ export default function AdminLayout() {
         return
     }
 
-    // 1. 造物主直接放行
     if (user.email === CREATOR_EMAIL) {
         setIsAdmin(true)
         setLoading(false)
         return
     }
 
-    // 2. 凡人 (含測試帳號) 查資料庫
     const { data } = await supabase
         .from('profiles')
         .select('role')

@@ -5,7 +5,7 @@ import {
   Crown, Zap, HelpCircle, ArrowLeft, Lock 
 } from 'lucide-react'
 
-// 🎨 顯示設定 (完整定義)
+// 🎨 角色定義
 const ROLE_DISPLAY = {
     SUPER_ADMIN: { label: '最高指揮官', color: 'text-red-600 border-red-200 bg-red-50', icon: Crown },
     EVENT_MANAGER: { label: '賽事管理員', color: 'text-blue-600 border-blue-200 bg-blue-50', icon: Shield },
@@ -26,7 +26,7 @@ export default function UserPermission() {
   const ITEMS_PER_PAGE = 50
 
   const [currentUserEmail, setCurrentUserEmail] = useState('')
-  const [currentUserRole, setCurrentUserRole] = useState('') 
+  const [currentUserRole, setCurrentUserRole] = useState('')
   const [showMobileDetail, setShowMobileDetail] = useState(false)
 
   const [stats, setStats] = useState({
@@ -48,7 +48,7 @@ export default function UserPermission() {
     return () => clearTimeout(delaySearch)
   }, [searchTerm, filterRole])
 
-  // 1. 權限檢查：只認資料庫 (除了艦長)
+  // 1. 權限檢查 (包含 MedicMarco 的正常檢查)
   const checkCurrentUserAndRole = async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (user) {
@@ -64,7 +64,7 @@ export default function UserPermission() {
 
   const canManageUsers = currentUserEmail === CREATOR_EMAIL || currentUserRole === 'SUPER_ADMIN'
 
-  // 2. 統計
+  // 2. 統計 (修復 NaN 與 0)
   const fetchExactStats = async () => {
       try {
           const [resAdmin, resManager, resMedic, resUser, resNull] = await Promise.all([
@@ -72,7 +72,7 @@ export default function UserPermission() {
               supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'EVENT_MANAGER'),
               supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'VERIFIED_MEDIC'),
               supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'USER'),
-              // 抓出所有不屬於上述四類的 (NULL, 空字串, 或舊資料)
+              // 抓出所有 role 不在上述名單的 (含 NULL)
               supabase.from('profiles').select('*', { count: 'exact', head: true }).or('role.is.null,role.eq.""')
           ])
 
@@ -88,7 +88,7 @@ export default function UserPermission() {
       }
   }
 
-  // 3. 列表載入 (含防崩潰處理)
+  // 3. 列表載入 (防崩潰 + 分頁)
   const fetchUsers = async (pageIndex = 0, isReset = false) => {
     setLoading(true)
     try {
@@ -118,15 +118,11 @@ export default function UserPermission() {
       
       if (data.length < ITEMS_PER_PAGE) setHasMore(false)
 
-      // 🔥 資料清洗：確保每個 User 都有合法的 role key
-      const processedData = data.map(u => {
-          // 如果 role 是 null 或不在我們的定義檔中，一律視為 UNASSIGNED
-          const isValidRole = u.role && ROLE_DISPLAY[u.role];
-          return {
-              ...u,
-              role: isValidRole ? u.role : 'UNASSIGNED'
-          }
-      })
+      const processedData = data.map(u => ({
+          ...u,
+          // 🔥 這裡就是防止崩潰的關鍵：無效 role 強制轉 UNASSIGNED
+          role: (!u.role || !ROLE_DISPLAY[u.role]) ? 'UNASSIGNED' : u.role 
+      }))
 
       if (isReset) {
           setUsers(processedData)
@@ -179,9 +175,7 @@ export default function UserPermission() {
     }
 
     try {
-      // 如果選擇 "未篩選" (UNASSIGNED)，我們寫入 NULL
       const dbRole = newRole === 'UNASSIGNED' ? null : newRole
-      
       const { error } = await supabase.from('profiles').update({ role: dbRole }).eq('id', selectedUser.id)
       if (error) throw error
       
@@ -204,15 +198,13 @@ export default function UserPermission() {
       setFilterRole(prev => prev === role ? 'ALL' : role) 
   }
 
-  // 🔥 最終防護：不管怎樣都回傳一個有效 Config，防止 React 崩潰
+  // 🔥 防呆取值
   const getSafeConfig = (roleKey) => {
       return ROLE_DISPLAY[roleKey] || ROLE_DISPLAY.UNASSIGNED
   }
 
   return (
     <div className="space-y-6 animate-fade-in pb-20 relative">
-      
-      {/* 統計卡 */}
       <div className="flex overflow-x-auto gap-4 pb-2 md:grid md:grid-cols-5 md:pb-0 scrollbar-hide">
           {Object.keys(ROLE_DISPLAY).map(roleKey => {
               const config = getSafeConfig(roleKey)
@@ -257,7 +249,7 @@ export default function UserPermission() {
                 ) : (
                     <>
                         {users.map(user => {
-                            const config = getSafeConfig(user.role) // 🔥 使用安全 Config
+                            const config = getSafeConfig(user.role) 
                             const isSelected = selectedUser?.id === user.id
                             const isCreator = user.email === CREATOR_EMAIL
                             

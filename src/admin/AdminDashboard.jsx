@@ -15,26 +15,29 @@ export default function AdminDashboard() {
   }, [])
 
   const fetchStats = async () => {
-    // 平行撈取數據，加快速度
-    const [resTotal, resAdmin, resManager, resMedic] = await Promise.all([
-      supabase.from('profiles').select('*', { count: 'exact', head: true }),
-      supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'SUPER_ADMIN'),
-      supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'EVENT_MANAGER'),
-      supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'VERIFIED_MEDIC')
-    ])
+    try {
+        const [resTotal, resAdmin, resManager, resMedic] = await Promise.all([
+          supabase.from('profiles').select('*', { count: 'exact', head: true }),
+          supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'SUPER_ADMIN'),
+          supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'EVENT_MANAGER'),
+          supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'VERIFIED_MEDIC')
+        ])
 
-    setStats({
-      totalUsers: resTotal.count || 0,
-      admins: resAdmin.count || 0,
-      managers: resManager.count || 0,
-      medics: resMedic.count || 0
-    })
+        setStats({
+          totalUsers: resTotal.count || 0,
+          admins: resAdmin.count || 0,
+          managers: resManager.count || 0,
+          medics: resMedic.count || 0
+        })
+    } catch (e) {
+        console.error("Dashboard Stats Error", e)
+    }
   }
 
   return (
     <div className="space-y-8 animate-fade-in">
       
-      {/* 頂部標題 */}
+      {/* 標題區 */}
       <div>
         <h2 className="text-2xl font-black text-slate-800">營運總覽</h2>
         <div className="flex items-center mt-1">
@@ -43,7 +46,7 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* 數據儀表板 */}
+      {/* 數據卡片區 */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         
         {/* 卡片 1 */}
@@ -63,7 +66,7 @@ export default function AdminDashboard() {
           <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
             <Shield size={64} className="text-red-600"/>
           </div>
-          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">指揮官 & 管理員</p>
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">管理團隊</p>
           <h3 className="text-4xl font-black text-slate-800">{stats.admins + stats.managers}</h3>
           <div className="mt-4 h-1 w-full bg-slate-100 rounded-full overflow-hidden">
             <div className="h-full bg-red-500 w-[80%]"></div>

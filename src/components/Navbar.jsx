@@ -47,7 +47,6 @@ export default function Navbar() {
     navigate('/login')
   }
 
-  // 只要是管理員或賽事經理，就能看到按鈕
   const isAdmin = userRole === 'SUPER_ADMIN' || userRole === 'EVENT_MANAGER'
 
   return (
