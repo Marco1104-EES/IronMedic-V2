@@ -1,10 +1,18 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
 import { 
-  Search, Shield, User, CheckCircle, AlertTriangle, 
-  Loader2, Users, Crown, Zap, Activity, X, ArrowLeft, Lock, ChevronDown
+  Search, Shield, User, CheckCircle, Loader2, Users, 
+  Crown, Zap, HelpCircle, ArrowLeft, Lock 
 } from 'lucide-react'
-import { ROLES, ROLE_CONFIG } from '../lib/roles'
+
+// 🎨 顯示設定 (完整定義)
+const ROLE_DISPLAY = {
+    SUPER_ADMIN: { label: '最高指揮官', color: 'text-red-600 border-red-200 bg-red-50', icon: Crown },
+    EVENT_MANAGER: { label: '賽事管理員', color: 'text-blue-600 border-blue-200 bg-blue-50', icon: Shield },
+    VERIFIED_MEDIC: { label: '醫護鐵人', color: 'text-green-600 border-green-200 bg-green-50', icon: Zap },
+    USER: { label: '非當年度會員', color: 'text-purple-600 border-purple-200 bg-purple-50', icon: Users },
+    UNASSIGNED: { label: '未篩選', color: 'text-orange-600 border-orange-200 bg-orange-50', icon: HelpCircle }
+}
 
 export default function UserPermission() {
   const [users, setUsers] = useState([])
@@ -13,22 +21,18 @@ export default function UserPermission() {
   const [searchTerm, setSearchTerm] = useState('')
   const [filterRole, setFilterRole] = useState('ALL')
   
-  // 分頁控制 (無限載入流)
   const [page, setPage] = useState(0)
   const [hasMore, setHasMore] = useState(true)
   const ITEMS_PER_PAGE = 50
 
-  // 當前操作者的資訊
   const [currentUserEmail, setCurrentUserEmail] = useState('')
   const [currentUserRole, setCurrentUserRole] = useState('') 
   const [showMobileDetail, setShowMobileDetail] = useState(false)
 
-  // 統計數據
   const [stats, setStats] = useState({
-    SUPER_ADMIN: 0, EVENT_MANAGER: 0, VERIFIED_MEDIC: 0, USER: 0
+    SUPER_ADMIN: 0, EVENT_MANAGER: 0, VERIFIED_MEDIC: 0, USER: 0, UNASSIGNED: 0
   })
 
-  // 👑 絕對造物主
   const CREATOR_EMAIL = 'marco1104@gmail.com'
 
   useEffect(() => {
@@ -36,16 +40,15 @@ export default function UserPermission() {
     fetchExactStats()
   }, [])
 
-  // 當篩選或搜尋改變時，重置列表
   useEffect(() => {
     setPage(0)
-    setUsers([]) // 清空列表，準備重新載入
+    setUsers([])
     setHasMore(true)
     const delaySearch = setTimeout(() => { fetchUsers(0, true) }, 500)
     return () => clearTimeout(delaySearch)
   }, [searchTerm, filterRole])
 
-  // 1. 驗明正身
+  // 1. 權限檢查：只認資料庫 (除了艦長)
   const checkCurrentUserAndRole = async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (user) {
@@ -61,73 +64,79 @@ export default function UserPermission() {
 
   const canManageUsers = currentUserEmail === CREATOR_EMAIL || currentUserRole === 'SUPER_ADMIN'
 
-  // 2. 精準統計 (直接算資料庫總數，不被 1000 筆限制)
+  // 2. 統計
   const fetchExactStats = async () => {
       try {
-          const [resAdmin, resManager, resMedic, resUser] = await Promise.all([
+          const [resAdmin, resManager, resMedic, resUser, resNull] = await Promise.all([
               supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'SUPER_ADMIN'),
               supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'EVENT_MANAGER'),
               supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'VERIFIED_MEDIC'),
-              supabase.from('profiles').select('*', { count: 'exact', head: true }).or('role.is.null,role.eq.USER')
+              supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'USER'),
+              // 抓出所有不屬於上述四類的 (NULL, 空字串, 或舊資料)
+              supabase.from('profiles').select('*', { count: 'exact', head: true }).or('role.is.null,role.eq.""')
           ])
 
           setStats({
               SUPER_ADMIN: resAdmin.count || 0,
               EVENT_MANAGER: resManager.count || 0,
               VERIFIED_MEDIC: resMedic.count || 0,
-              USER: resUser.count || 0
+              USER: resUser.count || 0,
+              UNASSIGNED: resNull.count || 0
           })
       } catch (error) {
           console.error("統計失敗", error)
       }
   }
 
-  // 3. 載入用戶 (支援分頁載入)
+  // 3. 列表載入 (含防崩潰處理)
   const fetchUsers = async (pageIndex = 0, isReset = false) => {
     setLoading(true)
     try {
       let query = supabase.from('profiles')
         .select('id, email, full_name, role, avatar_url')
-        // 按照權限排序(官大的在上面)，其次按時間
         .order('role', { ascending: true }) 
         .order('created_at', { ascending: false })
       
-      // 篩選
-      if (filterRole !== 'ALL') query = query.eq('role', filterRole)
+      if (filterRole !== 'ALL') {
+          if (filterRole === 'UNASSIGNED') {
+              query = query.is('role', null)
+          } else {
+              query = query.eq('role', filterRole)
+          }
+      }
       
-      // 搜尋
       if (searchTerm) {
           query = query.or(`full_name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%`)
       }
 
-      // 分頁範圍 (0-49, 50-99, ...)
       const from = pageIndex * ITEMS_PER_PAGE
       const to = from + ITEMS_PER_PAGE - 1
       query = query.range(from, to)
       
       const { data, error } = await query
-      
       if (error) throw error
       
-      // 如果回傳資料少於一頁數量，代表沒更多了
-      if (data.length < ITEMS_PER_PAGE) {
-          setHasMore(false)
-      }
+      if (data.length < ITEMS_PER_PAGE) setHasMore(false)
+
+      // 🔥 資料清洗：確保每個 User 都有合法的 role key
+      const processedData = data.map(u => {
+          // 如果 role 是 null 或不在我們的定義檔中，一律視為 UNASSIGNED
+          const isValidRole = u.role && ROLE_DISPLAY[u.role];
+          return {
+              ...u,
+              role: isValidRole ? u.role : 'UNASSIGNED'
+          }
+      })
 
       if (isReset) {
-          setUsers(data)
+          setUsers(processedData)
       } else {
-          setUsers(prev => [...prev, ...data])
+          setUsers(prev => [...prev, ...processedData])
       }
 
-    } catch (error) { 
-        console.error('載入失敗:', error) 
-    } finally { 
-        setLoading(false) 
-    }
+    } catch (error) { console.error('載入失敗:', error) } finally { setLoading(false) }
   }
 
-  // 載入更多按鈕
   const handleLoadMore = () => {
       const nextPage = page + 1
       setPage(nextPage)
@@ -139,12 +148,11 @@ export default function UserPermission() {
       setShowMobileDetail(true) 
   }
 
-  // 4. 權限變更 (即時連動數字)
   const handleUpdateRole = async (newRole) => {
     if (!selectedUser) return
     
     if (selectedUser.email === CREATOR_EMAIL) {
-        alert("⛔ 權限鎖定：無法變更艦長 (Creator) 的權限。")
+        alert("⛔ 無法變更艦長 (Creator) 的權限。")
         return
     }
 
@@ -153,103 +161,103 @@ export default function UserPermission() {
         return 
     }
 
-    const oldRole = selectedUser.role || 'USER'
-    if (oldRole === newRole) return
+    const oldRoleKey = selectedUser.role || 'UNASSIGNED'
+    if (oldRoleKey === newRole) return
 
-    // A. 列表變色 (樂觀更新)
     const updatedUser = { ...selectedUser, role: newRole }
     setSelectedUser(updatedUser)
     setUsers(prev => prev.map(u => u.id === selectedUser.id ? updatedUser : u))
 
-    // B. 數字跳動 (手動校正)
     setStats(prev => ({
         ...prev,
-        [oldRole]: Math.max(0, prev[oldRole] - 1), 
+        [oldRoleKey]: Math.max(0, (prev[oldRoleKey] || 0) - 1), 
         [newRole]: (prev[newRole] || 0) + 1
     }))
 
-    // C. 如果列表正在篩選特定角色，移除該員 (視覺上更合理)
     if (filterRole !== 'ALL' && filterRole !== newRole) {
         setUsers(prev => prev.filter(u => u.id !== selectedUser.id))
     }
 
     try {
-      const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', selectedUser.id)
+      // 如果選擇 "未篩選" (UNASSIGNED)，我們寫入 NULL
+      const dbRole = newRole === 'UNASSIGNED' ? null : newRole
+      
+      const { error } = await supabase.from('profiles').update({ role: dbRole }).eq('id', selectedUser.id)
       if (error) throw error
       
       await supabase.from('system_logs').insert([{
           level: 'CRITICAL',
-          message: `權限變更: ${selectedUser.full_name} (${oldRole} -> ${newRole})`,
+          message: `權限變更: ${selectedUser.full_name} (${oldRoleKey} -> ${newRole})`,
           details: { target: selectedUser.email, by: currentUserEmail }
       }])
 
     } catch (error) { 
-      alert("資料庫更新失敗：" + error.message) 
-      // 回滾
-      const revertedUser = { ...selectedUser, role: oldRole }
+      alert("更新失敗：" + error.message) 
+      const revertedUser = { ...selectedUser, role: selectedUser.role }
       setSelectedUser(revertedUser)
       setUsers(prev => prev.map(u => u.id === selectedUser.id ? revertedUser : u))
-      // 數字回滾
       fetchExactStats()
     }
   }
 
   const toggleFilter = (role) => { 
-      // 切換篩選時，列表會自動重置 (由上面的 useEffect 控制)
       setFilterRole(prev => prev === role ? 'ALL' : role) 
   }
 
-  // 計算當前顯示數量
-  const currentCount = filterRole === 'ALL' 
-    ? Object.values(stats).reduce((a, b) => a + b, 0)
-    : stats[filterRole] || 0
+  // 🔥 最終防護：不管怎樣都回傳一個有效 Config，防止 React 崩潰
+  const getSafeConfig = (roleKey) => {
+      return ROLE_DISPLAY[roleKey] || ROLE_DISPLAY.UNASSIGNED
+  }
 
   return (
     <div className="space-y-6 animate-fade-in pb-20 relative">
       
-      {/* 頂部：數字統計卡 (精準數字) */}
-      <div className="flex overflow-x-auto gap-4 pb-2 md:grid md:grid-cols-4 md:pb-0 scrollbar-hide">
-          {Object.keys(stats).map(roleKey => {
-              const config = ROLE_CONFIG[roleKey] || ROLE_CONFIG['USER']
+      {/* 統計卡 */}
+      <div className="flex overflow-x-auto gap-4 pb-2 md:grid md:grid-cols-5 md:pb-0 scrollbar-hide">
+          {Object.keys(ROLE_DISPLAY).map(roleKey => {
+              const config = getSafeConfig(roleKey)
+              const Icon = config.icon
               const isActive = filterRole === roleKey
               
-              let Icon = Users
-              if (roleKey === 'SUPER_ADMIN') Icon = Crown
-              if (roleKey === 'EVENT_MANAGER') Icon = Shield
-              if (roleKey === 'VERIFIED_MEDIC') Icon = Zap
-
               return (
-                  <button key={roleKey} onClick={() => toggleFilter(roleKey)} className={`min-w-[140px] p-4 rounded-xl border shadow-sm text-left group flex-shrink-0 transition-all ${isActive ? `bg-${config.color.split('-')[1]}-600 text-white transform scale-105 border-${config.color.split('-')[1]}-700` : 'bg-white hover:border-blue-300'}`}>
-                      <div className="flex justify-between items-center mb-2">
-                          <div className={`text-xs font-bold uppercase tracking-wider ${isActive ? 'text-white/90' : config.color.split(' ')[0]}`}>{config.label}</div>
-                          <Icon size={16} className={isActive ? 'text-white' : config.color.split(' ')[0]} />
+                  <button key={roleKey} onClick={() => toggleFilter(roleKey)} 
+                      className={`min-w-[140px] p-4 rounded-xl border shadow-sm text-left group flex-shrink-0 transition-all duration-200
+                      ${isActive 
+                          ? `ring-2 ring-offset-1 transform scale-[1.02] ${config.color.split(' ')[1].replace('border-', 'border-')}` 
+                          : 'bg-white hover:border-slate-300'
+                      }
+                      bg-white
+                      `}
+                      style={{ borderColor: isActive ? 'currentColor' : '' }}
+                  >
+                      <div className={`flex justify-between items-center mb-2 ${isActive ? config.color.split(' ')[0] : 'text-slate-500'}`}>
+                          <div className="text-xs font-bold uppercase tracking-wider">{config.label}</div>
+                          <Icon size={16} />
                       </div>
-                      <div className="text-3xl font-black">{stats[roleKey]}</div>
+                      <div className="text-3xl font-black text-slate-800">{stats[roleKey] || 0}</div>
+                      <div className={`h-1 w-full mt-3 rounded-full opacity-50 ${config.color.split(' ')[0].replace('text', 'bg')}`}></div>
                   </button>
               )
           })}
       </div>
 
       <div className="flex flex-col lg:flex-row h-[600px] gap-6 relative">
-        {/* 左側：人員列表 (無限載入版) */}
         <div className={`w-full lg:w-1/3 bg-white rounded-2xl shadow-xl border border-slate-200 flex flex-col ${showMobileDetail ? 'hidden lg:flex' : 'flex'}`}>
             <div className="p-4 border-b border-slate-100 bg-slate-50">
                 <div className="relative">
                     <Search className="absolute left-3 top-3 text-slate-400" size={16} />
-                    <input type="text" placeholder="輸入姓名或 Email 搜尋..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-9 pr-3 py-3 bg-white border border-slate-200 rounded-xl font-bold focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"/>
+                    <input type="text" placeholder="搜尋姓名..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-9 pr-3 py-3 bg-white border border-slate-200 rounded-xl font-bold focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"/>
                     {loading && <Loader2 className="absolute right-3 top-3 animate-spin text-blue-500" size={16}/>}
                 </div>
             </div>
             
             <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar">
                 {users.length === 0 && !loading ? (
-                    <div className="text-center py-20 text-slate-400 text-sm font-bold">
-                        {searchTerm ? '找不到該人員' : '暫無資料'}
-                    </div>
+                    <div className="text-center py-20 text-slate-400 text-sm font-bold">暫無資料</div>
                 ) : (
                     <>
                         {users.map(user => {
-                            const config = ROLE_CONFIG[user.role] || ROLE_CONFIG['USER']
+                            const config = getSafeConfig(user.role) // 🔥 使用安全 Config
                             const isSelected = selectedUser?.id === user.id
                             const isCreator = user.email === CREATOR_EMAIL
                             
@@ -269,30 +277,16 @@ export default function UserPermission() {
                                 </button>
                             )
                         })}
-
-                        {/* 載入更多按鈕 */}
                         {hasMore && !searchTerm && (
-                            <button 
-                                onClick={handleLoadMore} 
-                                disabled={loading}
-                                className="w-full py-3 mt-2 text-sm font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl flex items-center justify-center transition-colors"
-                            >
-                                {loading ? <Loader2 size={16} className="animate-spin mr-2"/> : <ChevronDown size={16} className="mr-2"/>}
-                                載入更多 ({users.length} / {currentCount})
+                            <button onClick={handleLoadMore} disabled={loading} className="w-full py-3 mt-2 text-sm font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl flex items-center justify-center">
+                                {loading ? <Loader2 size={16} className="animate-spin mr-2"/> : <div className="mr-2">⬇</div>} 載入更多
                             </button>
-                        )}
-                        
-                        {!hasMore && users.length > 0 && (
-                            <div className="text-center py-4 text-xs text-slate-400 font-mono">
-                                --- 已顯示所有人員 ({users.length}) ---
-                            </div>
                         )}
                     </>
                 )}
             </div>
         </div>
 
-        {/* 右側：詳細設定 (維持不變) */}
         <div className={`lg:flex-1 bg-white lg:rounded-2xl lg:shadow-xl border border-slate-200 p-6 flex-col items-center fixed inset-0 z-50 lg:static lg:z-auto bg-white transition-transform duration-300 ${showMobileDetail ? 'translate-x-0' : 'translate-x-full lg:translate-x-0 lg:flex'}`}>
             <div className="w-full flex items-center justify-between mb-6 lg:hidden border-b pb-4">
                 <button onClick={() => setShowMobileDetail(false)} className="flex items-center text-slate-600 font-bold bg-slate-100 px-4 py-2 rounded-lg active:scale-95"><ArrowLeft size={18} className="mr-2"/> 返回列表</button>
@@ -301,27 +295,29 @@ export default function UserPermission() {
             {selectedUser ? (
                 <div className="w-full max-w-xl animate-scale-in flex flex-col h-full overflow-y-auto pb-20 lg:pb-0">
                     <div className="text-center mb-8 bg-slate-50 p-6 rounded-3xl border border-slate-100">
-                        <div className={`w-24 h-24 mx-auto rounded-3xl flex items-center justify-center text-4xl font-black text-white shadow-xl mb-4 ${ROLE_CONFIG[selectedUser.role]?.color.split(' ')[0].replace('text', 'bg')}`}>
-                             {selectedUser.full_name?.[0] || 'U'}
-                        </div>
-                        <h2 className="text-2xl font-black text-slate-800">{selectedUser.full_name}</h2>
-                        <p className="text-slate-500 font-mono mb-2">{selectedUser.email}</p>
-                        
-                        {selectedUser.email === CREATOR_EMAIL ? (
-                            <span className="inline-flex items-center px-4 py-1.5 rounded-full text-sm font-black bg-yellow-400 text-black shadow-lg shadow-yellow-400/30">
-                                <Crown size={14} className="mr-1"/> 絕對造物主
-                            </span>
-                        ) : (
-                            <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold border ${ROLE_CONFIG[selectedUser.role]?.color}`}>
-                                {ROLE_CONFIG[selectedUser.role]?.label}
-                            </span>
-                        )}
+                        {(() => {
+                            const config = getSafeConfig(selectedUser.role)
+                            return (
+                                <>
+                                    <div className={`w-24 h-24 mx-auto rounded-3xl flex items-center justify-center text-4xl font-black text-white shadow-xl mb-4 ${config.color.split(' ')[0].replace('text', 'bg')}`}>
+                                        {selectedUser.full_name?.[0] || 'U'}
+                                    </div>
+                                    <h2 className="text-2xl font-black text-slate-800">{selectedUser.full_name}</h2>
+                                    <p className="text-slate-500 font-mono mb-2">{selectedUser.email}</p>
+                                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold border ${config.color}`}>
+                                        {config.label}
+                                    </span>
+                                </>
+                            )
+                        })()}
                     </div>
 
                     <div className="grid grid-cols-1 gap-3">
-                        {Object.keys(ROLES).map((roleKey) => {
-                            const config = ROLE_CONFIG[roleKey]
-                            const isCurrent = selectedUser.role === roleKey
+                        {Object.keys(ROLE_DISPLAY).map((roleKey) => {
+                            const config = getSafeConfig(roleKey)
+                            const Icon = config.icon
+                            const currentRole = selectedUser.role || 'UNASSIGNED'
+                            const isCurrent = currentRole === roleKey
                             const isCreatorTarget = selectedUser.email === CREATOR_EMAIL
                             const isDisabled = isCreatorTarget || !canManageUsers
 
@@ -335,22 +331,16 @@ export default function UserPermission() {
                                         <span className={`font-bold block text-lg ${isCurrent ? config.color.split(' ')[0] : 'text-slate-700'}`}>{config.label}</span>
                                         <span className="text-xs text-slate-400 font-mono">{roleKey}</span>
                                     </div>
-                                    {isCurrent && <CheckCircle className={`text-${config.color.split('-')[1]}-500`} size={24}/>}
-                                    {isDisabled && !isCurrent && <Lock size={18} className="text-slate-300"/>}
+                                    {isCurrent ? <CheckCircle className={`text-${config.color.split('-')[1]}-500`} size={24}/> : <Icon className="text-slate-300 group-hover:text-slate-400" size={24}/>}
                                 </button>
                             )
                         })}
                     </div>
-                    {selectedUser.email === CREATOR_EMAIL && (
-                        <div className="mt-4 text-center text-yellow-600 text-xs font-bold bg-yellow-50 p-3 rounded-lg border border-yellow-200">
-                            🔒 此為艦長專屬帳號，權限已被系統鎖定，禁止變更。
-                        </div>
-                    )}
                 </div>
             ) : (
                 <div className="h-full flex flex-col items-center justify-center text-center text-slate-300">
                     <User size={64} className="mb-4 opacity-20"/>
-                    <div className="font-bold">請從左側選擇人員</div>
+                    <div className="font-bold">請選擇人員</div>
                 </div>
             )}
         </div>
