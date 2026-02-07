@@ -1,16 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
-import { Menu, X, LogOut, LayoutDashboard, CreditCard, User } from 'lucide-react'
-// 🔥 1. 統一用這個檔名，不要再改了
-import UserAvatar from './UserAvatar' 
-import DigitalIDCard from './DigitalIDCard' 
+import { Menu, X, LogOut, LayoutDashboard, CreditCard } from 'lucide-react'
+import UserAvatar from './UserAvatar'       // 引用同資料夾的 UserAvatar.jsx
+import DigitalIDCard from './DigitalIDCard' // 引用同資料夾的 DigitalIDCard.jsx
 
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false)
-  const [user, setUser] = useState(null)
-  const [userRole, setUserRole] = useState(null)
-  
+  const [profile, setProfile] = useState(null) // 存放完整的資料庫檔案
   const [showIDCard, setShowIDCard] = useState(false)
   const [showUserMenu, setShowUserMenu] = useState(false)
   const menuRef = useRef(null)
@@ -18,16 +15,20 @@ export default function Navbar() {
   const navigate = useNavigate()
 
   useEffect(() => {
+    // 1. 初始載入
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
-          setUser(session.user)
-          fetchUserRole(session.user.id)
+          fetchProfile(session.user.id)
       }
     })
 
+    // 2. 監聽登入狀態
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
-      if (session?.user) fetchUserRole(session.user.id)
+      if (session?.user) {
+          fetchProfile(session.user.id)
+      } else {
+          setProfile(null)
+      }
     })
 
     const handleClickOutside = (event) => {
@@ -42,12 +43,20 @@ export default function Navbar() {
     }
   }, [])
 
-  const fetchUserRole = async (uid) => {
+  // 🔥 關鍵修正：抓取資料庫所有欄位
+  const fetchProfile = async (uid) => {
       try {
-        const { data } = await supabase.from('profiles').select('role').eq('id', uid).single()
-        if (data) setUserRole(data.role)
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('*') // 抓取 badge_title, badge_color, display_name
+            .eq('id', uid)
+            .single()
+        
+        if (data) {
+            setProfile(data)
+        }
       } catch (e) {
-          console.error("Error fetching role:", e)
+          console.error("Error fetching profile:", e)
       }
   }
 
@@ -56,18 +65,12 @@ export default function Navbar() {
     navigate('/login')
   }
 
-  const isAdmin = userRole === 'SUPER_ADMIN' || userRole === 'EVENT_MANAGER'
+  // 判斷是否為管理層 (超管 或 賽管)
+  const isAdmin = profile?.role === 'SUPER_ADMIN' || profile?.role === 'EVENT_MANAGER'
 
-  // 🔥 2. 強制計算：不管頭像元件多笨，這裡直接告訴它要顯示什麼字
-  const getAvatarLabel = (u) => {
-      if (!u || !u.email) return 'M';
-      if (u.email === 'marco1104@gmail.com') return '艦長';
-      if (u.email === 'medicmarco1104@gmail.com') return '醫護';
-      // 其他人顯示 Email 首字
-      return u.email.charAt(0).toUpperCase();
-  }
-
-  const avatarText = getAvatarLabel(user);
+  // 顯示變數 (優先讀取資料庫)
+  const displayName = profile?.display_name || profile?.email || '會員'
+  const avatarText = profile?.badge_title || profile?.email?.charAt(0).toUpperCase() || 'M'
 
   return (
     <>
@@ -82,25 +85,25 @@ export default function Navbar() {
               </Link>
             </div>
 
-            {/* 電腦版 */}
+            {/* 電腦版選單 */}
             <div className="hidden md:flex items-center space-x-4">
               
               {isAdmin && (
-                  <Link to="/admin/dashboard" className="flex items-center px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-bold hover:bg-red-700 transition-all shadow-md transform hover:-translate-y-0.5">
+                  <Link to="/admin/dashboard" className="flex items-center px-4 py-2 bg-slate-800 text-white rounded-lg text-sm font-bold hover:bg-slate-700 transition-all shadow-md transform hover:-translate-y-0.5">
                       <LayoutDashboard size={16} className="mr-2"/>
-                      戰情室
+                      戰情指揮中心
                   </Link>
               )}
 
-              {user ? (
+              {profile ? (
                 <div className="relative ml-4" ref={menuRef}>
                   <button 
                     onClick={() => setShowUserMenu(!showUserMenu)}
                     className="focus:outline-none transition-transform active:scale-95"
                   >
-                    {/* 🔥 3. 關鍵：把算好的 avatarText 塞進去 */}
+                    {/* 🔥 傳入完整的 profile 物件 (包含顏色) */}
                     <UserAvatar 
-                        user={user} 
+                        user={profile} 
                         text={avatarText} 
                         styleType={1} 
                         size="md" 
@@ -108,23 +111,23 @@ export default function Navbar() {
                   </button>
 
                   {showUserMenu && (
-                    <div className="absolute right-0 mt-3 w-60 bg-white rounded-xl shadow-2xl border border-slate-100 py-2 animate-scale-in origin-top-right z-50">
+                    <div className="absolute right-0 mt-3 w-64 bg-white rounded-xl shadow-2xl border border-slate-100 py-2 animate-scale-in origin-top-right z-50">
                       <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/50">
-                        <p className="text-sm font-black text-slate-800 truncate">{user.email}</p>
-                        <p className="text-xs text-blue-600 font-bold">{userRole || '載入中...'}</p>
+                        <p className="text-sm font-black text-slate-800 truncate">{displayName}</p>
+                        <p className="text-xs text-blue-600 font-bold">{profile.role || 'User'}</p>
                       </div>
                       
                       <button 
                         onClick={() => { setShowIDCard(true); setShowUserMenu(false); }}
                         className="w-full text-left px-4 py-3 text-sm font-bold text-slate-700 hover:bg-blue-50 flex items-center"
                       >
-                        <CreditCard size={16} className="mr-3 text-blue-500"/> 數位 ID
+                        <CreditCard size={16} className="mr-3 text-blue-500"/> 數位識別證
                       </button>
 
                       <div className="border-t border-slate-100 my-1"></div>
 
                       <button onClick={handleLogout} className="w-full text-left px-4 py-3 text-sm font-bold text-red-600 hover:bg-red-50 flex items-center">
-                        <LogOut size={16} className="mr-3"/> 登出
+                        <LogOut size={16} className="mr-3"/> 安全登出
                       </button>
                     </div>
                   )}
@@ -134,7 +137,7 @@ export default function Navbar() {
               )}
             </div>
 
-            {/* 手機版 */}
+            {/* 手機版按鈕 */}
             <div className="flex items-center md:hidden">
               <button onClick={() => setIsOpen(!isOpen)} className="text-slate-500 hover:text-slate-800 p-2">
                 {isOpen ? <X size={24} /> : <Menu size={24} />}
@@ -146,31 +149,31 @@ export default function Navbar() {
         {/* 手機版選單 */}
         {isOpen && (
           <div className="md:hidden bg-white border-t border-slate-100 absolute w-full shadow-xl z-40">
-            {user && (
+            {profile && (
                 <div className="px-4 pt-4 pb-2 flex items-center border-b border-slate-100 mb-2 bg-slate-50">
-                    {/* 🔥 4. 手機版也要塞 */}
                     <UserAvatar 
-                        user={user} 
+                        user={profile} 
                         text={avatarText} 
                         styleType={1} 
                         size="sm" 
                         className="mr-3"
                     />
                     <div className="overflow-hidden">
-                        <p className="text-sm font-black text-slate-800 truncate">{user.email}</p>
+                        <p className="text-sm font-black text-slate-800 truncate">{displayName}</p>
+                        <p className="text-xs text-slate-500 truncate">{profile.email}</p>
                     </div>
                 </div>
             )}
             <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3">
               {isAdmin && (
-                  <Link to="/admin/dashboard" className="block px-3 py-3 rounded-lg text-base font-bold text-white bg-red-600 mb-2 flex items-center justify-center shadow-md">
-                      <LayoutDashboard size={18} className="mr-2"/> 進入戰情室
+                  <Link to="/admin/dashboard" className="block px-3 py-3 rounded-lg text-base font-bold text-white bg-slate-800 mb-2 flex items-center justify-center shadow-md">
+                      <LayoutDashboard size={18} className="mr-2"/> 戰情指揮中心
                   </Link>
               )}
               <Link to="/home" className="block px-3 py-2 rounded-md text-base font-medium text-slate-700 hover:bg-slate-50">首頁</Link>
-              {user && (
+              {profile && (
                 <button onClick={() => { setShowIDCard(true); setIsOpen(false); }} className="w-full text-left block px-3 py-2 rounded-md text-base font-medium text-slate-700 hover:bg-slate-50 flex items-center">
-                    <CreditCard size={18} className="mr-3 text-blue-600"/> 數位 ID
+                    <CreditCard size={18} className="mr-3 text-blue-600"/> 數位識別證
                 </button>
               )}
               <button onClick={handleLogout} className="w-full text-left block px-3 py-2 rounded-md text-base font-medium text-red-600 hover:bg-red-50 flex items-center">
@@ -181,8 +184,8 @@ export default function Navbar() {
         )}
       </nav>
 
-      {/* ID 卡彈窗 */}
-      {showIDCard && <DigitalIDCard user={user} role={userRole} onClose={() => setShowIDCard(false)} />}
+      {/* 數位識別證 */}
+      {showIDCard && <DigitalIDCard user={profile} role={profile?.role} onClose={() => setShowIDCard(false)} />}
     </>
   )
 }
