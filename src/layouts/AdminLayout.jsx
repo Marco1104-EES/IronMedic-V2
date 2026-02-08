@@ -1,160 +1,122 @@
 import { useState, useEffect } from 'react'
 import { Outlet, useNavigate, useLocation, Link } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
-import { 
-  LayoutDashboard, Users, Trophy, Settings, LogOut, Menu, X, 
-  FileText, Activity, ShieldAlert, Upload 
-} from 'lucide-react'
+import { ShieldAlert, Loader2, FileWarning, LayoutDashboard, Users, Trophy, LogOut } from 'lucide-react'
 
 export default function AdminLayout() {
-  const [isSidebarOpen, setSidebarOpen] = useState(true)
-  const [isAdmin, setIsAdmin] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [isAuthorized, setIsAuthorized] = useState(false)
+  const [errorMsg, setErrorMsg] = useState(null)
   const navigate = useNavigate()
-  const location = useLocation()
-
-  const CREATOR_EMAIL = 'marco1104@gmail.com'
+  const location = useLocation() // 取得目前網址，用來標示選單
 
   useEffect(() => {
-    checkAdmin()
+    checkAdminPrivileges()
   }, [])
 
-  const checkAdmin = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    
-    if (!user) {
-        navigate('/login')
-        return
-    }
+  const checkAdminPrivileges = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) { navigate('/login'); return }
 
-    if (user.email === CREATOR_EMAIL) {
-        setIsAdmin(true)
-        setLoading(false)
-        return
-    }
-
-    const { data } = await supabase
+      const { data: profile, error } = await supabase
         .from('profiles')
-        .select('role')
+        .select('*') 
         .eq('id', user.id)
-        .single()
+        .maybeSingle() 
 
-    if (data && (data.role === 'SUPER_ADMIN' || data.role === 'EVENT_MANAGER')) {
-        setIsAdmin(true)
-    } else {
-        alert("權限不足：您無權進入戰情中心")
+      if (error || !profile) {
+        setErrorMsg("⚠️ 無法讀取權限檔案")
+        return
+      }
+
+      const ALLOWED_ROLES = ['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'EVENT_MANAGER']
+      const userRole = (profile.role || '').toUpperCase()
+
+      if (ALLOWED_ROLES.includes(userRole)) {
+        setIsAuthorized(true)
+      } else {
+        alert(`⛔ 存取被拒：您的權限 (${userRole}) 不足`)
         navigate('/home')
+      }
+    } catch (error) {
+      navigate('/login')
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   const handleLogout = async () => {
-    await supabase.auth.signOut()
-    navigate('/login')
+      await supabase.auth.signOut()
+      navigate('/login')
   }
 
-  const navItems = [
-    { icon: LayoutDashboard, label: '系統運作全方位', path: '/admin/dashboard' },
-    { icon: Trophy, label: '賽事管理系統', path: '/admin/events' },
-    { icon: Users, label: '會員資料中心', path: '/admin/members' },
-    { icon: Upload, label: '資料匯入中心', path: '/admin/import' },
-    { icon: ShieldAlert, label: '權限管理 (IAM)', path: '/admin/permissions', highlight: true },
-    { icon: Activity, label: '系統操作日誌', path: '/admin/logs' },
+  if (loading) return <div className="h-screen flex items-center justify-center bg-slate-900 text-white"><Loader2 className="animate-spin mr-2"/> 核對權限中...</div>
+  if (errorMsg) return <div className="p-10 text-center text-red-600 font-bold">{errorMsg}</div>
+  if (!isAuthorized) return null
+
+  // 定義選單項目
+  const menuItems = [
+      { path: '/admin/dashboard', icon: <LayoutDashboard size={20}/>, label: '戰情儀表板' },
+      { path: '/admin/members', icon: <Users size={20}/>, label: '人員名冊 CRM' },
+      // { path: '/admin/events', icon: <Trophy size={20}/>, label: '賽事管理 (即將推出)' },
   ]
 
-  if (loading) return <div className="h-screen flex items-center justify-center bg-slate-900 text-blue-500"><Activity className="animate-spin mr-2"/> 正在驗證指揮官身分...</div>
-
-  if (!isAdmin) return null
-
   return (
-    <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
+    <div className="min-h-screen bg-slate-100 flex">
       
-      {isSidebarOpen && (
-        <div 
-          className="fixed inset-0 bg-black/50 z-20 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-
-      <aside className={`
-        fixed lg:static inset-y-0 left-0 z-30 w-64 bg-[#0f172a] text-white transform transition-transform duration-300 ease-in-out flex flex-col shadow-2xl
-        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
-        lg:translate-x-0
-      `}>
-        <div className="p-6 border-b border-slate-700 flex items-center justify-between">
-          <div className="flex items-center">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center font-black text-lg mr-3 shadow-lg shadow-blue-500/50">I</div>
-            <div>
-              <h1 className="text-xl font-bold tracking-wider">IRON MEDIC</h1>
-              <p className="text-[10px] text-blue-400 font-mono tracking-widest">ENTERPRISE SYSTEM</p>
-            </div>
+      {/* 🟢 左側戰略導航列 (Sidebar) */}
+      <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col shadow-2xl fixed h-full z-50">
+          <div className="p-6 border-b border-slate-800 flex items-center gap-3">
+              <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold">I</div>
+              <span className="font-bold text-white tracking-wider">IRON MEDIC</span>
           </div>
-          <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-slate-400 hover:text-white">
-            <X size={20} />
-          </button>
-        </div>
 
-        <nav className="flex-1 overflow-y-auto py-6 px-3 space-y-1">
-          {navItems.map((item) => {
-            const isActive = location.pathname === item.path
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                onClick={() => setSidebarOpen(false)}
-                className={`
-                  flex items-center px-4 py-3.5 rounded-xl transition-all duration-200 group
-                  ${isActive 
-                    ? item.highlight 
-                        ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/50' 
-                        : 'bg-slate-800 text-white'
-                    : 'text-slate-400 hover:bg-slate-800/50 hover:text-white'
-                  }
-                `}
+          <nav className="flex-1 p-4 space-y-2">
+              <div className="text-xs font-bold text-slate-500 px-3 mb-2 uppercase tracking-widest">Admin Console</div>
+              
+              {menuItems.map((item) => {
+                  const isActive = location.pathname === item.path
+                  return (
+                    <Link 
+                        key={item.path} 
+                        to={item.path}
+                        className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all font-bold ${isActive ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/50' : 'hover:bg-slate-800 hover:text-white'}`}
+                    >
+                        {item.icon}
+                        {item.label}
+                    </Link>
+                  )
+              })}
+          </nav>
+
+          <div className="p-4 border-t border-slate-800">
+              <button 
+                  onClick={handleLogout}
+                  className="flex items-center gap-3 px-3 py-3 w-full rounded-xl hover:bg-red-900/30 hover:text-red-400 transition-colors text-sm font-bold text-slate-400"
               >
-                <item.icon size={20} className={`mr-3 transition-colors ${isActive ? 'text-white' : 'text-slate-500 group-hover:text-blue-400'}`} />
-                <span className="font-bold text-sm">{item.label}</span>
-                {isActive && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white animate-pulse"></div>}
-              </Link>
-            )
-          })}
-        </nav>
-
-        <div className="p-4 border-t border-slate-800">
-            <Link to="/home" className="flex items-center w-full px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors mb-2">
-                <FileText size={18} className="mr-3"/>
-                <span className="text-sm font-bold">返回前台首頁</span>
-            </Link>
-            <button 
-                onClick={handleLogout}
-                className="flex items-center w-full px-4 py-3 text-red-400 hover:text-red-300 hover:bg-red-900/20 rounded-lg transition-colors"
-            >
-                <LogOut size={18} className="mr-3" />
-                <span className="text-sm font-bold">安全登出</span>
-            </button>
-        </div>
+                  <LogOut size={18}/>
+                  登出系統
+              </button>
+          </div>
       </aside>
 
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-[#f8fafc]">
-        <header className="bg-white border-b border-slate-200 h-16 flex items-center justify-between px-4 lg:px-8 shadow-sm z-10">
-          <button onClick={() => setSidebarOpen(true)} className="lg:hidden text-slate-500 hover:text-slate-800 p-2">
-            <Menu size={24} />
-          </button>
-          
-          <div className="flex items-center ml-auto space-x-4">
-             <div className="text-right hidden md:block">
-                 <div className="text-xs font-bold text-blue-600 uppercase tracking-wider">System Online</div>
-                 <div className="text-sm font-black text-slate-800">戰情指揮中心</div>
-             </div>
-             <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 font-bold border border-slate-200">
-                 M
-             </div>
-          </div>
-        </header>
+      {/* 🟢 右側內容區 */}
+      <main className="flex-1 ml-64 p-8 animate-fade-in">
+          {/* 頂部狀態列 */}
+          <header className="flex justify-between items-center mb-8">
+              <h2 className="text-2xl font-black text-slate-800">
+                  {menuItems.find(m => m.path === location.pathname)?.label || '戰情中心'}
+              </h2>
+              <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-full shadow-sm border border-slate-200">
+                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                  <span className="text-xs font-bold text-slate-500 uppercase">Secure Connection</span>
+                  <span className="text-xs font-mono text-slate-300">|</span>
+                  <span className="text-xs font-bold text-slate-700">SUPER_ADMIN</span>
+              </div>
+          </header>
 
-        <div className="flex-1 overflow-auto p-4 lg:p-8 relative">
-            <Outlet />
-        </div>
+          <Outlet />
       </main>
     </div>
   )
