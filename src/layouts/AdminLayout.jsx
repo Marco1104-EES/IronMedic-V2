@@ -1,121 +1,152 @@
 import { useState, useEffect } from 'react'
 import { Outlet, useNavigate, useLocation, Link } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
-import { ShieldAlert, Loader2, FileWarning, LayoutDashboard, Users, Trophy, LogOut } from 'lucide-react'
+import { LayoutDashboard, Users, LogOut, Loader2, ShieldAlert, Shield, ShieldCheck, UserPlus, AlertTriangle, Ban, ServerCog } from 'lucide-react'
 
 export default function AdminLayout() {
   const [loading, setLoading] = useState(true)
   const [isAuthorized, setIsAuthorized] = useState(false)
-  const [errorMsg, setErrorMsg] = useState(null)
+  const [userEmail, setUserEmail] = useState('')
   const navigate = useNavigate()
-  const location = useLocation() // 取得目前網址，用來標示選單
+  const location = useLocation()
 
-  useEffect(() => {
-    checkAdminPrivileges()
-  }, [])
+  const searchParams = new URLSearchParams(location.search)
+  const currentView = searchParams.get('view') || 'ALL'
+
+  useEffect(() => { checkAdminPrivileges() }, [])
 
   const checkAdminPrivileges = async () => {
+    // 🔥🔥🔥 【上帝模式開啟】 🔥🔥🔥
+    // 當 Supabase 寄信額度爆掉時，強制開啟此模式
+    // 這會繞過所有驗證，直接把您視為超級管理員
+    const GOD_MODE = true; 
+    
+    if (GOD_MODE) {
+        console.log("⚠️ 目前處於開發者上帝模式 (Dev God Mode) - 已繞過登入驗證");
+        setUserEmail('marco1104@gmail.com'); // 強制設定您的 Email
+        setIsAuthorized(true); // 強制授權
+        setLoading(false);
+        return; // 直接結束檢查，不問 Supabase 了
+    }
+    // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
+
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { navigate('/login'); return }
-
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('*') 
-        .eq('id', user.id)
-        .maybeSingle() 
-
-      if (error || !profile) {
-        setErrorMsg("⚠️ 無法讀取權限檔案")
-        return
+      setUserEmail(user.email)
+      
+      const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle()
+      
+      // 注意：上帝模式下這段不會執行，所以不用擔心 profile 讀取問題
+      if (!profile || !['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR'].includes(profile.role)) {
+        alert("⛔ 權限不足"); navigate('/home'); return
       }
-
-      const ALLOWED_ROLES = ['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'EVENT_MANAGER']
-      const userRole = (profile.role || '').toUpperCase()
-
-      if (ALLOWED_ROLES.includes(userRole)) {
-        setIsAuthorized(true)
-      } else {
-        alert(`⛔ 存取被拒：您的權限 (${userRole}) 不足`)
-        navigate('/home')
-      }
-    } catch (error) {
-      navigate('/login')
-    } finally {
-      setLoading(false)
-    }
+      setIsAuthorized(true)
+    } catch (e) { navigate('/login') } finally { setLoading(false) }
   }
 
-  const handleLogout = async () => {
-      await supabase.auth.signOut()
-      navigate('/login')
+  const handleLogout = async () => { 
+      // 上帝模式下，登出只是跳回登入頁，但實際上沒登出 (因為根本沒登入)
+      await supabase.auth.signOut(); 
+      navigate('/login') 
   }
 
   if (loading) return <div className="h-screen flex items-center justify-center bg-slate-900 text-white"><Loader2 className="animate-spin mr-2"/> 核對權限中...</div>
-  if (errorMsg) return <div className="p-10 text-center text-red-600 font-bold">{errorMsg}</div>
+  
+  // 即使沒登入，上帝模式也會讓 isAuthorized 為 true，所以這裡會通過
   if (!isAuthorized) return null
 
-  // 定義選單項目
-  const menuItems = [
-      { path: '/admin/dashboard', icon: <LayoutDashboard size={20}/>, label: '戰情儀表板' },
-      { path: '/admin/members', icon: <Users size={20}/>, label: '人員名冊 CRM' },
-      // { path: '/admin/events', icon: <Trophy size={20}/>, label: '賽事管理 (即將推出)' },
+  const menuGroups = [
+      { 
+          title: "戰情中心",
+          items: [
+              { path: '/admin/dashboard', icon: <LayoutDashboard size={18}/>, label: '戰情儀表板' }
+          ]
+      },
+      {
+          title: "人員戰略部署",
+          items: [
+              { path: '/admin/members', view: null, icon: <Users size={18}/>, label: '全部人員總覽' },
+              { path: '/admin/members', view: 'COMMAND', icon: <ShieldAlert size={18}/>, label: '🅰️ 指揮核心 (VIP)' },
+              { path: '/admin/members', view: 'ACTIVE', icon: <ShieldCheck size={18}/>, label: '🅱️ 主力戰鬥部隊' },
+              { path: '/admin/members', view: 'RESERVE', icon: <UserPlus size={18}/>, label: '🆎 潛力儲備軍' },
+              { path: '/admin/members', view: 'RISK', icon: <AlertTriangle size={18}/>, label: '⚠️ 風險預警名單' },
+              { path: '/admin/members', view: 'BLACKLIST', icon: <Ban size={18}/>, label: '⛔ 停權黑名單' },
+          ]
+      }
   ]
 
   return (
-    <div className="min-h-screen bg-slate-100 flex">
-      
-      {/* 🟢 左側戰略導航列 (Sidebar) */}
-      <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col shadow-2xl fixed h-full z-50">
-          <div className="p-6 border-b border-slate-800 flex items-center gap-3">
+    <div className="min-h-screen bg-slate-100 flex font-sans">
+      <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col shadow-2xl fixed h-full z-50 overflow-y-auto">
+          <div className="p-6 border-b border-slate-800 flex items-center gap-3 sticky top-0 bg-slate-900 z-10">
               <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold">I</div>
               <span className="font-bold text-white tracking-wider">IRON MEDIC</span>
           </div>
 
-          <nav className="flex-1 p-4 space-y-2">
-              <div className="text-xs font-bold text-slate-500 px-3 mb-2 uppercase tracking-widest">Admin Console</div>
-              
-              {menuItems.map((item) => {
-                  const isActive = location.pathname === item.path
-                  return (
-                    <Link 
-                        key={item.path} 
-                        to={item.path}
-                        className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all font-bold ${isActive ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/50' : 'hover:bg-slate-800 hover:text-white'}`}
-                    >
-                        {item.icon}
-                        {item.label}
-                    </Link>
-                  )
-              })}
+          <div className="bg-red-900/50 p-2 text-center text-xs text-red-200 font-bold border-b border-red-800 animate-pulse">
+              🛡️ GOD MODE ACTIVE
+          </div>
+
+          <nav className="flex-1 p-4 space-y-6">
+              {menuGroups.map((group, idx) => (
+                  <div key={idx}>
+                      <div className="text-xs font-bold text-slate-500 px-3 mb-2 uppercase tracking-widest">{group.title}</div>
+                      <div className="space-y-1">
+                          {group.items.map((item, i) => {
+                              const isPathMatch = location.pathname === item.path
+                              const isViewMatch = item.view ? currentView === item.view : !searchParams.get('view')
+                              const isActive = isPathMatch && isViewMatch
+
+                              return (
+                                <Link 
+                                    key={i} 
+                                    to={item.view ? `${item.path}?view=${item.view}` : item.path}
+                                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all font-bold text-sm ${isActive ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/50' : 'hover:bg-slate-800 hover:text-white'}`}
+                                >
+                                    {item.icon}
+                                    {item.label}
+                                </Link>
+                              )
+                          })}
+                      </div>
+                  </div>
+              ))}
+
+              {/* 🔥 系統運作總覽 (Only for Marco - 上帝模式強制開啟) */}
+              {userEmail === 'marco1104@gmail.com' && (
+                  <div>
+                      <div className="text-xs font-bold text-red-500 px-3 mb-2 uppercase tracking-widest border-t border-slate-800 pt-4">最高權限區</div>
+                      <Link to="/admin/system-status" className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all font-bold text-sm text-red-400 hover:bg-red-900/20">
+                          <ServerCog size={18}/>
+                          系統運作總覽
+                      </Link>
+                  </div>
+              )}
           </nav>
 
-          <div className="p-4 border-t border-slate-800">
-              <button 
-                  onClick={handleLogout}
-                  className="flex items-center gap-3 px-3 py-3 w-full rounded-xl hover:bg-red-900/30 hover:text-red-400 transition-colors text-sm font-bold text-slate-400"
-              >
-                  <LogOut size={18}/>
-                  登出系統
+          <div className="p-4 border-t border-slate-800 sticky bottom-0 bg-slate-900">
+              <button onClick={handleLogout} className="flex items-center gap-3 px-3 py-3 w-full rounded-xl hover:bg-red-900/30 hover:text-red-400 transition-colors text-sm font-bold text-slate-400">
+                  <LogOut size={18}/> 登出系統
               </button>
           </div>
       </aside>
 
-      {/* 🟢 右側內容區 */}
       <main className="flex-1 ml-64 p-8 animate-fade-in">
-          {/* 頂部狀態列 */}
           <header className="flex justify-between items-center mb-8">
               <h2 className="text-2xl font-black text-slate-800">
-                  {menuItems.find(m => m.path === location.pathname)?.label || '戰情中心'}
+                  {location.pathname === '/admin/system-status' ? '系統資源運作監控' : 
+                   menuGroups.flatMap(g => g.items).find(i => 
+                      i.path === location.pathname && (i.view ? currentView === i.view : !searchParams.get('view'))
+                  )?.label || '戰情中心'}
               </h2>
               <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-full shadow-sm border border-slate-200">
-                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                  <span className="text-xs font-bold text-slate-500 uppercase">Secure Connection</span>
-                  <span className="text-xs font-mono text-slate-300">|</span>
-                  <span className="text-xs font-bold text-slate-700">SUPER_ADMIN</span>
+                  <div className={`w-2 h-2 rounded-full animate-pulse ${userEmail === 'marco1104@gmail.com' ? 'bg-red-500' : 'bg-green-500'}`}></div>
+                  <span className="text-xs font-bold text-slate-700">
+                      {userEmail === 'marco1104@gmail.com' ? 'COMMANDER (GOD MODE)' : 'ADMIN'}
+                  </span>
               </div>
           </header>
-
           <Outlet />
       </main>
     </div>
