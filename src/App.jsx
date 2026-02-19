@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import Login from './auth/Login'
+// ✅ 正確的新路徑
+import Login from "./pages/Login";
 import AdminLayout from './layouts/AdminLayout'
 import MemberCRM from './admin/MemberCRM'
 import Dashboard from './admin/Dashboard'
