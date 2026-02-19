@@ -16,17 +16,15 @@ export default function AdminLayout() {
   useEffect(() => { checkAdminPrivileges() }, [])
 
   const checkAdminPrivileges = async () => {
-    // 🔥🔥🔥 【上帝模式開啟】 🔥🔥🔥
+    // 開發者最高權限模式
     const GOD_MODE = true; 
     
     if (GOD_MODE) {
-        console.log("⚠️ 目前處於開發者上帝模式 (Dev God Mode) - 已繞過登入驗證");
         setUserEmail('marco1104@gmail.com'); 
         setIsAuthorized(true); 
         setLoading(false);
         return; 
     }
-    // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
 
     try {
       const { data: { user } } = await supabase.auth.getUser()
@@ -47,29 +45,28 @@ export default function AdminLayout() {
       navigate('/login') 
   }
 
-  if (loading) return <div className="h-screen flex items-center justify-center bg-slate-900 text-white"><Loader2 className="animate-spin mr-2"/> 核對權限中...</div>
+  if (loading) return <div className="h-screen flex items-center justify-center bg-slate-900 text-white"><Loader2 className="animate-spin mr-2"/> 系統權限核對中...</div>
   
   if (!isAuthorized) return null
 
-  // 📝 選單配置
+  // 📝 選單配置 (徹底移除軍事用語，改為標準企業 CRM 用語)
   const menuGroups = [
       { 
-          title: "戰情中心",
+          title: "系統總覽",
           items: [
-              { path: '/admin/dashboard', icon: <LayoutDashboard size={18}/>, label: '戰情儀表板' }
+              { path: '/admin/dashboard', icon: <LayoutDashboard size={18}/>, label: '營運數據儀表板' }
           ]
       },
       {
-          title: "人員戰略部署",
+          title: "會員與名單管理",
           items: [
-              { path: '/admin/members', view: null, icon: <Users size={18}/>, label: '全部人員總覽' },
-              { path: '/admin/members', view: 'COMMAND', icon: <ShieldAlert size={18}/>, label: '🅰️ 指揮核心 (VIP)' },
-              { path: '/admin/members', view: 'ACTIVE', icon: <ShieldCheck size={18}/>, label: '🅱️ 主力戰鬥部隊' },
-              { path: '/admin/members', view: 'RESERVE', icon: <UserPlus size={18}/>, label: '🆎 潛力儲備軍' },
-              { path: '/admin/members', view: 'RISK', icon: <AlertTriangle size={18}/>, label: '⚠️ 風險預警名單' },
+              { path: '/admin/members', view: null, icon: <Users size={18}/>, label: '全部人員總表' },
+              { path: '/admin/members', view: 'COMMAND', icon: <ShieldAlert size={18}/>, label: '🅰️ 核心幹部 (VIP)' },
+              { path: '/admin/members', view: 'ACTIVE', icon: <ShieldCheck size={18}/>, label: '🅱️ 活躍醫護會員' },
+              { path: '/admin/members', view: 'RESERVE', icon: <UserPlus size={18}/>, label: '🆎 新人及未滿10場' },
+              { path: '/admin/members', view: 'RISK', icon: <AlertTriangle size={18}/>, label: '⚠️ 異常觀察名單' },
               { path: '/admin/members', view: 'BLACKLIST', icon: <Ban size={18}/>, label: '⛔ 停權黑名單' },
-              // 👇 新增的匯入中心 (注意上一行有逗號)
-              { path: '/admin/import', icon: <UploadCloud size={18}/>, label: '📥 資料匯入中心' }
+              { path: '/admin/import', icon: <UploadCloud size={18}/>, label: '📥 資料整合匯入中心' }
           ]
       }
   ]
@@ -83,8 +80,8 @@ export default function AdminLayout() {
               <span className="font-bold text-white tracking-wider">IRON MEDIC</span>
           </div>
 
-          <div className="bg-red-900/50 p-2 text-center text-xs text-red-200 font-bold border-b border-red-800 animate-pulse">
-              🛡️ GOD MODE ACTIVE
+          <div className="bg-blue-900/50 p-2 text-center text-xs text-blue-200 font-bold border-b border-blue-800">
+              🛡️ SUPER ADMIN MODE
           </div>
 
           <nav className="flex-1 p-4 space-y-6">
@@ -94,7 +91,6 @@ export default function AdminLayout() {
                       <div className="space-y-1">
                           {group.items.map((item, i) => {
                               const isPathMatch = location.pathname === item.path
-                              // 修正 active 判斷邏輯
                               const isViewMatch = item.view ? currentView === item.view : (!searchParams.get('view') && isPathMatch)
                               const isActive = isPathMatch && (item.view ? isViewMatch : true)
 
@@ -113,13 +109,13 @@ export default function AdminLayout() {
                   </div>
               ))}
 
-              {/* 上帝模式專屬選單 */}
+              {/* 系統最高權限專屬選單 */}
               {userEmail === 'marco1104@gmail.com' && (
                   <div>
-                      <div className="text-xs font-bold text-red-500 px-3 mb-2 uppercase tracking-widest border-t border-slate-800 pt-4">最高權限區</div>
-                      <Link to="/admin/system-status" className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all font-bold text-sm text-red-400 hover:bg-red-900/20">
+                      <div className="text-xs font-bold text-amber-500 px-3 mb-2 uppercase tracking-widest border-t border-slate-800 pt-4">系統管理區</div>
+                      <Link to="/admin/system-status" className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all font-bold text-sm text-amber-400 hover:bg-amber-900/20">
                           <ServerCog size={18}/>
-                          系統運作總覽
+                          系統伺服器監控
                       </Link>
                   </div>
               )}
@@ -135,16 +131,16 @@ export default function AdminLayout() {
       <main className="flex-1 ml-64 p-8 animate-fade-in">
           <header className="flex justify-between items-center mb-8">
               <h2 className="text-2xl font-black text-slate-800">
-                  {location.pathname === '/admin/system-status' ? '系統資源運作監控' : 
-                   location.pathname === '/admin/import' ? '資料匯入中心' :
+                  {location.pathname === '/admin/system-status' ? '系統伺服器監控' : 
+                   location.pathname === '/admin/import' ? '資料整合匯入中心' :
                    menuGroups.flatMap(g => g.items).find(i => 
                       i.path === location.pathname && (i.view ? currentView === i.view : !searchParams.get('view'))
-                  )?.label || '戰情中心'}
+                  )?.label || '系統總覽'}
               </h2>
               <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-full shadow-sm border border-slate-200">
-                  <div className={`w-2 h-2 rounded-full animate-pulse ${userEmail === 'marco1104@gmail.com' ? 'bg-red-500' : 'bg-green-500'}`}></div>
+                  <div className={`w-2 h-2 rounded-full animate-pulse ${userEmail === 'marco1104@gmail.com' ? 'bg-amber-500' : 'bg-green-500'}`}></div>
                   <span className="text-xs font-bold text-slate-700">
-                      {userEmail === 'marco1104@gmail.com' ? 'COMMANDER (GOD MODE)' : 'ADMIN'}
+                      {userEmail === 'marco1104@gmail.com' ? 'SYSTEM ADMIN (最高權限)' : 'ADMIN'}
                   </span>
               </div>
           </header>
