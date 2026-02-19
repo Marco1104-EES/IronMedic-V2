@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Outlet, useNavigate, useLocation, Link } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
-import { LayoutDashboard, Users, LogOut, Loader2, ShieldAlert, Shield, ShieldCheck, UserPlus, AlertTriangle, Ban, ServerCog } from 'lucide-react'
+import { LayoutDashboard, Users, LogOut, Loader2, ShieldAlert, ShieldCheck, UserPlus, AlertTriangle, Ban, ServerCog, UploadCloud } from 'lucide-react'
 
 export default function AdminLayout() {
   const [loading, setLoading] = useState(true)
@@ -17,16 +17,14 @@ export default function AdminLayout() {
 
   const checkAdminPrivileges = async () => {
     // 🔥🔥🔥 【上帝模式開啟】 🔥🔥🔥
-    // 當 Supabase 寄信額度爆掉時，強制開啟此模式
-    // 這會繞過所有驗證，直接把您視為超級管理員
     const GOD_MODE = true; 
     
     if (GOD_MODE) {
         console.log("⚠️ 目前處於開發者上帝模式 (Dev God Mode) - 已繞過登入驗證");
-        setUserEmail('marco1104@gmail.com'); // 強制設定您的 Email
-        setIsAuthorized(true); // 強制授權
+        setUserEmail('marco1104@gmail.com'); 
+        setIsAuthorized(true); 
         setLoading(false);
-        return; // 直接結束檢查，不問 Supabase 了
+        return; 
     }
     // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
 
@@ -37,7 +35,6 @@ export default function AdminLayout() {
       
       const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle()
       
-      // 注意：上帝模式下這段不會執行，所以不用擔心 profile 讀取問題
       if (!profile || !['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR'].includes(profile.role)) {
         alert("⛔ 權限不足"); navigate('/home'); return
       }
@@ -46,16 +43,15 @@ export default function AdminLayout() {
   }
 
   const handleLogout = async () => { 
-      // 上帝模式下，登出只是跳回登入頁，但實際上沒登出 (因為根本沒登入)
       await supabase.auth.signOut(); 
       navigate('/login') 
   }
 
   if (loading) return <div className="h-screen flex items-center justify-center bg-slate-900 text-white"><Loader2 className="animate-spin mr-2"/> 核對權限中...</div>
   
-  // 即使沒登入，上帝模式也會讓 isAuthorized 為 true，所以這裡會通過
   if (!isAuthorized) return null
 
+  // 📝 選單配置
   const menuGroups = [
       { 
           title: "戰情中心",
@@ -72,6 +68,8 @@ export default function AdminLayout() {
               { path: '/admin/members', view: 'RESERVE', icon: <UserPlus size={18}/>, label: '🆎 潛力儲備軍' },
               { path: '/admin/members', view: 'RISK', icon: <AlertTriangle size={18}/>, label: '⚠️ 風險預警名單' },
               { path: '/admin/members', view: 'BLACKLIST', icon: <Ban size={18}/>, label: '⛔ 停權黑名單' },
+              // 👇 新增的匯入中心 (注意上一行有逗號)
+              { path: '/admin/import', icon: <UploadCloud size={18}/>, label: '📥 資料匯入中心' }
           ]
       }
   ]
@@ -79,6 +77,7 @@ export default function AdminLayout() {
   return (
     <div className="min-h-screen bg-slate-100 flex font-sans">
       <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col shadow-2xl fixed h-full z-50 overflow-y-auto">
+          {/* Logo */}
           <div className="p-6 border-b border-slate-800 flex items-center gap-3 sticky top-0 bg-slate-900 z-10">
               <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold">I</div>
               <span className="font-bold text-white tracking-wider">IRON MEDIC</span>
@@ -95,8 +94,9 @@ export default function AdminLayout() {
                       <div className="space-y-1">
                           {group.items.map((item, i) => {
                               const isPathMatch = location.pathname === item.path
-                              const isViewMatch = item.view ? currentView === item.view : !searchParams.get('view')
-                              const isActive = isPathMatch && isViewMatch
+                              // 修正 active 判斷邏輯
+                              const isViewMatch = item.view ? currentView === item.view : (!searchParams.get('view') && isPathMatch)
+                              const isActive = isPathMatch && (item.view ? isViewMatch : true)
 
                               return (
                                 <Link 
@@ -113,7 +113,7 @@ export default function AdminLayout() {
                   </div>
               ))}
 
-              {/* 🔥 系統運作總覽 (Only for Marco - 上帝模式強制開啟) */}
+              {/* 上帝模式專屬選單 */}
               {userEmail === 'marco1104@gmail.com' && (
                   <div>
                       <div className="text-xs font-bold text-red-500 px-3 mb-2 uppercase tracking-widest border-t border-slate-800 pt-4">最高權限區</div>
@@ -136,6 +136,7 @@ export default function AdminLayout() {
           <header className="flex justify-between items-center mb-8">
               <h2 className="text-2xl font-black text-slate-800">
                   {location.pathname === '/admin/system-status' ? '系統資源運作監控' : 
+                   location.pathname === '/admin/import' ? '資料匯入中心' :
                    menuGroups.flatMap(g => g.items).find(i => 
                       i.path === location.pathname && (i.view ? currentView === i.view : !searchParams.get('view'))
                   )?.label || '戰情中心'}

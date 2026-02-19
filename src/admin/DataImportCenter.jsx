@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import { supabase } from '../supabaseClient'
 import * as XLSX from 'xlsx' 
-import { Upload, FileSpreadsheet, CheckCircle, Terminal, Plus, RefreshCw, Eye, Save, X, AlertTriangle, Download, FileWarning, ShieldCheck, Wand2, Search } from 'lucide-react'
+import { Upload, FileSpreadsheet, CheckCircle, Terminal, RefreshCw, Eye, Save, X, AlertTriangle, Download, FileWarning, ShieldCheck, Search, Database } from 'lucide-react'
 
 export default function DataImportCenter() {
   const [fileMaster, setFileMaster] = useState(null)
@@ -176,8 +176,8 @@ export default function DataImportCenter() {
                 email: emailRaw,
                 phone: phone,
                 id_number: idNumber,
-                uniform_size: size,
-                original_source: row._is_patched ? 'Master+Wix (Fuzzy)' : 'Master'
+                shirt_size: size, // 注意：您原本寫 uniform_size，但我看 MemberCRM 用 shirt_size，這裡幫您對齊
+                admin_note: row._is_patched ? '來源: Master+Wix (Fuzzy)' : '來源: Master'
             };
 
             // 嚴格檢查：沒 Email 或 沒名字 就視為問題資料
@@ -215,8 +215,9 @@ export default function DataImportCenter() {
       addLog('開始寫入資料庫 (Writing to DB)...', 'warning');
 
       try {
-          const recordsToUpsert = validData.map(({ _id, original_source, ...rest }) => ({
+          const recordsToUpsert = validData.map(({ _id, ...rest }) => ({
               ...rest,
+              role: 'USER', // 預設權限
               updated_at: new Date()
           }));
 
@@ -253,13 +254,13 @@ export default function DataImportCenter() {
 
           if (sCount > 0) {
               addLog(`🚀 匯入作業結束！成功匯入: ${sCount} 筆資料。`, 'success');
-              // 記錄到系統日誌
-              const { data: { user } } = await supabase.auth.getUser();
-              await supabase.from('system_logs').insert([{ 
+              // 記錄到系統日誌 (如果有 system_logs 表的話)
+              /* await supabase.from('system_logs').insert([{ 
                   level: 'INFO', 
                   message: `資料匯入完成`, 
-                  details: { success: sCount, failed: failedCount, importer: user?.email } 
+                  details: { success: sCount, failed: failedCount } 
               }]);
+              */
               setTimeout(() => setValidData([]), 3000);
           } else {
               addLog(`💀 寫入失敗：資料庫拒絕了所有寫入。請檢查 Supabase Policy。`, 'error');
@@ -276,17 +277,14 @@ export default function DataImportCenter() {
     <div className="space-y-8 animate-fade-in pb-20">
       <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
         <div>
-          {/* 修正：移除版本號 */}
           <h2 className="text-2xl font-black text-slate-800 flex items-center">
-            <FileSpreadsheet className="mr-3 text-blue-600"/> 資料匯入中心
+            <Database className="mr-3 text-blue-600"/> 資料匯入中心 (Advanced)
           </h2>
-          {/* 修正：企業級副標題 */}
-          <p className="text-slate-500 text-sm mt-1 font-bold">資料分析比對清除 (表頭自動鎖定 + 模糊補丁)</p>
+          <p className="text-slate-500 text-sm mt-1 font-bold">資料分析比對清除 (Master 表頭偵測 + Wix 補丁融合)</p>
         </div>
         
         {(validData.length > 0 || invalidData.length > 0) && (
             <div className="flex gap-2">
-                 {/* 修正：下載匯入報告 */}
                  <button onClick={() => exportExcel([...validData, ...invalidData], 'IronMedic_Full_Report')} className="px-4 py-2 bg-slate-800 text-white rounded-lg text-xs font-bold flex items-center hover:bg-slate-700 transition-colors">
                      <Download size={14} className="mr-2"/> 下載匯入報告 ({validData.length + invalidData.length})
                  </button>
@@ -297,7 +295,6 @@ export default function DataImportCenter() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
          <div className="lg:col-span-1 space-y-6">
              <div className="bg-white rounded-2xl shadow-xl border border-blue-100 p-6">
-                {/* 修正：匯入資料分析 */}
                 <h3 className="font-bold text-slate-700 mb-4 flex items-center"><Search size={18} className="mr-2 text-purple-500"/> 匯入資料分析</h3>
                 
                 <div className={`border-2 border-dashed rounded-xl p-4 text-center mb-3 transition-all ${fileMaster ? 'border-green-500 bg-green-50' : 'border-slate-300 hover:border-blue-400'}`}>
@@ -306,7 +303,7 @@ export default function DataImportCenter() {
                         <div className="flex items-center justify-center mb-1">
                             {fileMaster ? <CheckCircle size={24} className="text-green-600"/> : <FileSpreadsheet size={24} className="text-slate-400"/>}
                         </div>
-                        <span className={`text-xs font-bold ${fileMaster ? 'text-green-700' : 'text-slate-500'}`}>{fileMaster ? fileMaster.name : '上傳 Master.xlsx (自動找表頭)'}</span>
+                        <span className={`text-xs font-bold ${fileMaster ? 'text-green-700' : 'text-slate-500'}`}>{fileMaster ? fileMaster.name : '1. 上傳 Master.xlsx (名單)'}</span>
                     </label>
                 </div>
 
@@ -316,19 +313,17 @@ export default function DataImportCenter() {
                         <div className="flex items-center justify-center mb-1">
                             {fileWix ? <CheckCircle size={24} className="text-blue-600"/> : <FileSpreadsheet size={24} className="text-slate-400"/>}
                         </div>
-                        <span className={`text-xs font-bold ${fileWix ? 'text-blue-700' : 'text-slate-500'}`}>{fileWix ? fileWix.name : '上傳 Wix.xlsx (模糊補丁)'}</span>
+                        <span className={`text-xs font-bold ${fileWix ? 'text-blue-700' : 'text-slate-500'}`}>{fileWix ? fileWix.name : '2. 上傳 Wix.xlsx (補丁)'}</span>
                     </label>
                 </div>
 
                 {validData.length === 0 && invalidData.length === 0 ? (
-                    /* 修正：啟動分析檢查 */
                     <button onClick={handlePreview} disabled={processing || !fileMaster} className="w-full py-3 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-500 shadow-md disabled:opacity-50 flex justify-center items-center transition-all">
                         {processing ? <RefreshCw size={20} className="animate-spin mr-2"/> : <Eye size={20} className="mr-2"/>}
-                        啟動分析檢查 (Start Analysis)
+                        啟動分析檢查
                     </button>
                 ) : (
                     <div className="space-y-3">
-                        {/* 修正：確認匯入 */}
                         <button onClick={handleConfirmImport} disabled={processing || validData.length === 0} className="w-full py-3 rounded-xl font-black text-white bg-green-600 hover:bg-green-500 shadow-lg disabled:opacity-50 flex justify-center items-center animate-pulse">
                             {processing ? '資料寫入中...' : <><Save size={20} className="mr-2"/> 確認匯入 ({validData.length})</>}
                         </button>
@@ -340,7 +335,6 @@ export default function DataImportCenter() {
              </div>
              
              <div className="bg-[#0f172a] rounded-xl border border-slate-700 p-4 h-64 overflow-hidden flex flex-col shadow-inner">
-                {/* 修正：操作紀錄日誌 */}
                 <div className="text-slate-400 text-xs font-bold border-b border-slate-700 pb-2 mb-2 flex items-center"><Terminal size={12} className="mr-2"/> 操作紀錄日誌 (Operation Logs)</div>
                 <div className="flex-1 overflow-y-auto custom-scrollbar font-mono text-xs space-y-1">
                     {logs.map((l, i) => (
@@ -355,18 +349,10 @@ export default function DataImportCenter() {
 
          <div className="lg:col-span-2 bg-white rounded-2xl shadow-xl border border-slate-200 flex flex-col overflow-hidden h-[600px]">
              <div className="flex border-b border-slate-200">
-                 <button 
-                    onClick={() => setViewMode('valid')}
-                    /* 修正：有效資料 */
-                    className={`flex-1 py-4 text-sm font-bold flex items-center justify-center transition-all ${viewMode === 'valid' ? 'bg-white text-green-600 border-b-2 border-green-600' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}
-                 >
+                 <button onClick={() => setViewMode('valid')} className={`flex-1 py-4 text-sm font-bold flex items-center justify-center transition-all ${viewMode === 'valid' ? 'bg-white text-green-600 border-b-2 border-green-600' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}>
                     <ShieldCheck size={18} className="mr-2"/> 有效資料 ({validData.length})
                  </button>
-                 <button 
-                    onClick={() => setViewMode('invalid')}
-                    /* 修正：異常資料 */
-                    className={`flex-1 py-4 text-sm font-bold flex items-center justify-center transition-all ${viewMode === 'invalid' ? 'bg-red-50 text-red-600 border-b-2 border-red-600' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}
-                 >
+                 <button onClick={() => setViewMode('invalid')} className={`flex-1 py-4 text-sm font-bold flex items-center justify-center transition-all ${viewMode === 'invalid' ? 'bg-red-50 text-red-600 border-b-2 border-red-600' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}>
                     <FileWarning size={18} className="mr-2"/> 異常資料 ({invalidData.length})
                  </button>
              </div>
@@ -385,12 +371,12 @@ export default function DataImportCenter() {
                                             <td className="p-3 font-bold text-slate-700">{row.full_name}</td>
                                             <td className="p-3 font-mono text-xs text-slate-500">{row.email}</td>
                                             <td className="p-3 text-slate-500">{row.phone}</td>
-                                            <td className="p-3 text-xs"><span className="bg-slate-100 px-2 py-1 rounded text-slate-500">{row.original_source}</span></td>
+                                            <td className="p-3 text-xs"><span className="bg-slate-100 px-2 py-1 rounded text-slate-500">{row.admin_note}</span></td>
                                         </tr>
                                     ))}
                                 </tbody>
                             </table>
-                        ) : <div className="h-full flex flex-col items-center justify-center text-slate-400"><ShieldCheck size={48} className="mb-2 opacity-20"/>資料分析中...</div>}
+                        ) : <div className="h-full flex flex-col items-center justify-center text-slate-400"><ShieldCheck size={48} className="mb-2 opacity-20"/>請上傳檔案以開始分析</div>}
                      </>
                  )}
 
@@ -398,7 +384,6 @@ export default function DataImportCenter() {
                      <div className="space-y-4">
                         {invalidData.length > 0 && (
                             <div className="bg-red-100 border border-red-200 text-red-800 p-3 rounded-lg flex justify-between items-center">
-                                {/* 修正：這些資料無法匯入 */}
                                 <span className="text-xs font-bold flex items-center"><AlertTriangle size={14} className="mr-2"/> 這些資料無法匯入 (缺姓名或 Email)</span>
                                 <button onClick={() => exportExcel(invalidData, 'IronMedic_Missed_Targets')} className="bg-red-600 text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-red-700 flex items-center shadow-sm">
                                     <Download size={12} className="mr-1"/> 下載異常清單

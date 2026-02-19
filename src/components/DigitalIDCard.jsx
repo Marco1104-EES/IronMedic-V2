@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
-import { Shield, Activity, Phone, Database, Award, User, ChevronRight, Zap } from 'lucide-react'
+import { Shield, Activity, Phone, Database, Award, User, CheckCircle2, ChevronRight } from 'lucide-react'
 
 export default function DigitalIdCard({ member }) {
   const [isFlipped, setIsFlipped] = useState(false)
 
-  // 🛡️ 資料防呆 (若資料缺失，顯示預設值)
+  // 🛡️ 1. 資料防呆 (Data Safety)
   const defaultData = {
     full_name: "未知人員",
     role: "USER",
@@ -21,135 +21,145 @@ export default function DigitalIdCard({ member }) {
   }
   const data = { ...defaultData, ...member }
 
-  // 🆔 ID 格式化 (ABCD-1234)
+  // 🆔 2. ID 格式化
   const formatId = (id) => {
       if (!id || id === 'UNKNOWN') return 'NO-ID';
       return id.length > 8 ? `${id.substring(0, 4)}-${id.substring(id.length-4)}`.toUpperCase() : id;
   }
 
-  // 📊 等級計算
-  const safePoints = Number(data.points) || 0;
-  const level = Math.floor(safePoints / 100) + 1;
-
-  // 🎨 角色配色 (APP 風格標籤)
-  const getRoleBadge = (role) => {
+  // 🎨 3. 經典版配色系統 (復刻截圖中的金色漸層)
+  const getRoleStyle = (role) => {
       switch(role) {
-          case 'SUPER_ADMIN': return { bg: 'bg-red-100 text-red-700 border-red-200', label: '超級管理員', icon: '🛡️' };
-          case 'TOURNAMENT_DIRECTOR': return { bg: 'bg-blue-100 text-blue-700 border-blue-200', label: '賽事總監', icon: '🔵' };
-          case 'VERIFIED_MEDIC': return { bg: 'bg-emerald-100 text-emerald-700 border-emerald-200', label: '醫護鐵人', icon: '⚕️' };
-          default: return { bg: 'bg-slate-100 text-slate-600 border-slate-200', label: '一般會員', icon: '👤' };
+          case 'SUPER_ADMIN': 
+              return { 
+                  gradient: 'bg-gradient-to-r from-red-100 to-red-200 text-red-800', 
+                  icon: '🛡️', 
+                  label: '超級管理員',
+                  sub: 'ADMINISTRATOR'
+              };
+          case 'TOURNAMENT_DIRECTOR': 
+              return { 
+                  gradient: 'bg-gradient-to-r from-blue-100 to-blue-200 text-blue-800', 
+                  icon: '🔵', 
+                  label: '賽事總監',
+                  sub: 'DIRECTOR'
+              };
+          case 'VERIFIED_MEDIC': 
+              return { 
+                  // 這是截圖中的「金色漸層」風格
+                  gradient: 'bg-gradient-to-r from-amber-100 via-yellow-200 to-amber-100 text-amber-900 border border-amber-200', 
+                  icon: '⭐', 
+                  label: '高級緊急救護員', // 這裡可以動態帶入 data.medical_license
+                  sub: 'MEDIC TEAM'
+              };
+          default: 
+              return { 
+                  gradient: 'bg-slate-100 text-slate-600', 
+                  icon: '👤', 
+                  label: '一般會員',
+                  sub: 'MEMBER'
+              };
       }
   }
-  const badge = getRoleBadge(data.role);
+  const roleStyle = getRoleStyle(data.role);
+  
+  // 如果是醫護，顯示真實證照名稱；否則顯示預設職稱
+  const displayTitle = data.role === 'VERIFIED_MEDIC' && data.medical_license ? data.medical_license : roleStyle.label;
 
   return (
-    <div className="w-full flex justify-center items-center py-6 bg-slate-50 rounded-3xl">
-      {/* 📱 模擬手機外框 */}
+    <div className="w-full flex justify-center items-center py-4 bg-slate-50">
+      {/* 📱 容器：模仿手機螢幕比例 */}
       <div 
-        className="group perspective-1000 w-[320px] h-[520px] cursor-pointer select-none relative"
+        className="group perspective-1000 w-[300px] h-[520px] cursor-pointer select-none relative rounded-[40px] shadow-2xl bg-white border-4 border-slate-800"
         onClick={() => setIsFlipped(!isFlipped)}
       >
+        {/* 手機劉海 (裝飾用) */}
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-6 bg-slate-800 rounded-b-xl z-20"></div>
+
         <div className={`relative w-full h-full transition-all duration-500 transform preserve-3d ${isFlipped ? 'rotate-y-180' : ''}`}>
           
-          {/* ================= 正面 (Front) - APP 個人首頁風格 ================= */}
-          <div className="absolute w-full h-full backface-hidden bg-white rounded-[30px] shadow-2xl overflow-hidden border border-slate-200 flex flex-col">
+          {/* ================= 正面 (Front) - 經典白底設計 ================= */}
+          <div className="absolute w-full h-full backface-hidden bg-slate-50 rounded-[36px] overflow-hidden flex flex-col items-center pt-10 pb-6 px-4">
               
-              {/* 頂部 Header (Iron Medic) */}
-              <div className="h-16 bg-slate-900 flex items-center justify-center relative">
-                  <div className="absolute left-4 top-1/2 -translate-y-1/2 w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-                  <h3 className="text-white font-black tracking-widest text-lg flex items-center gap-2">
-                      <Shield size={20} className="text-blue-400"/> IRON MEDIC
-                  </h3>
+              {/* 1. 頂部 LOGO (海軍藍風格) */}
+              <div className="mb-6 flex flex-col items-center text-slate-800">
+                  <Shield size={48} fill="#1e293b" className="text-slate-800 drop-shadow-sm mb-2"/>
               </div>
 
-              {/* 頭像與主要資訊 */}
-              <div className="flex-1 flex flex-col items-center pt-6 px-6">
-                  {/* 頭像框 (模擬 APP 頭像) */}
-                  <div className="w-24 h-24 bg-slate-100 rounded-full flex items-center justify-center mb-3 shadow-inner border-4 border-white ring-2 ring-slate-100">
-                      <User size={40} className="text-slate-400"/>
+              {/* 2. 主要白色卡片 (有陰影) */}
+              <div className="w-full bg-white rounded-2xl shadow-lg p-5 flex flex-col items-center gap-3 relative">
+                  
+                  {/* 頭像 (灰色圓形占位符) */}
+                  <div className="w-20 h-20 bg-slate-200 rounded-full border-4 border-white shadow-sm flex items-center justify-center -mt-10">
+                      <User size={40} className="text-white"/>
                   </div>
 
                   {/* 姓名 */}
-                  <h2 className="text-2xl font-black text-slate-800 mb-1">{data.full_name}</h2>
-                  <p className="text-xs text-slate-400 font-mono mb-4">{data.email}</p>
+                  <h2 className="text-2xl font-black text-slate-900 tracking-wide">
+                      {data.full_name}
+                  </h2>
 
-                  {/* 職稱金牌 (模擬您的截圖) */}
-                  <div className={`w-full py-2 rounded-xl border flex items-center justify-center gap-2 mb-2 ${badge.bg} shadow-sm`}>
-                      <span className="text-lg">{badge.icon}</span>
-                      <span className="font-bold text-sm tracking-wide">{badge.label}</span>
-                  </div>
-
-                  {/* 資格狀態 */}
-                  <div className="flex items-center gap-2 text-xs font-bold text-green-600 bg-green-50 px-3 py-1 rounded-full mb-6">
-                      <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
-                      資格有效 (Active)
-                  </div>
-
-                  {/* 數據列 (ID / 尺寸) */}
-                  <div className="w-full grid grid-cols-2 gap-3 mb-6">
-                      <div className="bg-slate-50 p-2 rounded-lg text-center border border-slate-100">
-                          <div className="text-[10px] text-slate-400 uppercase">制服尺寸</div>
-                          <div className="font-bold text-slate-700">{data.shirt_size || '-'}</div>
+                  {/* ✨ 金色職位框 (復刻重點) */}
+                  <div className={`w-full ${roleStyle.gradient} py-3 rounded-lg flex flex-col items-center justify-center shadow-sm`}>
+                      <div className="flex items-center gap-1 font-black text-sm">
+                          <span>{roleStyle.icon}</span>
+                          <span>{displayTitle}</span>
                       </div>
-                      <div className="bg-slate-50 p-2 rounded-lg text-center border border-slate-100">
-                          <div className="text-[10px] text-slate-400 uppercase">System ID</div>
-                          <div className="font-mono font-bold text-slate-700 text-xs">{formatId(data.id)}</div>
+                      <div className="text-[10px] font-bold opacity-60 tracking-widest mt-0.5">
+                          {roleStyle.sub}
                       </div>
                   </div>
 
-                  {/* 底部提示 */}
-                  <div className="mt-auto mb-4 flex flex-col items-center gap-1 opacity-50">
-                      <ChevronRight className="animate-bounce-x" size={16}/>
-                      <span className="text-[10px]">點擊翻轉查看醫療卡</span>
+                  {/* 資格狀態 (綠色打勾) */}
+                  <div className="flex items-center gap-1.5 text-sm font-bold text-green-600 bg-green-50 px-3 py-1 rounded-full mt-1">
+                      <CheckCircle2 size={16} fill="currentColor" className="text-white"/>
+                      <span>資格有效 (Active)</span>
                   </div>
+
+                  {/* 制服尺寸 */}
+                  <div className="text-xs text-slate-400 font-medium mt-1">
+                      制服尺寸：<span className="text-slate-600 font-bold">{data.shirt_size}</span>
+                  </div>
+              </div>
+
+              {/* 3. 底部資訊 */}
+              <div className="mt-auto flex flex-col items-center gap-1">
+                   <div className="text-xs text-slate-400">證照效期：{data.license_expiry || '無'}</div>
+                   <div className="text-[10px] text-slate-300 font-mono mt-2 flex items-center gap-1">
+                       <ChevronRight size={10} className="animate-pulse"/> 點擊翻轉查看條碼
+                   </div>
               </div>
           </div>
 
-          {/* ================= 背面 (Back) - 醫療與 QR Code ================= */}
-          <div className="absolute w-full h-full backface-hidden bg-slate-800 text-white rounded-[30px] shadow-2xl overflow-hidden border border-slate-700 rotate-y-180 flex flex-col">
+          {/* ================= 背面 (Back) - 簡潔資訊 ================= */}
+          <div className="absolute w-full h-full backface-hidden bg-slate-800 rounded-[36px] overflow-hidden rotate-y-180 flex flex-col text-white pt-12 pb-6 px-6">
                
-               {/* 背面 Header */}
-               <div className="h-16 bg-red-900 flex items-center px-6 gap-3">
-                   <Activity className="text-white" size={24}/>
+               <div className="flex items-center gap-2 mb-6 border-b border-slate-600 pb-4">
+                   <Activity className="text-green-400"/>
+                   <h3 className="font-bold text-lg">緊急醫療資訊</h3>
+               </div>
+
+               <div className="space-y-6 flex-1">
+                   <div className="flex justify-between items-center bg-slate-700/50 p-3 rounded-xl">
+                       <span className="text-xs text-slate-400">血型 Blood</span>
+                       <span className="text-2xl font-black">{data.blood_type || '-'}</span>
+                   </div>
+
                    <div>
-                       <h3 className="font-bold text-base">緊急醫療資訊</h3>
-                       <p className="text-[10px] text-red-200">Emergency Profile</p>
+                       <div className="text-xs text-slate-400 mb-1">緊急聯絡人 Contact</div>
+                       <div className="bg-slate-700/50 p-3 rounded-xl border-l-4 border-red-400">
+                           <div className="font-bold text-sm">{data.emergency_contact || '無資料'}</div>
+                       </div>
+                   </div>
+
+                   <div className="bg-white p-4 rounded-xl flex flex-col items-center gap-2 shadow-lg mt-4">
+                       <QRCodeSVG value={`https://ironmedic.com/member/${data.id}`} size={140} />
+                       <span className="text-[10px] text-slate-500 font-mono">ID: {formatId(data.id)}</span>
                    </div>
                </div>
 
-               {/* 內容區 */}
-               <div className="flex-1 p-6 flex flex-col">
-                   
-                   {/* 證照區塊 */}
-                   <div className="bg-slate-700/50 p-4 rounded-xl border border-slate-600 mb-4">
-                       <div className="text-[10px] text-slate-400 uppercase mb-1 flex items-center gap-1">
-                           <Award size={12}/> Medical License
-                       </div>
-                       <div className="text-xl font-bold text-emerald-400">
-                           {data.medical_license || '無醫療證照'}
-                       </div>
-                       <div className="text-[10px] text-slate-400 mt-1">
-                           效期: {data.license_expiry || 'N/A'}
-                       </div>
-                   </div>
-
-                   {/* 緊急聯絡人 */}
-                   <div className="bg-slate-700/50 p-4 rounded-xl border border-slate-600 mb-6">
-                       <div className="text-[10px] text-slate-400 uppercase mb-1 flex items-center gap-1">
-                           <Phone size={12}/> Emergency Contact
-                       </div>
-                       <div className="text-sm font-bold text-white break-words">
-                           {data.emergency_contact || '無資料'}
-                       </div>
-                   </div>
-
-                   {/* QR Code (置底) */}
-                   <div className="mt-auto bg-white p-3 rounded-xl self-center shadow-lg">
-                       <QRCodeSVG value={`https://ironmedic.com/member/${data.id}`} size={120} />
-                   </div>
-                   <p className="text-center text-[10px] text-slate-500 mt-2 font-mono">
-                       SCAN FOR FULL PROFILE
-                   </p>
+               <div className="text-center text-[10px] text-slate-500 mt-auto">
+                   IRON MEDIC DIGITAL ID
                </div>
           </div>
 
