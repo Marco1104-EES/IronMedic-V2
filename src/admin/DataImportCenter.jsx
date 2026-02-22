@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
 import * as XLSX from 'xlsx' 
-import { FileSpreadsheet, CheckCircle, ArrowRight, Save, Database, Settings, LayoutList, Merge, Plus, Target, AlertTriangle, UserCheck, XCircle, BrainCircuit, Trash2, Edit, Download, FileText, Filter } from 'lucide-react'
+import { FileSpreadsheet, CheckCircle, ArrowRight, Save, Database, Settings, LayoutList, Merge, Plus, Target, UserCheck, XCircle, BrainCircuit, Trash2, Edit, Download, FileText, Filter } from 'lucide-react'
 
-// 🎯 系統目標欄位定義
 const TARGET_FIELDS = [
     { group: '🟢 【A~O】基本與聯絡資料', options: [
         { key: 'full_name', label: '姓名(A) *必填' }, { key: 'birthday', label: '出生年月日(B)' },
@@ -57,7 +56,7 @@ export default function DataImportCenter() {
   const [patchAnchorDB, setPatchAnchorDB] = useState('full_name') 
   
   const [previewData, setPreviewData] = useState([]) 
-  const [viewFilter, setViewFilter] = useState('all') // 狀態篩選器
+  const [viewFilter, setViewFilter] = useState('all') 
   const [logs, setLogs] = useState([])
   const [processing, setProcessing] = useState(false)
   const logsEndRef = useRef(null)
@@ -108,7 +107,6 @@ export default function DataImportCenter() {
       }
   }
 
-  // 📝 匯出 TXT 日誌
   const handleExportLog = () => {
       if(logs.length === 0) return alert("目前沒有日誌可匯出");
       const textContent = logs.map(l => `[${l.time}] [${l.type.toUpperCase()}] ${l.msg}`).join('\n');
@@ -121,18 +119,23 @@ export default function DataImportCenter() {
       URL.revokeObjectURL(url);
   }
 
-  // 📊 匯出 Excel 審核報表
   const handleExportExcel = () => {
       if (previewData.length === 0) return alert("目前沒有資料可匯出");
       const exportData = previewData.map(row => {
           const exportRow = {
-              '系統狀態': row._status,
-              '錯誤/異常原因': row._error || (row._status === 'duplicate' ? '發現同名者' : (row._status === 'not_found' ? '查無此人' : '正常')),
+              '狀態': row._status === 'valid' || row._status === 'perfect' || row._status === 'resolved' ? '🟢 正常' : '🔴 異常',
+              '錯誤/異常原因': row._error || (row._status === 'duplicate' ? '發現同名者' : (row._status === 'not_found' ? '查無此人' : '無')),
+              '姓名(A)': row.full_name || '未提供',
+              '聯絡信箱(E)': row.contact_email || '未提供',
+              '報名系統登入/WIX(Y)': row.email || '未提供',
               '資料來源': row._source || ''
           };
           if (mode === 'patch') exportRow['比對基準'] = row._rawAnchor;
-          Object.keys(fieldMapping).forEach(exCol => {
-              if (fieldMapping[exCol]) exportRow[`更新欄位: ${exCol}`] = row[exCol];
+          Object.keys(fieldMapping).forEach(excelHeader => {
+              const dbField = fieldMapping[excelHeader]
+              if (dbField && !['full_name', 'email', 'contact_email'].includes(dbField)) {
+                  exportRow[`[更新] ${excelHeader}`] = row[dbField] || '';
+              }
           });
           return exportRow;
       });
@@ -155,7 +158,8 @@ export default function DataImportCenter() {
             finalRows = await readExcel(fileMaster)
             if (finalRows.length === 0) throw new Error("檔案為空")
             headers = Object.keys(finalRows[0])
-            setPatchAnchorExcel(headers.find(h => h.includes('姓名') || h.includes('Name')) || headers[0])
+            // 2-1 步驟：智慧設定為第一欄或是包含 Name 的欄位
+            setPatchAnchorExcel(headers.find(h => h.includes('姓名') || h.toLowerCase().includes('name')) || headers[0])
         } else {
             const masterRows = await readExcel(fileMaster)
             finalRows = masterRows.map(row => ({...row, _source: '主名單'}))
@@ -198,25 +202,48 @@ export default function DataImportCenter() {
         const memFlags = {}
         const savedMemory = JSON.parse(localStorage.getItem(MAPPING_MEMORY_KEY) || '{}')
 
+        // 🌟 V9.6 全新智慧對接引擎 (雙重保證自動帶入中文欄位)
         headers.forEach(h => {
-            const lowerH = h.toLowerCase().replace(/\s+/g, '')
+            let matchedKey = null;
+
+            // 第 1 階段：(A)~(AO) 字母代號絕對定位 (100% 準確率)
+            const letterMatch = h.match(/\([A-Z]{1,2}\)/);
+            if (letterMatch) {
+                const code = letterMatch[0]; // 例如抓出 "(C)"
+                const target = FLAT_TARGETS.find(t => t.label.includes(code));
+                if (target) matchedKey = target.key;
+            }
+
+            // 第 2 階段：中英雙語模糊比對 (針對舊 Excel 或是 Wix 的英文標題)
+            if (!matchedKey) {
+                const lowerH = h.toLowerCase().replace(/\s+/g, '')
+                if (['姓名', 'name', 'fullname'].some(k => lowerH.includes(k)) && !lowerH.includes('緊急') && !lowerH.includes('英文') && !lowerH.includes('emergency')) matchedKey = 'full_name'
+                else if (['wix', '報名系統', 'account'].some(k => lowerH.includes(k)) || (lowerH.includes('登入') && lowerH.includes('帳號'))) matchedKey = 'email'
+                else if (lowerH === 'e-mail' || lowerH === 'email' || lowerH.includes('信箱')) matchedKey = 'contact_email'
+                else if (['手機', 'phone', 'mobile'].some(k => lowerH.includes(k)) && !lowerH.includes('緊急') && !lowerH.includes('emergency')) matchedKey = 'phone'
+                else if (['身分證', 'id_number', 'nationalid'].some(k => lowerH.includes(k)) || lowerH === 'id') matchedKey = 'national_id'
+                else if (['衣服', 'size', '背心', 'shirt'].some(k => lowerH.includes(k))) matchedKey = 'shirt_size'
+                else if (lowerH.includes('血型') || lowerH.includes('blood')) matchedKey = 'blood_type'
+                else if (lowerH.includes('生日') || lowerH.includes('birthday') || lowerH === 'dob') matchedKey = 'birthday'
+                else if (lowerH.includes('地址') || lowerH.includes('address')) matchedKey = 'address'
+                else if (lowerH.includes('緊急聯繫人電話') || lowerH.includes('emergencyphone')) matchedKey = 'emergency_phone'
+                else if (lowerH.includes('緊急聯繫人關係') || lowerH.includes('relationship')) matchedKey = 'emergency_relation'
+                else if (lowerH.includes('緊急聯繫人') || lowerH.includes('emergencycontact')) matchedKey = 'emergency_name'
+                else if (lowerH.includes('英文名') || lowerH.includes('englishname')) matchedKey = 'english_name'
+            }
+
+            // 最後套用：記憶優先 > 自動對接
             if (savedMemory[h]) {
                 initialMap[h] = savedMemory[h]; memFlags[h] = true 
-            } else {
-                if (['姓名', '中文姓名'].some(k => lowerH.includes(k)) && !lowerH.includes('緊急') && !lowerH.includes('英文')) initialMap[h] = 'full_name'
-                else if (lowerH.includes('wix') && lowerH.includes('email')) initialMap[h] = 'email' 
-                else if (lowerH.includes('e-mail') || lowerH.includes('信箱')) initialMap[h] = 'contact_email'
-                else if (['手機', 'phone'].some(k => lowerH.includes(k)) && !lowerH.includes('緊急')) initialMap[h] = 'phone'
-                else if (['身分證', 'id_number'].some(k => lowerH.includes(k))) initialMap[h] = 'national_id'
-                else if (['衣服', 'size', '背心'].some(k => lowerH.includes(k))) initialMap[h] = 'shirt_size'
-                else if (lowerH.includes('血型')) initialMap[h] = 'blood_type'
+            } else if (matchedKey) {
+                initialMap[h] = matchedKey;
             }
         })
         
         setFieldMapping(initialMap)
         setMemoryFlags(memFlags)
         
-        addLog(`資料分析完成。成功載入 ${Object.keys(memFlags).length} 項系統記憶設定。`, 'success')
+        addLog(`資料分析完成。成功預載對應 ${Object.keys(initialMap).length} 個欄位！`, 'success')
         setStep(2)
     } catch (err) { addLog(`分析異常: ${err.message}`, 'error') } finally { setProcessing(false) }
   }
@@ -240,9 +267,13 @@ export default function DataImportCenter() {
                   })
 
                   let status = 'not_found', dbId = null, duplicateOptions = []
-                  if (matches.length === 1) { status = 'perfect'; dbId = matches[0].id; perfect++; } 
-                  else if (matches.length > 1) { status = 'duplicate'; duplicateOptions = matches; duplicate++; } 
-                  else { notFound++; }
+                  let dbInfo = { full_name: '', email: '', contact_email: '' } 
+
+                  if (matches.length === 1) { 
+                      status = 'perfect'; dbId = matches[0].id; dbInfo = matches[0]; perfect++; 
+                  } else if (matches.length > 1) { 
+                      status = 'duplicate'; duplicateOptions = matches; duplicate++; 
+                  } else { notFound++; }
 
                   const updateData = {}
                   Object.keys(fieldMapping).forEach(exCol => {
@@ -250,7 +281,7 @@ export default function DataImportCenter() {
                       if (dbField && exCol !== patchAnchorExcel) updateData[dbField] = row[exCol]
                   })
 
-                  return { _id: idx, _rawAnchor: anchorValue, _status: status, _dbId: dbId, _duplicates: duplicateOptions, _updateData: updateData, ...updateData }
+                  return { _id: idx, _rawAnchor: anchorValue, _status: status, _dbId: dbId, _duplicates: duplicateOptions, _updateData: updateData, ...dbInfo, ...updateData }
               })
 
               setPreviewData(transformed)
@@ -294,7 +325,6 @@ export default function DataImportCenter() {
           const toUpdate = previewData.filter(r => ['perfect', 'resolved'].includes(r._status) && r._dbId)
           if (toUpdate.length === 0) { alert("無有效資料可更新！"); setProcessing(false); return; }
           
-          addLog(`準備執行局部更新，預計更新 ${toUpdate.length} 筆資料...`, 'info')
           let success = 0, fail = 0;
           for (const row of toUpdate) {
               try {
@@ -315,18 +345,25 @@ export default function DataImportCenter() {
               ...rest, role: rest.role || 'USER', updated_at: new Date()
           }))
 
-          addLog(`準備執行完整資料寫入，共計 ${validRows.length} 筆資料...`, 'info')
+          const uniqueRowsMap = new Map();
+          cleanRows.forEach(row => {
+              const emailKey = row.email || row.contact_email; 
+              if (emailKey) uniqueRowsMap.set(emailKey, row); 
+          });
+          const uniqueCleanRows = Array.from(uniqueRowsMap.values());
+          
+          const duplicateCount = cleanRows.length - uniqueCleanRows.length;
+          if (duplicateCount > 0) {
+              addLog(`自動過濾了 ${duplicateCount} 筆重複的 Email 資料，確保寫入安全。`, 'warning')
+          }
 
-          for (let i = 0; i < cleanRows.length; i += BATCH) {
-              const chunk = cleanRows.slice(i, i + BATCH)
+          for (let i = 0; i < uniqueCleanRows.length; i += BATCH) {
+              const chunk = uniqueCleanRows.slice(i, i + BATCH)
               try {
                   const { error } = await supabase.from('profiles').upsert(chunk, { onConflict: 'email' })
                   if (error) throw error
                   success += chunk.length
-              } catch (err) { 
-                  fail += chunk.length; 
-                  addLog(`批次寫入失敗: 可能是 Email 重複或資料庫限制 (${err.message})`, 'error') 
-              }
+              } catch (err) { fail += chunk.length; addLog(`批次寫入失敗: (${err.message})`, 'error') }
           }
           addLog(`完整資料建檔作業完成。成功: ${success} 筆，失敗: ${fail} 筆。`, fail === 0 ? 'success' : 'warning')
       }
@@ -335,7 +372,7 @@ export default function DataImportCenter() {
       if (!logs.some(l => l.type === 'error') && fail === 0) {
           setTimeout(() => { alert("系統匯入作業已成功完成！"); handleModeSwitch(mode); }, 1500)
       } else {
-          alert("作業完成，但有部分資料匯入失敗。請匯出「審核報表」或查看「系統日誌」以了解原因！")
+          alert("作業完成，但有部分資料匯入失敗。請查看「系統日誌」了解原因！")
       }
   }
 
@@ -343,10 +380,17 @@ export default function DataImportCenter() {
       const newData = [...previewData]
       newData[rowIndex]._dbId = selectedDbId
       newData[rowIndex]._status = selectedDbId ? 'resolved' : 'duplicate'
+      if (selectedDbId !== 'SKIP' && selectedDbId) {
+          const selectedUser = newData[rowIndex]._duplicates.find(u => u.id === selectedDbId);
+          if (selectedUser) {
+              newData[rowIndex].full_name = selectedUser.full_name;
+              newData[rowIndex].contact_email = selectedUser.contact_email;
+              newData[rowIndex].email = selectedUser.email;
+          }
+      }
       setPreviewData(newData)
   }
 
-  // 🔍 過濾器：根據下拉選單過濾顯示的資料
   const filteredData = previewData.filter(row => {
       if (viewFilter === 'all') return true;
       if (viewFilter === 'valid') return ['valid', 'perfect', 'resolved'].includes(row._status);
@@ -354,19 +398,27 @@ export default function DataImportCenter() {
       return true;
   });
 
+  const getDynamicMappedFields = () => {
+      return Object.keys(fieldMapping).filter(excelCol => {
+          const dbField = fieldMapping[excelCol];
+          return dbField && !['full_name', 'email', 'contact_email'].includes(dbField);
+      });
+  }
+
   return (
-    <div className="space-y-6 pb-20 animate-fade-in text-slate-800">
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+    <div className="w-full space-y-6 pb-20 animate-fade-in text-slate-800">
+      
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 w-full">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
             <div>
                 <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
-                    <Database className="text-blue-600"/> 資料整合匯入中心 <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold border border-slate-200">System V9.0</span>
+                    <Database className="text-blue-600"/> 資料整合匯入中心 <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold border border-slate-200">System V9.6 AI 智慧版</span>
                 </h2>
-                <p className="text-slate-500 text-sm mt-1">企業級資料處理模組。支援「完整資料整合」與「特定欄位更新」雙重作業模式。</p>
+                <p className="text-slate-500 text-sm mt-1">企業級資料處理模組。支援自動對接欄位與大螢幕滿版檢視。</p>
             </div>
             <div className="flex bg-slate-50 p-1 rounded-lg border border-slate-200">
-                <button onClick={()=>handleModeSwitch('full')} className={`px-4 py-2 rounded-md font-bold text-sm flex items-center gap-2 transition-all ${mode==='full' ? 'bg-white shadow-sm border border-slate-200 text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}><Merge size={16}/> 完整資料整合 (新增/覆寫)</button>
-                <button onClick={()=>handleModeSwitch('patch')} className={`px-4 py-2 rounded-md font-bold text-sm flex items-center gap-2 transition-all ${mode==='patch' ? 'bg-white shadow-sm border border-slate-200 text-amber-600' : 'text-slate-500 hover:text-slate-700'}`}><Edit size={16}/> 特定欄位更新 (局部修改)</button>
+                <button onClick={()=>handleModeSwitch('full')} className={`px-4 py-2 rounded-md font-bold text-sm flex items-center gap-2 transition-all ${mode==='full' ? 'bg-white shadow-sm border border-slate-200 text-blue-600' : 'text-slate-500 hover:text-slate-700'} `}><Merge size={16}/> 完整資料整合</button>
+                <button onClick={()=>handleModeSwitch('patch')} className={`px-4 py-2 rounded-md font-bold text-sm flex items-center gap-2 transition-all ${mode==='patch' ? 'bg-white shadow-sm border border-slate-200 text-amber-600' : 'text-slate-500 hover:text-slate-700'}`}><Edit size={16}/> 特定欄位更新</button>
             </div>
           </div>
           
@@ -453,17 +505,17 @@ export default function DataImportCenter() {
                 </div>
             )}
 
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm w-full">
                 <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
                     <h4 className="font-bold text-slate-800 flex items-center gap-2">
-                        <Settings className="text-slate-500"/> {mode === 'patch' ? '步驟 2-2：選擇欲更新的資料欄位' : '欄位對應設定 (Data Mapping)'}
+                        <Settings className="text-slate-500"/> {mode === 'patch' ? '步驟 2-2：選擇欲更新的資料欄位 (系統已為您自動配對)' : '欄位對應設定 (Data Mapping)'}
                     </h4>
                     <button onClick={handleClearMemory} className="flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-red-500 px-3 py-1.5 rounded-lg hover:bg-red-50 transition-colors">
                         <Trash2 size={14}/> 重置系統記憶
                     </button>
                 </div>
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[600px] overflow-y-auto p-2 bg-slate-50 rounded-xl">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[60vh] overflow-y-auto p-2 bg-slate-50 rounded-xl custom-scrollbar">
                     {rawHeaders.filter(h => mode === 'full' || h !== patchAnchorExcel).map((header) => {
                         const mappedKey = fieldMapping[header]
                         const isMapped = !!mappedKey
@@ -480,7 +532,7 @@ export default function DataImportCenter() {
                                     {isFromWix && <span className="text-[10px] bg-purple-100 text-purple-600 px-1.5 rounded font-medium">輔助表</span>}
                                 </div>
                                 <div className="font-bold text-slate-800 text-sm mb-3 truncate" title={header}>{header}</div>
-                                <div className="text-[10px] font-bold text-slate-400 mb-1">匯入至系統欄位 (Database)</div>
+                                <div className="text-[10px] font-bold text-slate-400 mb-1">匯入至系統欄位</div>
                                 <select 
                                     className={`w-full p-2 rounded-lg font-medium text-sm border outline-none ${isMapped ? 'border-blue-300 text-blue-800 bg-blue-50/30' : 'border-slate-200 text-slate-500 bg-slate-50'}`}
                                     value={mappedKey || ""} onChange={(e) => handleUpdateMapping(header, e.target.value)} 
@@ -499,59 +551,61 @@ export default function DataImportCenter() {
             </div>
 
             <div className="flex justify-end gap-4">
-                <button onClick={() => setStep(1)} className="px-6 py-2 rounded-xl font-medium text-slate-600 hover:bg-slate-100">返回上一步</button>
+                <button onClick={() => setStep(1)} className="px-6 py-2 rounded-xl font-medium text-slate-600 hover:bg-slate-100 border border-slate-200">返回上一步</button>
                 <button onClick={handleMatchAndTransform} disabled={processing} className="px-8 py-2 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-md flex items-center gap-2">
-                    <LayoutList size={18}/> 產生資料預覽
+                    <LayoutList size={18}/> 確認對應，產生預覽
                 </button>
             </div>
         </div>
       )}
 
       {step === 3 && (
-        <div className="space-y-6 animate-fade-in-up">
-            <div className="flex flex-wrap items-center justify-between p-5 rounded-2xl shadow-sm bg-white border border-slate-200 gap-4">
+        <div className="space-y-4 animate-fade-in-up w-full">
+            
+            <div className="flex flex-wrap items-center justify-start p-4 rounded-xl shadow-sm bg-white border border-slate-200 gap-6">
                 {mode === 'patch' ? (
-                    <div className="flex gap-4 items-center">
-                        <div className="bg-green-50 px-3 py-2 rounded-lg border border-green-100 text-center">
-                            <div className="text-xs text-green-600 font-bold">🟢 可更新</div>
-                            <div className="text-xl font-black text-green-700">{previewData.filter(r=>['perfect','resolved'].includes(r._status)).length}</div>
+                    <div className="flex gap-4 items-center border-r border-slate-200 pr-6">
+                        <div className="bg-green-50/50 px-4 py-2 rounded-lg border border-green-100 text-center min-w-[100px]">
+                            <div className="text-xs text-green-600 font-bold flex items-center justify-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500"></span>可更新</div>
+                            <div className="text-2xl font-black text-green-700 mt-1">{previewData.filter(r=>['perfect','resolved'].includes(r._status)).length}</div>
                         </div>
-                        <div className="bg-amber-50 px-3 py-2 rounded-lg border border-amber-100 text-center">
-                            <div className="text-xs text-amber-600 font-bold">🟡 需手動確認</div>
-                            <div className="text-xl font-black text-amber-700">{previewData.filter(r=>r._status==='duplicate').length}</div>
+                        <div className="bg-amber-50/50 px-4 py-2 rounded-lg border border-amber-100 text-center min-w-[100px]">
+                            <div className="text-xs text-amber-600 font-bold flex items-center justify-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500"></span>需手動確認</div>
+                            <div className="text-2xl font-black text-amber-700 mt-1">{previewData.filter(r=>r._status==='duplicate').length}</div>
                         </div>
-                        <div className="bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 text-center">
-                            <div className="text-xs text-slate-500 font-bold">⚪ 將略過</div>
-                            <div className="text-xl font-black text-slate-600">{previewData.filter(r=>r._status==='not_found').length}</div>
+                        <div className="bg-slate-50/50 px-4 py-2 rounded-lg border border-slate-200 text-center min-w-[100px]">
+                            <div className="text-xs text-slate-500 font-bold flex items-center justify-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-400"></span>查無此人</div>
+                            <div className="text-2xl font-black text-slate-600 mt-1">{previewData.filter(r=>r._status==='not_found').length}</div>
                         </div>
                     </div>
                 ) : (
-                    <div className="flex gap-4 items-center">
-                        <div className="bg-green-50 px-4 py-2 rounded-lg border border-green-100 text-center">
-                            <div className="text-xs text-green-600 font-bold">🟢 格式完整</div>
-                            <div className="text-xl font-black text-green-700">{previewData.filter(r=>r._status==='valid').length}</div>
+                    <div className="flex gap-4 items-center border-r border-slate-200 pr-6">
+                        <div className="bg-green-50/50 px-5 py-2.5 rounded-lg border border-green-100 text-center min-w-[120px]">
+                            <div className="text-xs text-green-600 font-bold flex items-center justify-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500"></span>格式完整</div>
+                            <div className="text-2xl font-black text-green-700 mt-1">{previewData.filter(r=>r._status==='valid').length}</div>
                         </div>
-                        <div className="bg-red-50 px-4 py-2 rounded-lg border border-red-100 text-center">
-                            <div className="text-xs text-red-600 font-bold">🔴 異常/缺漏</div>
-                            <div className="text-xl font-black text-red-700">{previewData.filter(r=>r._status==='invalid').length}</div>
+                        <div className="bg-red-50/50 px-5 py-2.5 rounded-lg border border-red-100 text-center min-w-[120px]">
+                            <div className="text-xs text-red-600 font-bold flex items-center justify-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500"></span>異常/缺漏</div>
+                            <div className="text-2xl font-black text-red-700 mt-1">{previewData.filter(r=>r._status==='invalid').length}</div>
                         </div>
                     </div>
                 )}
                 
                 <div className="flex items-center gap-3">
-                    <button onClick={() => setStep(2)} className="px-5 py-2.5 rounded-xl font-medium text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200">返回修改設定</button>
-                    <button onClick={handleExecute} disabled={processing || previewData.filter(r=>mode==='patch' ? ['perfect','resolved'].includes(r._status) : r._status==='valid').length === 0} className="px-8 py-2.5 rounded-xl font-bold text-white shadow-md flex items-center gap-2 disabled:opacity-50 bg-slate-800 hover:bg-slate-700">
+                    <button onClick={() => setStep(2)} className="px-5 py-2.5 rounded-xl font-medium text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200 transition-colors">返回修改設定</button>
+                    <button onClick={handleExecute} disabled={processing || previewData.filter(r=>mode==='patch' ? ['perfect','resolved'].includes(r._status) : r._status==='valid').length === 0} className="px-8 py-2.5 rounded-xl font-bold text-white shadow-md flex items-center gap-2 disabled:opacity-50 bg-slate-800 hover:bg-slate-700 transition-transform active:scale-95">
                         <Save size={18}/> {processing ? '系統處理中...' : '確認無誤，執行匯入'}
                     </button>
                 </div>
             </div>
 
-            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-                <div className="p-4 bg-slate-50 border-b border-slate-200 font-bold text-slate-700 flex justify-between items-center flex-wrap gap-4">
-                    <div className="flex items-center gap-3">
-                        <Filter size={18} className="text-slate-500"/>
+            <div className="bg-white border border-slate-200 rounded-xl shadow-sm w-full flex flex-col overflow-hidden">
+                
+                <div className="p-3 bg-white border-b border-slate-200 flex justify-start items-center w-full gap-4">
+                    <div className="flex items-center gap-2">
+                        <Filter size={16} className="text-slate-400"/>
                         <select 
-                            className="bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500"
+                            className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500"
                             value={viewFilter} onChange={(e) => setViewFilter(e.target.value)}
                         >
                             <option value="all">顯示全部名單 ({previewData.length} 筆)</option>
@@ -559,77 +613,60 @@ export default function DataImportCenter() {
                             <option value="error">🔴 僅顯示異常/需確認名單</option>
                         </select>
                     </div>
+
+                    <div className="h-6 w-px bg-slate-200"></div> 
                     
-                    {/* 📊 匯出報表按鈕 */}
-                    <button onClick={handleExportExcel} className="flex items-center gap-2 text-sm bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 px-4 py-1.5 rounded-lg transition-colors font-bold">
+                    <button onClick={handleExportExcel} className="flex items-center gap-2 text-sm text-green-700 bg-green-50 hover:bg-green-100 border border-green-200 px-4 py-1.5 rounded-lg transition-colors font-bold shadow-sm">
                         <Download size={16}/> 匯出審核報表 (Excel)
                     </button>
                 </div>
-                <div className="overflow-x-auto max-h-[500px]">
+                
+                <div className="w-full overflow-x-auto overflow-y-auto max-h-[65vh] custom-scrollbar">
                     <table className="w-full text-sm text-left whitespace-nowrap">
-                        <thead className="bg-white text-slate-500 font-medium sticky top-0 z-10 shadow-sm text-xs">
+                        <thead className="bg-white text-slate-500 font-bold sticky top-0 z-10 text-xs border-b border-slate-200">
                             <tr>
-                                <th className="p-4 border-b">資料狀態</th>
-                                {mode === 'patch' ? (
-                                    <>
-                                        <th className="p-4 border-b bg-slate-50">比對基準 ({patchAnchorExcel})</th>
-                                        {Object.keys(fieldMapping).filter(k=>fieldMapping[k]).map(col => (
-                                            <th key={col} className="p-4 border-b text-blue-600">更新: {col}</th>
-                                        ))}
-                                    </>
-                                ) : (
-                                    <>
-                                        <th className="p-4 border-b">資料來源</th>
-                                        {Object.keys(fieldMapping).filter(k=>fieldMapping[k]).slice(0,10).map(col => (
-                                            <th key={col} className="p-4 border-b text-slate-700">{col}</th>
-                                        ))}
-                                        {Object.keys(fieldMapping).filter(k=>fieldMapping[k]).length > 10 && <th className="p-4 border-b text-slate-400">...其他欄位</th>}
-                                    </>
-                                )}
+                                <th className="px-6 py-4 bg-white/95 backdrop-blur">資料狀態</th>
+                                <th className="px-6 py-4 bg-white/95 backdrop-blur text-slate-800">姓名(A)</th>
+                                <th className="px-6 py-4 bg-white/95 backdrop-blur text-slate-800">聯絡信箱(E)</th>
+                                <th className="px-6 py-4 bg-white/95 backdrop-blur text-slate-800">登入帳號/WIX(Y)</th>
+                                {mode === 'patch' && <th className="px-6 py-4 bg-amber-50/95 backdrop-blur text-amber-800 border-l border-amber-100">比對基準 ({patchAnchorExcel})</th>}
+                                {getDynamicMappedFields().map(excelCol => (
+                                    <th key={excelCol} className="px-6 py-4 bg-white/95 backdrop-blur text-blue-600">更新: {excelCol}</th>
+                                ))}
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {/* 🚀 無限顯示 (透過 filteredData 控制) */}
+                        <tbody className="divide-y divide-slate-100 bg-white">
                             {filteredData.map((row) => (
                                 <tr key={row._id} className={
                                     mode === 'patch' 
-                                        ? (row._status === 'duplicate' ? 'bg-amber-50/50' : row._status === 'not_found' ? 'bg-slate-50 opacity-60' : 'hover:bg-slate-50')
+                                        ? (row._status === 'duplicate' ? 'bg-amber-50/50' : row._status === 'not_found' ? 'opacity-50' : 'hover:bg-slate-50')
                                         : (row._status === 'invalid' ? 'bg-red-50/50' : 'hover:bg-slate-50')
                                 }>
-                                    {mode === 'patch' ? (
-                                        <>
-                                            <td className="p-4">
-                                                {row._status === 'perfect' && <span className="text-green-600 font-bold text-xs"><CheckCircle size={14} className="inline mr-1"/>準備更新</span>}
-                                                {row._status === 'resolved' && <span className="text-blue-600 font-bold text-xs"><UserCheck size={14} className="inline mr-1"/>已手動指定</span>}
-                                                {row._status === 'not_found' && <span className="text-slate-400 font-medium text-xs"><XCircle size={14} className="inline mr-1"/>查無此人(略過)</span>}
-                                                {row._status === 'duplicate' && (
-                                                    <div className="space-y-1">
-                                                        <span className="text-amber-600 font-bold text-xs">⚠️ 發現 {row._duplicates.length} 筆重複名稱：</span>
-                                                        <select className="w-full p-2 border border-amber-300 rounded bg-white text-xs font-medium text-slate-700" onChange={(e) => resolveDuplicate(row._id, e.target.value)} defaultValue="">
-                                                            <option value="" disabled>-- 請指定要更新的人員 --</option>
-                                                            {row._duplicates.map(dup => <option key={dup.id} value={dup.id}>{dup.full_name} | {dup.phone || '無電話'} | {dup.email}</option>)}
-                                                            <option value="SKIP">🚫 皆非，略過此筆</option>
-                                                        </select>
-                                                    </div>
-                                                )}
-                                            </td>
-                                            <td className="p-4 font-bold text-slate-700 bg-slate-50/50">{row._rawAnchor}</td>
-                                            {Object.keys(fieldMapping).filter(k=>fieldMapping[k]).map(exCol => (
-                                                <td key={exCol} className="p-4 text-blue-700">{row[exCol] || '-'}</td>
-                                            ))}
-                                        </>
-                                    ) : (
-                                        <>
-                                            <td className="p-4">
-                                                {row._status === 'valid' ? <span className="text-green-600 font-bold text-xs">🟢 正常</span> : <span className="text-red-500 font-bold text-xs">🔴 {row._error}</span>}
-                                            </td>
-                                            <td className="p-4 text-xs text-slate-500">{row._source}</td>
-                                            {Object.keys(fieldMapping).filter(k=>fieldMapping[k]).slice(0,10).map(col => (
-                                                <td key={col} className="p-4 text-sm max-w-[150px] truncate" title={row[col]}>{row[col] || '-'}</td>
-                                            ))}
-                                            {Object.keys(fieldMapping).filter(k=>fieldMapping[k]).length > 10 && <td className="p-4 text-slate-300">...</td>}
-                                        </>
-                                    )}
+                                    <td className="px-6 py-3">
+                                        {row._status === 'valid' && <span className="text-green-600 font-bold flex items-center gap-1.5"><CheckCircle size={14}/>資料完整</span>}
+                                        {row._status === 'invalid' && <span className="text-red-600 font-bold flex items-center gap-1.5"><XCircle size={14}/>{row._error}</span>}
+                                        {row._status === 'perfect' && <span className="text-green-600 font-bold flex items-center gap-1.5"><CheckCircle size={14}/>準備更新</span>}
+                                        {row._status === 'resolved' && <span className="text-blue-600 font-bold flex items-center gap-1.5"><UserCheck size={14}/>已手動指定</span>}
+                                        {row._status === 'not_found' && <span className="text-slate-400 font-medium flex items-center gap-1.5"><XCircle size={14}/>查無此人(略過)</span>}
+                                        
+                                        {row._status === 'duplicate' && (
+                                            <div className="space-y-1 mt-1">
+                                                <span className="text-amber-600 font-bold text-xs">⚠️ 發現 {row._duplicates.length} 筆重複：</span>
+                                                <select className="w-full min-w-[200px] p-1.5 border border-amber-300 rounded bg-white text-xs font-medium text-slate-700" onChange={(e) => resolveDuplicate(row._id, e.target.value)} defaultValue="">
+                                                    <option value="" disabled>-- 請指定更新對象 --</option>
+                                                    {row._duplicates.map(dup => <option key={dup.id} value={dup.id}>{dup.full_name} | {dup.phone || '無電話'} | {dup.email}</option>)}
+                                                    <option value="SKIP">🚫 皆非，略過此筆</option>
+                                                </select>
+                                            </div>
+                                        )}
+                                    </td>
+                                    <td className="px-6 py-3 font-bold text-slate-800">{row.full_name || '-'}</td>
+                                    <td className="px-6 py-3 text-slate-600">{row.contact_email || '-'}</td>
+                                    <td className="px-6 py-3 text-slate-600">{row.email || '-'}</td>
+                                    {mode === 'patch' && <td className="px-6 py-3 font-bold text-amber-700 bg-amber-50/30 border-l border-amber-100/50">{row._rawAnchor}</td>}
+                                    {getDynamicMappedFields().map(excelCol => (
+                                        <td key={excelCol} className="px-6 py-3 text-blue-700">{row[fieldMapping[excelCol]] || '-'}</td>
+                                    ))}
                                 </tr>
                             ))}
                         </tbody>
@@ -640,10 +677,9 @@ export default function DataImportCenter() {
       )}
 
       {/* 系統執行紀錄區 */}
-      <div className="bg-slate-900 rounded-xl p-4 h-48 overflow-hidden flex flex-col shadow-inner">
+      <div className="bg-slate-900 rounded-xl p-4 h-40 overflow-hidden flex flex-col shadow-inner w-full">
           <div className="text-slate-400 text-xs font-bold border-b border-slate-700 pb-2 mb-2 flex justify-between items-center">
               <span className="flex items-center gap-2"><Database size={14}/> 系統執行紀錄 (System Logs)</span>
-              {/* 📝 匯出 TXT 日誌按鈕 */}
               <button onClick={handleExportLog} className="flex items-center gap-1 hover:text-white transition-colors border border-slate-600 px-2 py-1 rounded">
                   <FileText size={12}/> 匯出日誌
               </button>

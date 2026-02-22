@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Outlet, useNavigate, useLocation, Link } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
-import { LayoutDashboard, Users, LogOut, Loader2, ShieldAlert, ShieldCheck, UserPlus, AlertTriangle, Ban, ServerCog, UploadCloud } from 'lucide-react'
+import { LayoutDashboard, Users, LogOut, Loader2, ShieldAlert, ShieldCheck, UserPlus, AlertTriangle, Ban, ServerCog, UploadCloud, Flag } from 'lucide-react'
 
 export default function AdminLayout() {
   const [loading, setLoading] = useState(true)
@@ -49,12 +49,19 @@ export default function AdminLayout() {
   
   if (!isAuthorized) return null
 
-  // 📝 選單配置 (徹底移除軍事用語，改為標準企業 CRM 用語)
+  // 📝 選單配置
   const menuGroups = [
       { 
           title: "系統總覽",
           items: [
               { path: '/admin/dashboard', icon: <LayoutDashboard size={18}/>, label: '營運數據儀表板' }
+          ]
+      },
+      // 👇 新增：賽事派班與戰略群組
+      {
+          title: "賽事派班與戰略",
+          items: [
+              { path: '/admin/race-builder', icon: <Flag size={18}/>, label: '🚩 賽事兵工廠 (Race Builder)' }
           ]
       },
       {
@@ -133,6 +140,7 @@ export default function AdminLayout() {
               <h2 className="text-2xl font-black text-slate-800">
                   {location.pathname === '/admin/system-status' ? '系統伺服器監控' : 
                    location.pathname === '/admin/import' ? '資料整合匯入中心' :
+                   location.pathname === '/admin/race-builder' ? '賽事兵工廠 (Race Builder)' :
                    menuGroups.flatMap(g => g.items).find(i => 
                       i.path === location.pathname && (i.view ? currentView === i.view : !searchParams.get('view'))
                   )?.label || '系統總覽'}
