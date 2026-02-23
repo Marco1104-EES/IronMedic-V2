@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Outlet, useNavigate, useLocation, Link } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
-import { LayoutDashboard, Users, LogOut, Loader2, ShieldAlert, ShieldCheck, UserPlus, AlertTriangle, Ban, ServerCog, UploadCloud, Flag } from 'lucide-react'
+import { LayoutDashboard, Users, LogOut, Loader2, ShieldAlert, ShieldCheck, UserPlus, AlertTriangle, Ban, ServerCog, UploadCloud, Flag, History, CalendarClock } from 'lucide-react'
 
 export default function AdminLayout() {
   const [loading, setLoading] = useState(true)
@@ -57,11 +57,13 @@ export default function AdminLayout() {
               { path: '/admin/dashboard', icon: <LayoutDashboard size={18}/>, label: '營運數據儀表板' }
           ]
       },
-      // 👇 新增：賽事派班與戰略群組
       {
-          title: "賽事派班與戰略",
+          title: "賽事派班與管理",
           items: [
-              { path: '/admin/race-builder', icon: <Flag size={18}/>, label: '🚩 賽事兵工廠 (Race Builder)' }
+              { path: '/admin/races', icon: <Flag size={18}/>, label: '🚩 賽事任務總覽' },
+              // 🌟 新增子選單：歷史與未來
+              { path: '/admin/races', view: 'HISTORY', icon: <History size={18}/>, label: '📜 歷史任務結算' },
+              { path: '/admin/races', view: 'FUTURE', icon: <CalendarClock size={18}/>, label: '📅 未來任務規劃' }
           ]
       },
       {
@@ -77,6 +79,21 @@ export default function AdminLayout() {
           ]
       }
   ]
+
+  // 🧠 智慧判斷頁面標題
+  const getPageTitle = () => {
+    const { pathname } = location;
+    
+    if (pathname === '/admin/system-status') return '系統伺服器監控';
+    if (pathname === '/admin/import') return '資料整合匯入中心';
+    if (pathname === '/admin/race-builder') return '建立新任務';
+
+    const matchedItem = menuGroups.flatMap(g => g.items).find(i => 
+      i.path === pathname && (i.view ? currentView === i.view : !searchParams.get('view'))
+    );
+    
+    return matchedItem ? matchedItem.label.replace(/🚩 |📜 |📅 |🅰️ |🅱️ |🆎 |⚠️ |⛔ |📥 /g, '') : '系統總覽'; 
+  }
 
   return (
     <div className="min-h-screen bg-slate-100 flex font-sans">
@@ -99,13 +116,18 @@ export default function AdminLayout() {
                           {group.items.map((item, i) => {
                               const isPathMatch = location.pathname === item.path
                               const isViewMatch = item.view ? currentView === item.view : (!searchParams.get('view') && isPathMatch)
-                              const isActive = isPathMatch && (item.view ? isViewMatch : true)
+                              // 如果是 race-builder，讓總覽亮起
+                              const isActive = (isPathMatch || (item.path === '/admin/races' && !item.view && location.pathname === '/admin/race-builder')) && (item.view ? isViewMatch : true)
+                              
+                              // 🌟 調整子選單的縮排樣式
+                              const isSubItem = ['HISTORY', 'FUTURE'].includes(item.view)
+                              const linkClasses = `flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all font-bold text-sm ${isActive ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/50' : 'hover:bg-slate-800 hover:text-white'} ${isSubItem ? 'ml-4 text-xs' : ''}`
 
                               return (
                                 <Link 
                                     key={i} 
                                     to={item.view ? `${item.path}?view=${item.view}` : item.path}
-                                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all font-bold text-sm ${isActive ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/50' : 'hover:bg-slate-800 hover:text-white'}`}
+                                    className={linkClasses}
                                 >
                                     {item.icon}
                                     {item.label}
@@ -138,12 +160,7 @@ export default function AdminLayout() {
       <main className="flex-1 ml-64 p-8 animate-fade-in">
           <header className="flex justify-between items-center mb-8">
               <h2 className="text-2xl font-black text-slate-800">
-                  {location.pathname === '/admin/system-status' ? '系統伺服器監控' : 
-                   location.pathname === '/admin/import' ? '資料整合匯入中心' :
-                   location.pathname === '/admin/race-builder' ? '賽事兵工廠 (Race Builder)' :
-                   menuGroups.flatMap(g => g.items).find(i => 
-                      i.path === location.pathname && (i.view ? currentView === i.view : !searchParams.get('view'))
-                  )?.label || '系統總覽'}
+                  {getPageTitle()}
               </h2>
               <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-full shadow-sm border border-slate-200">
                   <div className={`w-2 h-2 rounded-full animate-pulse ${userEmail === 'marco1104@gmail.com' ? 'bg-amber-500' : 'bg-green-500'}`}></div>
