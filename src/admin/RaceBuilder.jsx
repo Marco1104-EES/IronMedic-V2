@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Calendar, MapPin, Clock, ImagePlus, Flag, Plus, Trash2, Save, ShieldAlert, Activity, Users, Settings, Flame, ExternalLink, Loader2, Edit3 } from 'lucide-react'
+import { Calendar, MapPin, Clock, ImagePlus, Flag, Plus, Trash2, Save, ShieldAlert, Activity, Users, Settings, Flame, ExternalLink, Loader2, Edit3, Handshake, Send } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 import { useLocation, useNavigate } from 'react-router-dom'
 
@@ -7,12 +7,11 @@ export default function RaceBuilder() {
   const location = useLocation()
   const navigate = useNavigate()
   
-  // 🌟 抓取網址上的 id，判斷是否為編輯模式
   const searchParams = new URLSearchParams(location.search)
   const editId = searchParams.get('id')
 
   const [raceData, setRaceData] = useState({
-      title: '', date: '', startTime: '', location: '', type: '馬拉松', status: 'UPCOMING', imageUrl: '', isHot: false
+      title: '', date: '', startTime: '', location: '', type: '馬拉松', status: 'OPEN', imageUrl: '', isHot: false
   })
   const [slots, setSlots] = useState([])
   const [isSubmitting, setIsSubmitting] = useState(false) 
@@ -27,12 +26,10 @@ export default function RaceBuilder() {
       '路跑接力': [ ...Array.from({ length: 7 }, (_, i) => ({ group: 'A組 - 競賽組', name: `第${i + 1}棒`, capacity: 1, genderLimit: 'ANY' })) ]
   }
 
-  // 🌟 如果是編輯模式，一進來就抓資料
   useEffect(() => {
       if (editId) {
           fetchExistingRace(editId)
       } else {
-          // 如果是新增模式，給予預設模板
           const template = SLOT_TEMPLATES['馬拉松'].map((s, i) => ({ ...s, id: Date.now() + i }))
           setSlots(template)
       }
@@ -60,12 +57,11 @@ export default function RaceBuilder() {
       }
   }
 
-  // 🌟 手動改變賽事類型時，才跳出替換模板的詢問
   const handleTypeChange = (e) => {
       const newType = e.target.value
       setRaceData({...raceData, type: newType})
       
-      if (window.confirm("更改賽事類型會重置下方的「賽段陣型模板」，確定要重置嗎？\n(如果您已經手動編輯過陣型，建議點選取消)")) {
+      if (window.confirm("更改賽事類型會重置下方的「任務名額配置模板」，確定要重置嗎？\n(如果您已經手動編輯過名單，建議點選取消)")) {
           const template = SLOT_TEMPLATES[newType] || [];
           setSlots(template.map((slot, index) => ({ ...slot, id: Date.now() + index })));
       }
@@ -95,13 +91,11 @@ export default function RaceBuilder() {
           };
 
           if (editId) {
-              // 🌟 編輯模式：更新資料
               const { error } = await supabase.from('races').update(payload).eq('id', editId)
               if (error) throw error;
               alert(`🎉 賽事「${raceData.title}」更新成功！`);
-              navigate('/admin/races') // 存檔後回到清單
+              navigate('/admin/races') 
           } else {
-              // 新增模式：寫入資料
               payload.medic_registered = 0; 
               const { error } = await supabase.from('races').insert([payload])
               if (error) throw error;
@@ -123,17 +117,26 @@ export default function RaceBuilder() {
 
   if (isFetchingData) return <div className="h-64 flex items-center justify-center text-slate-500"><Loader2 className="animate-spin mr-2"/> 讀取賽事資料中...</div>
 
+  // 動態渲染發佈狀態的圖示
+  const renderStatusIcon = (status) => {
+      switch(status) {
+          case 'OPEN': return <Activity size={16} className="text-green-500"/>;
+          case 'NEGOTIATING': return <Handshake size={16} className="text-amber-500"/>;
+          case 'SUBMITTED': return <Send size={16} className="text-slate-600"/>;
+          case 'FULL': return <Users size={16} className="text-red-500"/>;
+          default: return <Clock size={16} className="text-slate-400"/>;
+      }
+  }
+
   return (
     <div className="space-y-6 pb-20 animate-fade-in text-slate-800 w-full">
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
               <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
-                  {/* 🌟 標題動態改變 */}
                   {editId ? <Edit3 className="text-amber-500"/> : <Flag className="text-blue-600"/>}
                   {editId ? '編輯任務情報' : '建立新任務'} 
-                  <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold border border-slate-200">Race Builder</span>
               </h2>
-              <p className="text-slate-500 text-sm mt-1">{editId ? '修改賽事屬性與排班陣型，儲存後將即時生效。' : '請在此設定賽事的基本資訊、屬性，並規劃各組別的賽段與人力需求。'}</p>
+              <p className="text-slate-500 text-sm mt-1">{editId ? '修改賽事屬性與排班名額，儲存後將即時生效。' : '請在此設定賽事的基本資訊、屬性，並規劃各組別的賽段與人力需求。'}</p>
           </div>
           <button onClick={handleSaveRace} disabled={isSubmitting} className={`px-8 py-3 rounded-xl font-black shadow-lg transition-all flex items-center gap-2 ${isSubmitting ? 'bg-slate-400 text-white cursor-not-allowed' : editId ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-amber-500/30' : 'bg-slate-900 hover:bg-blue-600 text-white'}`}>
               {isSubmitting ? <><Loader2 className="animate-spin" size={18}/> 儲存中...</> : <><Save size={18}/> {editId ? '確認並更新賽事' : '簽署並發佈賽事'}</>}
@@ -166,18 +169,28 @@ export default function RaceBuilder() {
                   <div className="space-y-4">
                       <div>
                           <label className="block text-sm font-bold text-slate-700 mb-1">賽事類型 (影響裝備檢查)</label>
-                          {/* 🌟 綁定新的 handleTypeChange */}
                           <select className="w-full border border-slate-300 p-2.5 rounded-lg outline-none font-bold text-blue-700 bg-blue-50/30 cursor-pointer hover:bg-blue-50" value={raceData.type} onChange={handleTypeChange}>
                               <option value="馬拉松">馬拉松 (一般路跑)</option><option value="鐵人三項">鐵人三項 (🚨 強制檢查三鐵衣)</option><option value="二鐵">二鐵</option><option value="游泳">水上/游泳</option><option value="自行車">自行車</option><option value="路跑接力">路跑接力</option>
                           </select>
                       </div>
                       <div>
-                          <label className="block text-sm font-bold text-slate-700 mb-1">發佈狀態</label>
-                          <select className="w-full border border-slate-300 p-2.5 rounded-lg outline-none font-bold" value={raceData.status} onChange={e => setRaceData({...raceData, status: e.target.value})}>
-                              <option value="UPCOMING">🟡 即將開放 (預熱收集意願)</option><option value="OPEN">🟢 招募中 (正式開放報名)</option><option value="FULL">⚫ 任務滿編 (鎖定名額)</option>
-                          </select>
+                          <label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                              任務生命週期狀態
+                          </label>
+                          <div className="relative">
+                              <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                                  {renderStatusIcon(raceData.status)}
+                              </div>
+                              {/* 🌟 擴充了狀態選項 */}
+                              <select className="w-full border border-slate-300 py-2.5 pl-9 pr-4 rounded-lg outline-none font-bold cursor-pointer hover:border-blue-400 transition-colors bg-white appearance-none" value={raceData.status} onChange={e => setRaceData({...raceData, status: e.target.value})}>
+                                  <option value="OPEN">🟢 招募中 (開放報名)</option>
+                                  <option value="NEGOTIATING">🤝 洽談中 (意願收集/預備)</option>
+                                  <option value="SUBMITTED">📤 已送名單 (鎖定/停止報名)</option>
+                                  <option value="FULL">⚫ 滿編 (停止報名，開放候補)</option>
+                              </select>
+                          </div>
                       </div>
-                      <label className="flex items-center gap-2 p-3 bg-red-50 border border-red-100 rounded-lg cursor-pointer hover:bg-red-100 transition-colors">
+                      <label className="flex items-center gap-2 p-3 bg-red-50 border border-red-100 rounded-xl cursor-pointer hover:bg-red-100 transition-colors">
                           <input type="checkbox" className="w-5 h-5 accent-red-500" checked={raceData.isHot} onChange={e => setRaceData({...raceData, isHot: e.target.checked})}/>
                           <span className="font-bold text-red-600 flex items-center gap-1"><Flame size={18}/> 標記為「火熱賽事」</span>
                       </label>
@@ -189,10 +202,10 @@ export default function RaceBuilder() {
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 md:p-8 min-h-full">
                   <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
                       <div>
-                          <h3 className="font-black text-xl text-slate-800 flex items-center gap-2"><Users className="text-blue-600"/> 賽段與名額設定 (Stage & Slot Settings)</h3>
+                          <h3 className="font-black text-xl text-slate-800 flex items-center gap-2"><Users className="text-blue-600"/> 任務名額配置 (Slot Allocation)</h3>
                           <p className="text-xs text-slate-500 mt-1">您可以自由調整隊伍、棒次名稱與需求人數。</p>
                       </div>
-                      <button onClick={addSlot} className="flex items-center gap-1 bg-blue-100 text-blue-700 hover:bg-blue-200 px-4 py-2 rounded-lg font-bold text-sm transition-colors"><Plus size={16}/> 新增賽段</button>
+                      <button onClick={addSlot} className="flex items-center gap-1 bg-blue-100 text-blue-700 hover:bg-blue-200 px-4 py-2 rounded-lg font-bold text-sm transition-colors shadow-sm"><Plus size={16}/> 新增賽段</button>
                   </div>
 
                   <div className="space-y-4">

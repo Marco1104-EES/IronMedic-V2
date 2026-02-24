@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
 import * as XLSX from 'xlsx' 
-import { FileSpreadsheet, CheckCircle, ArrowRight, Save, Database, Settings, LayoutList, Merge, Plus, Target, UserCheck, XCircle, BrainCircuit, Trash2, Edit, Download, FileText, Filter } from 'lucide-react'
+// 🌟 修正：補上漏掉的 FileDown 圖示
+import { FileSpreadsheet, CheckCircle, ArrowRight, Save, Database, Settings, LayoutList, Merge, Plus, Target, UserCheck, XCircle, BrainCircuit, Trash2, Edit, Download, FileText, Filter, FileDown, Upload, AlertTriangle, Users, Flag } from 'lucide-react'
 
 const TARGET_FIELDS = [
     { group: '🟢 【A~O】基本與聯絡資料', options: [
@@ -40,7 +41,17 @@ const TARGET_FIELDS = [
 const FLAT_TARGETS = TARGET_FIELDS.flatMap(g => g.options)
 const MAPPING_MEMORY_KEY = 'ironmedic_mapping_memory'
 
+// 賽事匯入模板表頭
+const RACE_IMPORT_TEMPLATE_HEADERS = [
+    "賽事名稱", "日期(YYYY-MM-DD)", "鳴槍時間(HH:MM)", "地點", "賽事類型(馬拉松/鐵人三項...)", 
+    "海報圖片URL", "狀態(OPEN/NEGOTIATING/SUBMITTED)", "是否火熱(Y/N)", 
+    "賽段配置(JSON格式字串)"
+]
+
 export default function DataImportCenter() {
+  // 🌟 頂層切換：分為「會員匯入」與「賽事建檔」兩個分支
+  const [mainTab, setMainTab] = useState('members') 
+
   const [mode, setMode] = useState('full') 
   const [step, setStep] = useState(1) 
   
@@ -60,6 +71,10 @@ export default function DataImportCenter() {
   const [logs, setLogs] = useState([])
   const [processing, setProcessing] = useState(false)
   const logsEndRef = useRef(null)
+
+  // 賽事匯入的狀態模擬
+  const [isUploadingRace, setIsUploadingRace] = useState(false)
+  const [uploadRaceStatus, setUploadRaceStatus] = useState(null)
 
   const addLog = (msg, type = 'info') => {
     const time = new Date().toLocaleTimeString('zh-TW', { hour12: false })
@@ -158,7 +173,6 @@ export default function DataImportCenter() {
             finalRows = await readExcel(fileMaster)
             if (finalRows.length === 0) throw new Error("檔案為空")
             headers = Object.keys(finalRows[0])
-            // 2-1 步驟：智慧設定為第一欄或是包含 Name 的欄位
             setPatchAnchorExcel(headers.find(h => h.includes('姓名') || h.toLowerCase().includes('name')) || headers[0])
         } else {
             const masterRows = await readExcel(fileMaster)
@@ -202,19 +216,16 @@ export default function DataImportCenter() {
         const memFlags = {}
         const savedMemory = JSON.parse(localStorage.getItem(MAPPING_MEMORY_KEY) || '{}')
 
-        // 🌟 V9.6 全新智慧對接引擎 (雙重保證自動帶入中文欄位)
         headers.forEach(h => {
             let matchedKey = null;
 
-            // 第 1 階段：(A)~(AO) 字母代號絕對定位 (100% 準確率)
             const letterMatch = h.match(/\([A-Z]{1,2}\)/);
             if (letterMatch) {
-                const code = letterMatch[0]; // 例如抓出 "(C)"
+                const code = letterMatch[0]; 
                 const target = FLAT_TARGETS.find(t => t.label.includes(code));
                 if (target) matchedKey = target.key;
             }
 
-            // 第 2 階段：中英雙語模糊比對 (針對舊 Excel 或是 Wix 的英文標題)
             if (!matchedKey) {
                 const lowerH = h.toLowerCase().replace(/\s+/g, '')
                 if (['姓名', 'name', 'fullname'].some(k => lowerH.includes(k)) && !lowerH.includes('緊急') && !lowerH.includes('英文') && !lowerH.includes('emergency')) matchedKey = 'full_name'
@@ -232,7 +243,6 @@ export default function DataImportCenter() {
                 else if (lowerH.includes('英文名') || lowerH.includes('englishname')) matchedKey = 'english_name'
             }
 
-            // 最後套用：記憶優先 > 自動對接
             if (savedMemory[h]) {
                 initialMap[h] = savedMemory[h]; memFlags[h] = true 
             } else if (matchedKey) {
@@ -405,275 +415,395 @@ export default function DataImportCenter() {
       });
   }
 
+  // 🌟 賽事匯入模擬處理
+  const handleSimulateRaceUpload = () => {
+    setIsUploadingRace(true)
+    setUploadRaceStatus(null)
+    addLog("開始執行賽事批次建檔掃描...", 'info')
+    
+    setTimeout(() => {
+        setIsUploadingRace(false)
+        setUploadRaceStatus('success')
+        addLog("賽事批次建檔成功，共匯入 12 筆新賽事。", 'success')
+    }, 2000)
+  }
+
   return (
     <div className="w-full space-y-6 pb-20 animate-fade-in text-slate-800">
       
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 w-full">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-            <div>
-                <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
-                    <Database className="text-blue-600"/> 資料整合匯入中心 <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold border border-slate-200">System V9.6 AI 智慧版</span>
-                </h2>
-                <p className="text-slate-500 text-sm mt-1">企業級資料處理模組。支援自動對接欄位與大螢幕滿版檢視。</p>
+      {/* 🌟 頂層切換頁籤 */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex">
+          <button 
+              onClick={() => setMainTab('members')}
+              className={`flex-1 py-4 text-sm font-black flex justify-center items-center gap-2 relative transition-colors ${mainTab === 'members' ? 'text-blue-600 bg-blue-50/30' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
+          >
+              <Users size={18}/> 👥 會員名單整合
+              {mainTab === 'members' && <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-blue-600"></div>}
+          </button>
+          <button 
+              onClick={() => setMainTab('races')}
+              className={`flex-1 py-4 text-sm font-black flex justify-center items-center gap-2 relative transition-colors ${mainTab === 'races' ? 'text-amber-600 bg-amber-50/30' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
+          >
+              <Flag size={18}/> 🚩 賽事批次建檔
+              {mainTab === 'races' && <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-amber-500"></div>}
+          </button>
+      </div>
+
+      {mainTab === 'members' ? (
+        /* 原有的會員匯入介面 */
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 w-full animate-fade-in-up">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+                <div>
+                    <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
+                        <Database className="text-blue-600"/> 資料整合匯入中心 <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold border border-slate-200">System V9.6 AI 智慧版</span>
+                    </h2>
+                    <p className="text-slate-500 text-sm mt-1">企業級資料處理模組。支援自動對接欄位與大螢幕滿版檢視。</p>
+                </div>
+                <div className="flex bg-slate-50 p-1 rounded-lg border border-slate-200">
+                    <button onClick={()=>handleModeSwitch('full')} className={`px-4 py-2 rounded-md font-bold text-sm flex items-center gap-2 transition-all ${mode==='full' ? 'bg-white shadow-sm border border-slate-200 text-blue-600' : 'text-slate-500 hover:text-slate-700'} `}><Merge size={16}/> 完整資料整合</button>
+                    <button onClick={()=>handleModeSwitch('patch')} className={`px-4 py-2 rounded-md font-bold text-sm flex items-center gap-2 transition-all ${mode==='patch' ? 'bg-white shadow-sm border border-slate-200 text-amber-600' : 'text-slate-500 hover:text-slate-700'}`}><Edit size={16}/> 特定欄位更新</button>
+                </div>
             </div>
-            <div className="flex bg-slate-50 p-1 rounded-lg border border-slate-200">
-                <button onClick={()=>handleModeSwitch('full')} className={`px-4 py-2 rounded-md font-bold text-sm flex items-center gap-2 transition-all ${mode==='full' ? 'bg-white shadow-sm border border-slate-200 text-blue-600' : 'text-slate-500 hover:text-slate-700'} `}><Merge size={16}/> 完整資料整合</button>
-                <button onClick={()=>handleModeSwitch('patch')} className={`px-4 py-2 rounded-md font-bold text-sm flex items-center gap-2 transition-all ${mode==='patch' ? 'bg-white shadow-sm border border-slate-200 text-amber-600' : 'text-slate-500 hover:text-slate-700'}`}><Edit size={16}/> 特定欄位更新</button>
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-2 bg-slate-50 p-3 rounded-xl border border-slate-100">
+            
+            <div className="flex items-center gap-2 bg-slate-50 p-3 rounded-xl border border-slate-100 mb-6">
                 <div className={`px-4 py-2 rounded-lg font-bold text-sm transition-all ${step===1 ? 'bg-slate-800 text-white' : 'text-slate-400'}`}>1. 檔案上傳</div>
                 <ArrowRight size={16} className="text-slate-300"/>
                 <div className={`px-4 py-2 rounded-lg font-bold text-sm transition-all ${step===2 ? 'bg-slate-800 text-white' : 'text-slate-400'}`}>2. 欄位對應設定</div>
                 <ArrowRight size={16} className="text-slate-300"/>
                 <div className={`px-4 py-2 rounded-lg font-bold text-sm transition-all ${step===3 ? 'bg-slate-800 text-white' : 'text-slate-400'}`}>3. 預覽與匯入</div>
-          </div>
-      </div>
-
-      {step === 1 && (
-        <div className="space-y-6">
-            {mode === 'patch' ? (
-                <div className="border-2 border-dashed border-slate-300 rounded-2xl p-12 text-center hover:border-amber-400 bg-white transition-all cursor-pointer">
-                    <input type="file" id="upload-patch" className="hidden" accept=".xlsx,.csv" onChange={(e)=>setFileMaster(e.target.files[0])}/>
-                    <label htmlFor="upload-patch" className="cursor-pointer block">
-                        <div className="w-16 h-16 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mb-4 mx-auto border border-amber-100"><Edit size={32}/></div>
-                        <h3 className="text-xl font-bold text-slate-800 mb-2">上傳「特定欄位更新」資料表</h3>
-                        <p className="text-sm text-slate-500 mb-4">此模式僅會更新您指定的欄位，不會影響人員的其他資料。</p>
-                        {fileMaster && <div className="font-bold text-blue-600 bg-blue-50 border border-blue-100 inline-block px-4 py-2 rounded-full">已選取檔案: {fileMaster.name}</div>}
-                    </label>
-                </div>
-            ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className={`border-2 border-dashed rounded-2xl p-8 text-center transition-all cursor-pointer ${fileMaster ? 'border-blue-400 bg-blue-50' : 'border-slate-300 bg-white hover:border-blue-400'}`}>
-                        <input type="file" id="master-up" className="hidden" accept=".xlsx,.csv" onChange={(e)=>setFileMaster(e.target.files[0])}/>
-                        <label htmlFor="master-up" className="cursor-pointer block">
-                            <FileSpreadsheet size={40} className={`mx-auto mb-4 ${fileMaster ? 'text-blue-600' : 'text-slate-400'}`}/>
-                            <h3 className="text-lg font-bold text-slate-700">1. 上傳主要資料表 (Master)</h3>
-                            <p className="text-xs text-slate-500 mb-2">包含 A~AO 欄位的完整名單</p>
-                            {fileMaster && <div className="text-sm font-bold text-blue-600">{fileMaster.name}</div>}
-                        </label>
-                    </div>
-                    <div className={`border-2 border-dashed rounded-2xl p-8 text-center transition-all cursor-pointer ${fileWix ? 'border-purple-400 bg-purple-50' : 'border-slate-300 bg-white hover:border-purple-400'}`}>
-                        <input type="file" id="wix-up" className="hidden" accept=".xlsx,.csv" onChange={(e)=>setFileWix(e.target.files[0])}/>
-                        <label htmlFor="wix-up" className="cursor-pointer block">
-                            <Plus size={40} className={`mx-auto mb-4 ${fileWix ? 'text-purple-600' : 'text-slate-400'}`}/>
-                            <h3 className="text-lg font-bold text-slate-700">2. 上傳輔助資料表 (選項)</h3>
-                            <p className="text-xs text-slate-500 mb-2">用於合併比對，例如 Wix 報名系統匯出的資料</p>
-                            {fileWix && <div className="text-sm font-bold text-purple-600">{fileWix.name}</div>}
-                        </label>
-                    </div>
-                </div>
-            )}
-            <div className="flex justify-center mt-6">
-                <button 
-                    onClick={handleStep1Submit} disabled={!fileMaster || processing}
-                    className="px-10 py-3 text-white rounded-xl font-bold bg-slate-800 hover:bg-slate-700 shadow-md flex items-center justify-center gap-2 transition-transform active:scale-95 disabled:opacity-50"
-                >
-                    {processing ? '資料解析中...' : '確認檔案，進入下一步'}
-                </button>
-            </div>
-        </div>
-      )}
-
-      {step === 2 && (
-        <div className="space-y-6 animate-fade-in-up">
-            {mode === 'patch' && (
-                <div className="bg-amber-50 border border-amber-200 p-6 rounded-2xl shadow-sm">
-                    <h4 className="font-bold text-amber-800 flex items-center gap-2 mb-4">
-                        <Target className="text-amber-600"/> 步驟 2-1：設定資料比對基準 (Primary Key)
-                    </h4>
-                    <div className="flex flex-col md:flex-row items-center gap-4 bg-white p-4 rounded-xl border border-amber-100">
-                        <div className="flex-1 w-full">
-                            <label className="text-xs font-bold text-slate-500 block mb-1">您上傳的 Excel 欄位</label>
-                            <select className="w-full p-2.5 rounded-lg border focus:ring-2 border-slate-300 font-medium text-slate-700" value={patchAnchorExcel} onChange={e=>setPatchAnchorExcel(e.target.value)}>
-                                <option value="">請選擇...</option>
-                                {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
-                            </select>
-                        </div>
-                        <ArrowRight className="text-slate-300 md:mt-5 shrink-0 rotate-90 md:rotate-0"/>
-                        <div className="flex-1 w-full">
-                            <label className="text-xs font-bold text-slate-500 block mb-1">對應至系統識別欄位</label>
-                            <select className="w-full p-2.5 rounded-lg border focus:ring-2 border-slate-300 font-medium text-slate-700" value={patchAnchorDB} onChange={e=>setPatchAnchorDB(e.target.value)}>
-                                <option value="full_name">中文姓名(A)</option>
-                                <option value="national_id">身分證字號(C) (建議，最精準)</option>
-                                <option value="contact_email">聯絡信箱(E)</option>
-                                <option value="email">報名系統登入帳號(Y)</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm w-full">
-                <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
-                    <h4 className="font-bold text-slate-800 flex items-center gap-2">
-                        <Settings className="text-slate-500"/> {mode === 'patch' ? '步驟 2-2：選擇欲更新的資料欄位 (系統已為您自動配對)' : '欄位對應設定 (Data Mapping)'}
-                    </h4>
-                    <button onClick={handleClearMemory} className="flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-red-500 px-3 py-1.5 rounded-lg hover:bg-red-50 transition-colors">
-                        <Trash2 size={14}/> 重置系統記憶
-                    </button>
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[60vh] overflow-y-auto p-2 bg-slate-50 rounded-xl custom-scrollbar">
-                    {rawHeaders.filter(h => mode === 'full' || h !== patchAnchorExcel).map((header) => {
-                        const mappedKey = fieldMapping[header]
-                        const isMapped = !!mappedKey
-                        const isFromWix = mode === 'full' && header.includes('(輔助)')
-                        const isFromMemory = memoryFlags[header] 
-
-                        return (
-                            <div key={header} className={`p-4 rounded-xl border transition-all relative ${isMapped ? 'border-blue-300 bg-white shadow-sm' : 'border-slate-200 bg-white opacity-70'}`}>
-                                {isFromMemory && isMapped && (
-                                    <div className="absolute -top-2.5 right-3 bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200 flex items-center gap-1"><BrainCircuit size={10}/> 智慧載入</div>
-                                )}
-                                <div className="flex justify-between items-center mb-1 mt-1">
-                                    <span className="text-[10px] font-bold text-slate-400">來源資料 (Excel)</span>
-                                    {isFromWix && <span className="text-[10px] bg-purple-100 text-purple-600 px-1.5 rounded font-medium">輔助表</span>}
-                                </div>
-                                <div className="font-bold text-slate-800 text-sm mb-3 truncate" title={header}>{header}</div>
-                                <div className="text-[10px] font-bold text-slate-400 mb-1">匯入至系統欄位</div>
-                                <select 
-                                    className={`w-full p-2 rounded-lg font-medium text-sm border outline-none ${isMapped ? 'border-blue-300 text-blue-800 bg-blue-50/30' : 'border-slate-200 text-slate-500 bg-slate-50'}`}
-                                    value={mappedKey || ""} onChange={(e) => handleUpdateMapping(header, e.target.value)} 
-                                >
-                                    <option value="">-- 略過不匯入 --</option>
-                                    {TARGET_FIELDS.map(group => (
-                                        <optgroup key={group.group} label={group.group}>
-                                            {group.options.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
-                                        </optgroup>
-                                    ))}
-                                </select>
-                            </div>
-                        )
-                    })}
-                </div>
             </div>
 
-            <div className="flex justify-end gap-4">
-                <button onClick={() => setStep(1)} className="px-6 py-2 rounded-xl font-medium text-slate-600 hover:bg-slate-100 border border-slate-200">返回上一步</button>
-                <button onClick={handleMatchAndTransform} disabled={processing} className="px-8 py-2 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-md flex items-center gap-2">
-                    <LayoutList size={18}/> 確認對應，產生預覽
-                </button>
-            </div>
-        </div>
-      )}
-
-      {step === 3 && (
-        <div className="space-y-4 animate-fade-in-up w-full">
-            
-            <div className="flex flex-wrap items-center justify-start p-4 rounded-xl shadow-sm bg-white border border-slate-200 gap-6">
+            {step === 1 && (
+            <div className="space-y-6">
                 {mode === 'patch' ? (
-                    <div className="flex gap-4 items-center border-r border-slate-200 pr-6">
-                        <div className="bg-green-50/50 px-4 py-2 rounded-lg border border-green-100 text-center min-w-[100px]">
-                            <div className="text-xs text-green-600 font-bold flex items-center justify-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500"></span>可更新</div>
-                            <div className="text-2xl font-black text-green-700 mt-1">{previewData.filter(r=>['perfect','resolved'].includes(r._status)).length}</div>
-                        </div>
-                        <div className="bg-amber-50/50 px-4 py-2 rounded-lg border border-amber-100 text-center min-w-[100px]">
-                            <div className="text-xs text-amber-600 font-bold flex items-center justify-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500"></span>需手動確認</div>
-                            <div className="text-2xl font-black text-amber-700 mt-1">{previewData.filter(r=>r._status==='duplicate').length}</div>
-                        </div>
-                        <div className="bg-slate-50/50 px-4 py-2 rounded-lg border border-slate-200 text-center min-w-[100px]">
-                            <div className="text-xs text-slate-500 font-bold flex items-center justify-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-400"></span>查無此人</div>
-                            <div className="text-2xl font-black text-slate-600 mt-1">{previewData.filter(r=>r._status==='not_found').length}</div>
-                        </div>
+                    <div className="border-2 border-dashed border-slate-300 rounded-2xl p-12 text-center hover:border-amber-400 bg-white transition-all cursor-pointer">
+                        <input type="file" id="upload-patch" className="hidden" accept=".xlsx,.csv" onChange={(e)=>setFileMaster(e.target.files[0])}/>
+                        <label htmlFor="upload-patch" className="cursor-pointer block">
+                            <div className="w-16 h-16 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mb-4 mx-auto border border-amber-100"><Edit size={32}/></div>
+                            <h3 className="text-xl font-bold text-slate-800 mb-2">上傳「特定欄位更新」資料表</h3>
+                            <p className="text-sm text-slate-500 mb-4">此模式僅會更新您指定的欄位，不會影響人員的其他資料。</p>
+                            {fileMaster && <div className="font-bold text-blue-600 bg-blue-50 border border-blue-100 inline-block px-4 py-2 rounded-full">已選取檔案: {fileMaster.name}</div>}
+                        </label>
                     </div>
                 ) : (
-                    <div className="flex gap-4 items-center border-r border-slate-200 pr-6">
-                        <div className="bg-green-50/50 px-5 py-2.5 rounded-lg border border-green-100 text-center min-w-[120px]">
-                            <div className="text-xs text-green-600 font-bold flex items-center justify-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500"></span>格式完整</div>
-                            <div className="text-2xl font-black text-green-700 mt-1">{previewData.filter(r=>r._status==='valid').length}</div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className={`border-2 border-dashed rounded-2xl p-8 text-center transition-all cursor-pointer ${fileMaster ? 'border-blue-400 bg-blue-50' : 'border-slate-300 bg-white hover:border-blue-400'}`}>
+                            <input type="file" id="master-up" className="hidden" accept=".xlsx,.csv" onChange={(e)=>setFileMaster(e.target.files[0])}/>
+                            <label htmlFor="master-up" className="cursor-pointer block">
+                                <FileSpreadsheet size={40} className={`mx-auto mb-4 ${fileMaster ? 'text-blue-600' : 'text-slate-400'}`}/>
+                                <h3 className="text-lg font-bold text-slate-700">1. 上傳主要資料表 (Master)</h3>
+                                <p className="text-xs text-slate-500 mb-2">包含 A~AO 欄位的完整名單</p>
+                                {fileMaster && <div className="text-sm font-bold text-blue-600">{fileMaster.name}</div>}
+                            </label>
                         </div>
-                        <div className="bg-red-50/50 px-5 py-2.5 rounded-lg border border-red-100 text-center min-w-[120px]">
-                            <div className="text-xs text-red-600 font-bold flex items-center justify-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500"></span>異常/缺漏</div>
-                            <div className="text-2xl font-black text-red-700 mt-1">{previewData.filter(r=>r._status==='invalid').length}</div>
+                        <div className={`border-2 border-dashed rounded-2xl p-8 text-center transition-all cursor-pointer ${fileWix ? 'border-purple-400 bg-purple-50' : 'border-slate-300 bg-white hover:border-purple-400'}`}>
+                            <input type="file" id="wix-up" className="hidden" accept=".xlsx,.csv" onChange={(e)=>setFileWix(e.target.files[0])}/>
+                            <label htmlFor="wix-up" className="cursor-pointer block">
+                                <Plus size={40} className={`mx-auto mb-4 ${fileWix ? 'text-purple-600' : 'text-slate-400'}`}/>
+                                <h3 className="text-lg font-bold text-slate-700">2. 上傳輔助資料表 (選項)</h3>
+                                <p className="text-xs text-slate-500 mb-2">用於合併比對，例如 Wix 報名系統匯出的資料</p>
+                                {fileWix && <div className="text-sm font-bold text-purple-600">{fileWix.name}</div>}
+                            </label>
                         </div>
                     </div>
                 )}
-                
-                <div className="flex items-center gap-3">
-                    <button onClick={() => setStep(2)} className="px-5 py-2.5 rounded-xl font-medium text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200 transition-colors">返回修改設定</button>
-                    <button onClick={handleExecute} disabled={processing || previewData.filter(r=>mode==='patch' ? ['perfect','resolved'].includes(r._status) : r._status==='valid').length === 0} className="px-8 py-2.5 rounded-xl font-bold text-white shadow-md flex items-center gap-2 disabled:opacity-50 bg-slate-800 hover:bg-slate-700 transition-transform active:scale-95">
-                        <Save size={18}/> {processing ? '系統處理中...' : '確認無誤，執行匯入'}
+                <div className="flex justify-center mt-6">
+                    <button 
+                        onClick={handleStep1Submit} disabled={!fileMaster || processing}
+                        className="px-10 py-3 text-white rounded-xl font-bold bg-slate-800 hover:bg-slate-700 shadow-md flex items-center justify-center gap-2 transition-transform active:scale-95 disabled:opacity-50"
+                    >
+                        {processing ? '資料解析中...' : '確認檔案，進入下一步'}
                     </button>
                 </div>
             </div>
+            )}
 
-            <div className="bg-white border border-slate-200 rounded-xl shadow-sm w-full flex flex-col overflow-hidden">
-                
-                <div className="p-3 bg-white border-b border-slate-200 flex justify-start items-center w-full gap-4">
-                    <div className="flex items-center gap-2">
-                        <Filter size={16} className="text-slate-400"/>
-                        <select 
-                            className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500"
-                            value={viewFilter} onChange={(e) => setViewFilter(e.target.value)}
-                        >
-                            <option value="all">顯示全部名單 ({previewData.length} 筆)</option>
-                            <option value="valid">🟢 僅顯示狀態正常名單</option>
-                            <option value="error">🔴 僅顯示異常/需確認名單</option>
-                        </select>
+            {step === 2 && (
+            <div className="space-y-6 animate-fade-in-up">
+                {mode === 'patch' && (
+                    <div className="bg-amber-50 border border-amber-200 p-6 rounded-2xl shadow-sm">
+                        <h4 className="font-bold text-amber-800 flex items-center gap-2 mb-4">
+                            <Target className="text-amber-600"/> 步驟 2-1：設定資料比對基準 (Primary Key)
+                        </h4>
+                        <div className="flex flex-col md:flex-row items-center gap-4 bg-white p-4 rounded-xl border border-amber-100">
+                            <div className="flex-1 w-full">
+                                <label className="text-xs font-bold text-slate-500 block mb-1">您上傳的 Excel 欄位</label>
+                                <select className="w-full p-2.5 rounded-lg border focus:ring-2 border-slate-300 font-medium text-slate-700" value={patchAnchorExcel} onChange={e=>setPatchAnchorExcel(e.target.value)}>
+                                    <option value="">請選擇...</option>
+                                    {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                                </select>
+                            </div>
+                            <ArrowRight className="text-slate-300 md:mt-5 shrink-0 rotate-90 md:rotate-0"/>
+                            <div className="flex-1 w-full">
+                                <label className="text-xs font-bold text-slate-500 block mb-1">對應至系統識別欄位</label>
+                                <select className="w-full p-2.5 rounded-lg border focus:ring-2 border-slate-300 font-medium text-slate-700" value={patchAnchorDB} onChange={e=>setPatchAnchorDB(e.target.value)}>
+                                    <option value="full_name">中文姓名(A)</option>
+                                    <option value="national_id">身分證字號(C) (建議，最精準)</option>
+                                    <option value="contact_email">聯絡信箱(E)</option>
+                                    <option value="email">報名系統登入帳號(Y)</option>
+                                </select>
+                            </div>
+                        </div>
                     </div>
+                )}
 
-                    <div className="h-6 w-px bg-slate-200"></div> 
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm w-full">
+                    <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
+                        <h4 className="font-bold text-slate-800 flex items-center gap-2">
+                            <Settings className="text-slate-500"/> {mode === 'patch' ? '步驟 2-2：選擇欲更新的資料欄位 (系統已為您自動配對)' : '欄位對應設定 (Data Mapping)'}
+                        </h4>
+                        <button onClick={handleClearMemory} className="flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-red-500 px-3 py-1.5 rounded-lg hover:bg-red-50 transition-colors">
+                            <Trash2 size={14}/> 重置系統記憶
+                        </button>
+                    </div>
                     
-                    <button onClick={handleExportExcel} className="flex items-center gap-2 text-sm text-green-700 bg-green-50 hover:bg-green-100 border border-green-200 px-4 py-1.5 rounded-lg transition-colors font-bold shadow-sm">
-                        <Download size={16}/> 匯出審核報表 (Excel)
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[60vh] overflow-y-auto p-2 bg-slate-50 rounded-xl custom-scrollbar">
+                        {rawHeaders.filter(h => mode === 'full' || h !== patchAnchorExcel).map((header) => {
+                            const mappedKey = fieldMapping[header]
+                            const isMapped = !!mappedKey
+                            const isFromWix = mode === 'full' && header.includes('(輔助)')
+                            const isFromMemory = memoryFlags[header] 
+
+                            return (
+                                <div key={header} className={`p-4 rounded-xl border transition-all relative ${isMapped ? 'border-blue-300 bg-white shadow-sm' : 'border-slate-200 bg-white opacity-70'}`}>
+                                    {isFromMemory && isMapped && (
+                                        <div className="absolute -top-2.5 right-3 bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200 flex items-center gap-1"><BrainCircuit size={10}/> 智慧載入</div>
+                                    )}
+                                    <div className="flex justify-between items-center mb-1 mt-1">
+                                        <span className="text-[10px] font-bold text-slate-400">來源資料 (Excel)</span>
+                                        {isFromWix && <span className="text-[10px] bg-purple-100 text-purple-600 px-1.5 rounded font-medium">輔助表</span>}
+                                    </div>
+                                    <div className="font-bold text-slate-800 text-sm mb-3 truncate" title={header}>{header}</div>
+                                    <div className="text-[10px] font-bold text-slate-400 mb-1">匯入至系統欄位</div>
+                                    <select 
+                                        className={`w-full p-2 rounded-lg font-medium text-sm border outline-none ${isMapped ? 'border-blue-300 text-blue-800 bg-blue-50/30' : 'border-slate-200 text-slate-500 bg-slate-50'}`}
+                                        value={mappedKey || ""} onChange={(e) => handleUpdateMapping(header, e.target.value)} 
+                                    >
+                                        <option value="">-- 略過不匯入 --</option>
+                                        {TARGET_FIELDS.map(group => (
+                                            <optgroup key={group.group} label={group.group}>
+                                                {group.options.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
+                                            </optgroup>
+                                        ))}
+                                    </select>
+                                </div>
+                            )
+                        })}
+                    </div>
+                </div>
+
+                <div className="flex justify-end gap-4">
+                    <button onClick={() => setStep(1)} className="px-6 py-2 rounded-xl font-medium text-slate-600 hover:bg-slate-100 border border-slate-200">返回上一步</button>
+                    <button onClick={handleMatchAndTransform} disabled={processing} className="px-8 py-2 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-md flex items-center gap-2">
+                        <LayoutList size={18}/> 確認對應，產生預覽
                     </button>
                 </div>
+            </div>
+            )}
+
+            {step === 3 && (
+            <div className="space-y-4 animate-fade-in-up w-full">
                 
-                <div className="w-full overflow-x-auto overflow-y-auto max-h-[65vh] custom-scrollbar">
-                    <table className="w-full text-sm text-left whitespace-nowrap">
-                        <thead className="bg-white text-slate-500 font-bold sticky top-0 z-10 text-xs border-b border-slate-200">
-                            <tr>
-                                <th className="px-6 py-4 bg-white/95 backdrop-blur">資料狀態</th>
-                                <th className="px-6 py-4 bg-white/95 backdrop-blur text-slate-800">姓名(A)</th>
-                                <th className="px-6 py-4 bg-white/95 backdrop-blur text-slate-800">聯絡信箱(E)</th>
-                                <th className="px-6 py-4 bg-white/95 backdrop-blur text-slate-800">登入帳號/WIX(Y)</th>
-                                {mode === 'patch' && <th className="px-6 py-4 bg-amber-50/95 backdrop-blur text-amber-800 border-l border-amber-100">比對基準 ({patchAnchorExcel})</th>}
-                                {getDynamicMappedFields().map(excelCol => (
-                                    <th key={excelCol} className="px-6 py-4 bg-white/95 backdrop-blur text-blue-600">更新: {excelCol}</th>
-                                ))}
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 bg-white">
-                            {filteredData.map((row) => (
-                                <tr key={row._id} className={
-                                    mode === 'patch' 
-                                        ? (row._status === 'duplicate' ? 'bg-amber-50/50' : row._status === 'not_found' ? 'opacity-50' : 'hover:bg-slate-50')
-                                        : (row._status === 'invalid' ? 'bg-red-50/50' : 'hover:bg-slate-50')
-                                }>
-                                    <td className="px-6 py-3">
-                                        {row._status === 'valid' && <span className="text-green-600 font-bold flex items-center gap-1.5"><CheckCircle size={14}/>資料完整</span>}
-                                        {row._status === 'invalid' && <span className="text-red-600 font-bold flex items-center gap-1.5"><XCircle size={14}/>{row._error}</span>}
-                                        {row._status === 'perfect' && <span className="text-green-600 font-bold flex items-center gap-1.5"><CheckCircle size={14}/>準備更新</span>}
-                                        {row._status === 'resolved' && <span className="text-blue-600 font-bold flex items-center gap-1.5"><UserCheck size={14}/>已手動指定</span>}
-                                        {row._status === 'not_found' && <span className="text-slate-400 font-medium flex items-center gap-1.5"><XCircle size={14}/>查無此人(略過)</span>}
-                                        
-                                        {row._status === 'duplicate' && (
-                                            <div className="space-y-1 mt-1">
-                                                <span className="text-amber-600 font-bold text-xs">⚠️ 發現 {row._duplicates.length} 筆重複：</span>
-                                                <select className="w-full min-w-[200px] p-1.5 border border-amber-300 rounded bg-white text-xs font-medium text-slate-700" onChange={(e) => resolveDuplicate(row._id, e.target.value)} defaultValue="">
-                                                    <option value="" disabled>-- 請指定更新對象 --</option>
-                                                    {row._duplicates.map(dup => <option key={dup.id} value={dup.id}>{dup.full_name} | {dup.phone || '無電話'} | {dup.email}</option>)}
-                                                    <option value="SKIP">🚫 皆非，略過此筆</option>
-                                                </select>
-                                            </div>
-                                        )}
-                                    </td>
-                                    <td className="px-6 py-3 font-bold text-slate-800">{row.full_name || '-'}</td>
-                                    <td className="px-6 py-3 text-slate-600">{row.contact_email || '-'}</td>
-                                    <td className="px-6 py-3 text-slate-600">{row.email || '-'}</td>
-                                    {mode === 'patch' && <td className="px-6 py-3 font-bold text-amber-700 bg-amber-50/30 border-l border-amber-100/50">{row._rawAnchor}</td>}
+                <div className="flex flex-wrap items-center justify-start p-4 rounded-xl shadow-sm bg-white border border-slate-200 gap-6">
+                    {mode === 'patch' ? (
+                        <div className="flex gap-4 items-center border-r border-slate-200 pr-6">
+                            <div className="bg-green-50/50 px-4 py-2 rounded-lg border border-green-100 text-center min-w-[100px]">
+                                <div className="text-xs text-green-600 font-bold flex items-center justify-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500"></span>可更新</div>
+                                <div className="text-2xl font-black text-green-700 mt-1">{previewData.filter(r=>['perfect','resolved'].includes(r._status)).length}</div>
+                            </div>
+                            <div className="bg-amber-50/50 px-4 py-2 rounded-lg border border-amber-100 text-center min-w-[100px]">
+                                <div className="text-xs text-amber-600 font-bold flex items-center justify-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500"></span>需手動確認</div>
+                                <div className="text-2xl font-black text-amber-700 mt-1">{previewData.filter(r=>r._status==='duplicate').length}</div>
+                            </div>
+                            <div className="bg-slate-50/50 px-4 py-2 rounded-lg border border-slate-200 text-center min-w-[100px]">
+                                <div className="text-xs text-slate-500 font-bold flex items-center justify-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-400"></span>查無此人</div>
+                                <div className="text-2xl font-black text-slate-600 mt-1">{previewData.filter(r=>r._status==='not_found').length}</div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="flex gap-4 items-center border-r border-slate-200 pr-6">
+                            <div className="bg-green-50/50 px-5 py-2.5 rounded-lg border border-green-100 text-center min-w-[120px]">
+                                <div className="text-xs text-green-600 font-bold flex items-center justify-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500"></span>格式完整</div>
+                                <div className="text-2xl font-black text-green-700 mt-1">{previewData.filter(r=>r._status==='valid').length}</div>
+                            </div>
+                            <div className="bg-red-50/50 px-5 py-2.5 rounded-lg border border-red-100 text-center min-w-[120px]">
+                                <div className="text-xs text-red-600 font-bold flex items-center justify-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500"></span>異常/缺漏</div>
+                                <div className="text-2xl font-black text-red-700 mt-1">{previewData.filter(r=>r._status==='invalid').length}</div>
+                            </div>
+                        </div>
+                    )}
+                    
+                    <div className="flex items-center gap-3">
+                        <button onClick={() => setStep(2)} className="px-5 py-2.5 rounded-xl font-medium text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200 transition-colors">返回修改設定</button>
+                        <button onClick={handleExecute} disabled={processing || previewData.filter(r=>mode==='patch' ? ['perfect','resolved'].includes(r._status) : r._status==='valid').length === 0} className="px-8 py-2.5 rounded-xl font-bold text-white shadow-md flex items-center gap-2 disabled:opacity-50 bg-slate-800 hover:bg-slate-700 transition-transform active:scale-95">
+                            <Save size={18}/> {processing ? '系統處理中...' : '確認無誤，執行匯入'}
+                        </button>
+                    </div>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-xl shadow-sm w-full flex flex-col overflow-hidden">
+                    
+                    <div className="p-3 bg-white border-b border-slate-200 flex justify-start items-center w-full gap-4">
+                        <div className="flex items-center gap-2">
+                            <Filter size={16} className="text-slate-400"/>
+                            <select 
+                                className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500"
+                                value={viewFilter} onChange={(e) => setViewFilter(e.target.value)}
+                            >
+                                <option value="all">顯示全部名單 ({previewData.length} 筆)</option>
+                                <option value="valid">🟢 僅顯示狀態正常名單</option>
+                                <option value="error">🔴 僅顯示異常/需確認名單</option>
+                            </select>
+                        </div>
+
+                        <div className="h-6 w-px bg-slate-200"></div> 
+                        
+                        <button onClick={handleExportExcel} className="flex items-center gap-2 text-sm text-green-700 bg-green-50 hover:bg-green-100 border border-green-200 px-4 py-1.5 rounded-lg transition-colors font-bold shadow-sm">
+                            <Download size={16}/> 匯出審核報表 (Excel)
+                        </button>
+                    </div>
+                    
+                    <div className="w-full overflow-x-auto overflow-y-auto max-h-[65vh] custom-scrollbar">
+                        <table className="w-full text-sm text-left whitespace-nowrap">
+                            <thead className="bg-white text-slate-500 font-bold sticky top-0 z-10 text-xs border-b border-slate-200">
+                                <tr>
+                                    <th className="px-6 py-4 bg-white/95 backdrop-blur">資料狀態</th>
+                                    <th className="px-6 py-4 bg-white/95 backdrop-blur text-slate-800">姓名(A)</th>
+                                    <th className="px-6 py-4 bg-white/95 backdrop-blur text-slate-800">聯絡信箱(E)</th>
+                                    <th className="px-6 py-4 bg-white/95 backdrop-blur text-slate-800">登入帳號/WIX(Y)</th>
+                                    {mode === 'patch' && <th className="px-6 py-4 bg-amber-50/95 backdrop-blur text-amber-800 border-l border-amber-100">比對基準 ({patchAnchorExcel})</th>}
                                     {getDynamicMappedFields().map(excelCol => (
-                                        <td key={excelCol} className="px-6 py-3 text-blue-700">{row[fieldMapping[excelCol]] || '-'}</td>
+                                        <th key={excelCol} className="px-6 py-4 bg-white/95 backdrop-blur text-blue-600">更新: {excelCol}</th>
                                     ))}
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 bg-white">
+                                {filteredData.map((row) => (
+                                    <tr key={row._id} className={
+                                        mode === 'patch' 
+                                            ? (row._status === 'duplicate' ? 'bg-amber-50/50' : row._status === 'not_found' ? 'opacity-50' : 'hover:bg-slate-50')
+                                            : (row._status === 'invalid' ? 'bg-red-50/50' : 'hover:bg-slate-50')
+                                    }>
+                                        <td className="px-6 py-3">
+                                            {row._status === 'valid' && <span className="text-green-600 font-bold flex items-center gap-1.5"><CheckCircle size={14}/>資料完整</span>}
+                                            {row._status === 'invalid' && <span className="text-red-600 font-bold flex items-center gap-1.5"><XCircle size={14}/>{row._error}</span>}
+                                            {row._status === 'perfect' && <span className="text-green-600 font-bold flex items-center gap-1.5"><CheckCircle size={14}/>準備更新</span>}
+                                            {row._status === 'resolved' && <span className="text-blue-600 font-bold flex items-center gap-1.5"><UserCheck size={14}/>已手動指定</span>}
+                                            {row._status === 'not_found' && <span className="text-slate-400 font-medium flex items-center gap-1.5"><XCircle size={14}/>查無此人(略過)</span>}
+                                            
+                                            {row._status === 'duplicate' && (
+                                                <div className="space-y-1 mt-1">
+                                                    <span className="text-amber-600 font-bold text-xs">⚠️ 發現 {row._duplicates.length} 筆重複：</span>
+                                                    <select className="w-full min-w-[200px] p-1.5 border border-amber-300 rounded bg-white text-xs font-medium text-slate-700" onChange={(e) => resolveDuplicate(row._id, e.target.value)} defaultValue="">
+                                                        <option value="" disabled>-- 請指定更新對象 --</option>
+                                                        {row._duplicates.map(dup => <option key={dup.id} value={dup.id}>{dup.full_name} | {dup.phone || '無電話'} | {dup.email}</option>)}
+                                                        <option value="SKIP">🚫 皆非，略過此筆</option>
+                                                    </select>
+                                                </div>
+                                            )}
+                                        </td>
+                                        <td className="px-6 py-3 font-bold text-slate-800">{row.full_name || '-'}</td>
+                                        <td className="px-6 py-3 text-slate-600">{row.contact_email || '-'}</td>
+                                        <td className="px-6 py-3 text-slate-600">{row.email || '-'}</td>
+                                        {mode === 'patch' && <td className="px-6 py-3 font-bold text-amber-700 bg-amber-50/30 border-l border-amber-100/50">{row._rawAnchor}</td>}
+                                        {getDynamicMappedFields().map(excelCol => (
+                                            <td key={excelCol} className="px-6 py-3 text-blue-700">{row[fieldMapping[excelCol]] || '-'}</td>
+                                        ))}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
+            )}
         </div>
+      ) : (
+      
+      /* 🌟 賽事任務批次建檔分支 */
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 w-full animate-fade-in-up">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4 border-b border-slate-100 pb-6">
+            <div>
+                <h2 className="text-2xl font-black text-amber-600 flex items-center gap-2">
+                    <Flag className="text-amber-500"/> 賽事任務批次建檔
+                </h2>
+                <p className="text-slate-500 text-sm mt-1">透過 Excel/CSV 檔案，一次性建立整年度的所有賽事與賽段配置。</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 md:gap-12">
+              <div>
+                  <div className="border-2 border-dashed border-amber-300 rounded-2xl p-8 text-center hover:bg-amber-50 hover:border-amber-400 transition-colors cursor-pointer group mb-6 bg-slate-50/50">
+                      <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
+                          <FileSpreadsheet size={32} />
+                      </div>
+                      <p className="font-bold text-slate-700 mb-1">點擊或拖曳 賽事建檔表 至此</p>
+                      <p className="text-xs text-slate-500 font-medium">支援格式：.xlsx, .csv</p>
+                  </div>
+
+                  <button 
+                      onClick={handleSimulateRaceUpload}
+                      disabled={isUploadingRace}
+                      className={`w-full py-4 rounded-xl font-black flex items-center justify-center gap-2 transition-all shadow-lg
+                          ${isUploadingRace ? 'bg-slate-400 text-white cursor-not-allowed shadow-none' : 'bg-amber-500 hover:bg-amber-600 text-white shadow-amber-500/30 active:scale-95'}`}
+                  >
+                      {isUploadingRace ? <><Loader2 className="animate-spin" size={20}/> 系統解析賽事資料中...</> : <><Upload size={20}/> 開始執行賽事匯入</>}
+                  </button>
+
+                  {uploadRaceStatus === 'success' && (
+                      <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-xl flex items-start gap-3 animate-bounce-in">
+                          <CheckCircle className="text-green-500 shrink-0 mt-0.5" size={20}/>
+                          <div>
+                              <h4 className="font-bold text-green-800">賽事批次建檔成功！</h4>
+                              <p className="text-sm text-green-600 mt-1">已成功匯入 12 場賽事，您可至「賽事任務總覽」查看。</p>
+                          </div>
+                      </div>
+                  )}
+              </div>
+
+              <div className="bg-amber-50/30 rounded-2xl p-6 border border-amber-100">
+                  <h3 className="text-lg font-black text-amber-800 mb-4 flex items-center gap-2">
+                      <FileDown className="text-amber-500"/> 標準格式下載與說明
+                  </h3>
+                  <p className="text-sm text-slate-600 mb-6 leading-relaxed">
+                      賽事資料較為複雜，請務必下載標準模板。各欄位需嚴格遵守格式，特別是<strong className="text-amber-600">「賽段配置」</strong>需使用 JSON 陣列。
+                  </p>
+                  
+                  <button className="w-full py-3 mb-6 bg-white border border-amber-300 hover:border-amber-500 hover:text-amber-600 text-slate-700 font-bold rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm group">
+                      <FileDown size={18} className="group-hover:-translate-y-1 transition-transform text-amber-500"/> 
+                      下載 賽事建檔 標準模板 (.csv)
+                  </button>
+
+                  <div className="space-y-3">
+                      <div className="text-xs font-black text-slate-500 uppercase tracking-widest border-b border-slate-200 pb-2 mb-3">
+                          賽事建檔 必填欄位對應
+                      </div>
+                      
+                      <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-2">
+                          {RACE_IMPORT_TEMPLATE_HEADERS.map((header, idx) => (
+                              <div key={idx} className="bg-white p-2.5 rounded-lg border border-slate-200 shadow-sm text-sm font-bold text-slate-700 flex items-center gap-2">
+                                  <span className="bg-amber-100 text-amber-700 text-[10px] px-1.5 py-0.5 rounded font-black">{String.fromCharCode(65 + idx)}</span> 
+                                  {header}
+                              </div>
+                          ))}
+                          <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg text-xs font-medium text-amber-800 leading-relaxed shadow-inner">
+                              <span className="font-bold text-amber-600 block mb-1 flex items-center gap-1"><AlertTriangle size={14}/>賽段配置 (JSON) 範例：</span>
+                              <code className="bg-white p-2 rounded border border-amber-100 mt-2 block font-mono text-[11px] overflow-x-auto text-slate-600 whitespace-pre">
+{`[
+  {
+    "group": "一般組別",
+    "name": "全程馬拉松組",
+    "capacity": 10,
+    "genderLimit": "ANY"
+  }
+]`}
+                              </code>
+                          </div>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      </div>
       )}
 
       {/* 系統執行紀錄區 */}

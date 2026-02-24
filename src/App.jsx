@@ -20,6 +20,9 @@ import RaceBuilder from './admin/RaceBuilder'
 // 🌟 引入新做好的賽事管理清單頁面
 import RaceManager from './admin/RaceManager' 
 
+// 🌟 引入全新的個人數位 ID 卡頁面
+import DigitalID from './pages/DigitalID'
+
 
 function App() {
 
@@ -37,9 +40,10 @@ function App() {
 
         <Route path="/races" element={<RaceEvents />} />
 
-        {/* 🌟 在網址後面加上 /:id，讓系統知道要接收變數 */}
-
         <Route path="/race-detail/:id" element={<RaceDetail />} />
+
+        {/* 🌟 註冊個人數位 ID 路由 */}
+        <Route path="/my-id" element={<DigitalID />} />
 
         
 
