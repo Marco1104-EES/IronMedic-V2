@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Calendar, MapPin, Users, Clock, ChevronRight, Activity, Flame, ShieldAlert, Timer, CheckCircle, X, Loader2, UsersRound, Crown, Sprout, Handshake, Send, CreditCard } from 'lucide-react'
+import { Calendar, MapPin, Users, Clock, ChevronRight, Activity, Flame, ShieldAlert, Timer, CheckCircle, X, Loader2, UsersRound, Crown, Sprout, Handshake, Send, CreditCard, Flag } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 
@@ -99,6 +99,7 @@ export default function RaceEvents() {
     }
   }
 
+  // 🌟 加入 roleTag (教官身份) 解析邏輯
   const extractParticipantsData = (race) => {
       let totalRegistered = 0;
       let participantDetails = [];
@@ -118,7 +119,10 @@ export default function RaceEvents() {
                                       name: parsedUser.name,
                                       timestamp: parsedUser.timestamp || '10:00:00:000', 
                                       isVip: parsedUser.isVip || false, 
-                                      isNew: parsedUser.isNew || false 
+                                      isNew: parsedUser.isNew || false,
+                                      roleTag: parsedUser.roleTag || null, // 🌟 獲取後台指定的教官職位
+                                      slotGroup: slot.group,
+                                      slotName: slot.name
                                   });
                               }
                           } catch (e) {
@@ -127,7 +131,9 @@ export default function RaceEvents() {
                                       name: item,
                                       timestamp: `10:00:00:000`, 
                                       isVip: item.includes('管理員') || item.includes('VIP'), 
-                                      isNew: item.includes('新人') 
+                                      isNew: item.includes('新人'),
+                                      slotGroup: slot.group,
+                                      slotName: slot.name
                                   });
                               }
                           }
@@ -157,9 +163,18 @@ export default function RaceEvents() {
       return matchTime && matchStatus;
   });
 
+  // 🌟 獨立的教官/特殊身分徽章渲染器
+  const renderRoleBadge = (roleTag) => {
+      if (!roleTag) return null;
+      if (roleTag === '帶隊教官') return <span className="flex items-center text-[10px] bg-indigo-100 text-indigo-700 border border-indigo-300 px-1.5 py-0.5 rounded font-black"><ShieldAlert size={10} className="mr-1"/> 帶隊教官</span>;
+      if (roleTag === '賽道教官') return <span className="flex items-center text-[10px] bg-orange-100 text-orange-700 border border-orange-300 px-1.5 py-0.5 rounded font-black"><Flag size={10} className="mr-1"/> 賽道教官</span>;
+      if (roleTag === '醫護教官') return <span className="flex items-center text-[10px] bg-rose-100 text-rose-700 border border-rose-300 px-1.5 py-0.5 rounded font-black"><Activity size={10} className="mr-1"/> 醫護教官</span>;
+      if (roleTag === '官方代表') return <span className="flex items-center text-[10px] bg-slate-800 text-amber-400 border border-slate-600 px-1.5 py-0.5 rounded font-black"><Crown size={10} className="mr-1"/> 官方代表</span>;
+      return null;
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 pb-24 font-sans flex flex-col relative">
-      {/* 🌟 釋放頂部空間：將 pt-16 改為 pt-20 md:pt-24，避免標題撞到按鈕 */}
       <div className="bg-slate-900 pt-20 md:pt-24 pb-32 px-4 md:px-8 text-center relative overflow-hidden shrink-0">
           
           <div className="absolute top-4 right-4 md:top-6 md:right-8 z-30">
@@ -168,7 +183,6 @@ export default function RaceEvents() {
                   className="relative flex items-center gap-2 bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 px-3 py-2 md:px-4 md:py-2.5 rounded-full text-white text-xs md:text-sm font-bold transition-all shadow-lg shadow-black/20 active:scale-95 group"
               >
                   <CreditCard size={16} className="group-hover:text-amber-400 transition-colors"/> 
-                  {/* 手機版縮短文字，避免過長 */}
                   <span className="hidden sm:inline">我的數位 ID 卡</span>
                   <span className="sm:hidden">數位 ID</span>
                   
@@ -187,10 +201,8 @@ export default function RaceEvents() {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-20 relative z-20 w-full flex-1">
           
-          {/* 🌟 優化面板：手機版縮小 padding (p-3) 與圓角 (rounded-2xl) */}
           <div className="bg-white/95 backdrop-blur-xl rounded-2xl md:rounded-[2rem] shadow-xl p-3 md:p-4 flex flex-col xl:flex-row justify-between items-center gap-3 md:gap-4 mb-8 md:mb-10 border border-slate-100/50">
               
-              {/* 🌟 優化捲軸：加入 Tailwind 隱藏捲軸的 class，同時保留滑動能力，並加上 shrink-0 避免按鈕被擠壓 */}
               <div className="flex gap-2 w-full xl:w-auto overflow-x-auto pb-1 md:pb-0 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden snap-x">
                   <button onClick={() => setStatusFilter('ALL')} className={`shrink-0 px-4 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all whitespace-nowrap snap-start ${statusFilter === 'ALL' ? 'bg-slate-800 text-white shadow-md' : 'text-slate-500 hover:bg-slate-100 bg-slate-50/50'}`}>全部賽事</button>
                   <button onClick={() => setStatusFilter('OPEN')} className={`shrink-0 px-4 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all whitespace-nowrap flex items-center gap-1.5 snap-start ${statusFilter === 'OPEN' ? 'bg-green-500 text-white shadow-md shadow-green-500/20' : 'text-slate-500 hover:bg-slate-100 bg-slate-50/50'}`}><Activity size={14} className="hidden sm:block"/> 招募中</button>
@@ -198,7 +210,6 @@ export default function RaceEvents() {
                   <button onClick={() => setStatusFilter('SUBMITTED')} className={`shrink-0 px-4 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all whitespace-nowrap flex items-center gap-1.5 snap-start ${statusFilter === 'SUBMITTED' ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 hover:bg-slate-100 bg-slate-50/50'}`}><Send size={14} className="hidden sm:block"/> 已送名單</button>
               </div>
 
-              {/* 🌟 優化時間軸：讓三個按鈕在手機上平均分配寬度 (flex-1) */}
               <div className="flex bg-slate-100/80 p-1 md:p-1.5 rounded-xl md:rounded-2xl w-full xl:w-auto border border-slate-200 shadow-inner">
                   <button onClick={() => handleTimeFilterChange('PAST')} className={`flex-1 xl:flex-none px-2 sm:px-6 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all ${timeFilter === 'PAST' ? 'bg-white text-slate-800 shadow-sm border border-slate-200/60' : 'text-slate-400 hover:text-slate-600'}`}>過去賽事</button>
                   <button onClick={() => handleTimeFilterChange('CURRENT_YEAR')} className={`flex-1 xl:flex-none px-2 sm:px-6 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all ${timeFilter === 'CURRENT_YEAR' ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20' : 'text-slate-400 hover:text-slate-600'}`}>{CURRENT_YEAR} 年</button>
@@ -241,7 +252,7 @@ export default function RaceEvents() {
                       return (
                       <div key={race.id} className="bg-white rounded-[1.5rem] md:rounded-[2rem] shadow-lg shadow-slate-200/40 hover:shadow-2xl hover:shadow-blue-900/10 hover:-translate-y-1.5 border border-slate-100 overflow-hidden transition-all duration-300 group flex flex-col h-full animate-fade-in-up" style={{ animationDelay: `${(idx % 6) * 50}ms` }}>
                           <div className="h-[180px] md:h-[200px] relative overflow-hidden bg-slate-200 shrink-0">
-                              <img src={race.image_url || 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&q=80&w=800'} alt={race.name} className={`w-full h-full object-cover transition-transform duration-700 group-hover:scale-105 ${isFull || race.status === 'SUBMITTED' ? 'grayscale opacity-70' : ''}`} onError={(e) => e.target.src = 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&q=80&w=800'} />
+                              <img src={race.image_url} alt={race.name} className={`w-full h-full object-cover transition-transform duration-700 group-hover:scale-105 ${isFull || race.status === 'SUBMITTED' ? 'grayscale opacity-70' : ''}`} />
                               <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-slate-900/20 to-transparent"></div>
                               
                               {renderStatusBadge(race.status, race.is_hot, isFull)}
@@ -330,16 +341,20 @@ export default function RaceEvents() {
                                   </div>
                                   <div>
                                       <div className="font-bold text-slate-800 flex items-center gap-2 flex-wrap">
-                                          {p.name}
-                                          {p.isVip && <span className="flex items-center text-[10px] bg-amber-100 text-amber-700 border border-amber-300 px-1.5 py-0.5 rounded font-black"><Crown size={10} className="mr-1"/> VIP</span>}
+                                          {cleanName}
+                                          {/* 🌟 渲染教官徽章 */}
+                                          {renderRoleBadge(p.roleTag)}
+                                          {!p.roleTag && p.isVip && <span className="flex items-center text-[10px] bg-amber-100 text-amber-700 border border-amber-300 px-1.5 py-0.5 rounded font-black"><Crown size={10} className="mr-1"/> VIP</span>}
                                           {p.isNew && <span className="flex items-center text-[10px] bg-green-100 text-green-700 border border-green-300 px-1.5 py-0.5 rounded font-black"><Sprout size={10} className="mr-1"/> 新人</span>}
                                       </div>
-                                      <div className="text-xs text-slate-400 font-mono mt-1 flex items-center gap-1">
+                                      <div className="text-xs text-slate-500 font-bold mt-1">
+                                          📍 {p.slotGroup} - {p.slotName}
+                                      </div>
+                                      <div className="text-[10px] text-slate-400 font-mono mt-1 flex items-center gap-1">
                                           <Clock size={10}/> 登記時間: {p.timestamp}
                                       </div>
                                   </div>
                               </div>
-                              <div className="mt-2 sm:mt-0 sm:ml-auto text-xs text-green-600 font-bold bg-green-50 px-2 py-1 rounded w-fit border border-green-200/50">已確認報名</div>
                           </div>
                       )})}
                       {(!previewRace.participants || previewRace.participants.length === 0) && <div className="text-center text-slate-400 py-10 font-medium">目前尚無人員報名</div>}

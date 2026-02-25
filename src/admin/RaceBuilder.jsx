@@ -1,7 +1,13 @@
 import { useState, useEffect } from 'react'
-import { Calendar, MapPin, Clock, ImagePlus, Flag, Plus, Trash2, Save, ShieldAlert, Activity, Users, Settings, Flame, ExternalLink, Loader2, Edit3, Handshake, Send } from 'lucide-react'
+import { Calendar, MapPin, Clock, ImagePlus, Flag, Plus, Trash2, Save, ShieldAlert, Activity, Users, Settings, Flame, ExternalLink, Loader2, Edit3, Handshake, Send, Wand2, UsersRound, Crown, Sprout, XCircle, AlertCircle } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 import { useLocation, useNavigate } from 'react-router-dom'
+
+const TAIWAN_CITIES = [
+  '台北市', '新北市', '基隆市', '桃園市', '新竹市', '新竹縣', '苗栗縣', 
+  '台中市', '彰化縣', '南投縣', '雲林縣', '嘉義市', '嘉義縣', '台南市', 
+  '高雄市', '屏東縣', '宜蘭縣', '花蓮縣', '台東縣', '澎湖縣', '金門縣', '連江縣'
+]
 
 export default function RaceBuilder() {
   const location = useLocation()
@@ -11,11 +17,12 @@ export default function RaceBuilder() {
   const editId = searchParams.get('id')
 
   const [raceData, setRaceData] = useState({
-      title: '', date: '', startTime: '', location: '', type: '馬拉松', status: 'OPEN', imageUrl: '', isHot: false
+      title: '', date: '', startTime: '', location: '', city: '', type: '馬拉松', status: 'OPEN', imageUrl: '', isHot: false
   })
   const [slots, setSlots] = useState([])
   const [isSubmitting, setIsSubmitting] = useState(false) 
   const [isFetchingData, setIsFetchingData] = useState(false)
+  const [isGuessing, setIsGuessing] = useState(false)
 
   const SLOT_TEMPLATES = {
       '馬拉松': [ { group: '一般組別', name: '全程馬拉松組', capacity: 10, genderLimit: 'ANY' }, { group: '一般組別', name: '半程馬拉松組', capacity: 10, genderLimit: 'ANY' } ],
@@ -42,9 +49,16 @@ export default function RaceBuilder() {
           const { data, error } = await supabase.from('races').select('*').eq('id', id).single()
           if (error) throw error
           if (data) {
+              let matchedCity = '';
+              if (data.location) {
+                  TAIWAN_CITIES.forEach(c => {
+                      if (data.location.includes(c)) matchedCity = c;
+                  });
+              }
+
               setRaceData({
                   title: data.name, date: data.date, startTime: data.gather_time || '', 
-                  location: data.location, type: data.type, status: data.status, 
+                  location: data.location, city: matchedCity, type: data.type, status: data.status, 
                   imageUrl: data.image_url || '', isHot: data.is_hot
               })
               setSlots(data.slots_data || [])
@@ -74,6 +88,63 @@ export default function RaceBuilder() {
 
   const removeSlot = (id) => { setSlots(slots.filter(s => s.id !== id)) }
   const updateSlot = (id, field, value) => { setSlots(slots.map(s => s.id === id ? { ...s, [field]: value } : s)) }
+
+  const handleSetRole = (slotId, participantId, newRole) => {
+      setSlots(slots.map(slot => {
+          if (slot.id === slotId && slot.assignee) {
+              const assignees = slot.assignee.split('|').map(item => {
+                  try {
+                      const p = JSON.parse(item);
+                      if (p.id === participantId) {
+                          return JSON.stringify({ ...p, roleTag: newRole });
+                      }
+                      return item;
+                  } catch(e) { return item; }
+              });
+              return { ...slot, assignee: assignees.join('|') };
+          }
+          return slot;
+      }));
+  }
+
+  const handleAILocationGuess = () => {
+      if (!raceData.title && !raceData.imageUrl) {
+          return alert('請先輸入「賽事名稱」或「宣傳連結」，系統才有線索可以分析喔！');
+      }
+
+      setIsGuessing(true)
+      
+      setTimeout(() => {
+          const textToAnalyze = `${raceData.title} ${raceData.imageUrl}`.toLowerCase();
+          let guessedCity = '';
+
+          const cityKeywords = {
+              '台北': '台北市', '新北': '新北市', '萬金石': '新北市', '烏來': '新北市', '渣打': '台北市',
+              '桃園': '桃園市', '新竹': '新竹縣', '苗栗': '苗栗縣', '台中': '台中市', '后里': '台中市', '新社': '台中市',
+              '彰化': '彰化縣', '田中': '彰化縣', '南投': '南投縣', '日月潭': '南投縣',
+              '雲林': '雲林縣', '西螺': '雲林縣', '太平媽': '雲林縣', '嘉義': '嘉義縣',
+              '台南': '台南市', '曾文': '台南市', '高雄': '高雄市', '富邦': '高雄市',
+              '屏東': '屏東縣', '大鵬灣': '屏東縣', '宜蘭': '宜蘭縣', '礁溪': '宜蘭縣', '冬山': '宜蘭縣',
+              '花蓮': '花蓮縣', '太魯閣': '花蓮縣', '台東': '台東縣', '金門': '金門縣', '澎湖': '澎湖縣'
+          };
+
+          for (const [key, fullCity] of Object.entries(cityKeywords)) {
+              if (textToAnalyze.includes(key)) {
+                  guessedCity = fullCity;
+                  break;
+              }
+          }
+
+          setIsGuessing(false)
+
+          if (guessedCity) {
+              setRaceData(prev => ({ ...prev, city: guessedCity, location: prev.location || guessedCity }));
+              alert(`🤖 智能分析成功！\n根據賽事資訊，推測舉辦地點為：【${guessedCity}】\n已為您自動填入。`);
+          } else {
+              alert('🤖 智能分析完畢。\n目前資訊量不足，無法確認確切縣市，請手動選擇。');
+          }
+      }, 1000)
+  }
 
   const handleSaveRace = async () => {
       if(!raceData.title || !raceData.date || !raceData.location) return alert("請填寫完整的賽事資訊！")
@@ -117,16 +188,33 @@ export default function RaceBuilder() {
 
   if (isFetchingData) return <div className="h-64 flex items-center justify-center text-slate-500"><Loader2 className="animate-spin mr-2"/> 讀取賽事資料中...</div>
 
-  // 動態渲染發佈狀態的圖示
+  // 🌟 擴充六種狀態的圖示
   const renderStatusIcon = (status) => {
       switch(status) {
           case 'OPEN': return <Activity size={16} className="text-green-500"/>;
-          case 'NEGOTIATING': return <Handshake size={16} className="text-amber-500"/>;
+          case 'NEGOTIATING': return <Handshake size={16} className="text-blue-500"/>;
           case 'SUBMITTED': return <Send size={16} className="text-slate-600"/>;
-          case 'FULL': return <Users size={16} className="text-red-500"/>;
+          case 'FULL': return <CheckCircle size={16} className="text-emerald-500"/>;
+          case 'CANCELLED': return <XCircle size={16} className="text-slate-800"/>;
+          case 'SHORTAGE': return <AlertCircle size={16} className="text-red-500"/>;
           default: return <Clock size={16} className="text-slate-400"/>;
       }
   }
+
+  const parseAssignees = (assigneeString) => {
+      if (!assigneeString) return [];
+      const rawAssignees = assigneeString.split('|');
+      return rawAssignees.map(item => {
+          if (!item) return null;
+          try {
+              return JSON.parse(item); 
+          } catch (e) {
+              return { id: item, name: item.trim().split(' #')[0], timestamp: '舊資料匯入', isLegacy: true };
+          }
+      }).filter(Boolean);
+  }
+
+  const getInitial = (name) => name ? name.replace(/[^a-zA-Z\u4e00-\u9fa5]/g, '').charAt(0) || '?' : '?'
 
   return (
     <div className="space-y-6 pb-20 animate-fade-in text-slate-800 w-full">
@@ -151,14 +239,33 @@ export default function RaceBuilder() {
                       <div><label className="block text-sm font-bold text-slate-700 mb-1">賽事名稱</label><input type="text" className="w-full border border-slate-300 p-2.5 rounded-lg outline-none" value={raceData.title} onChange={e => setRaceData({...raceData, title: e.target.value})}/></div>
                       <div className="grid grid-cols-2 gap-4">
                           <div><label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-1"><Calendar size={14}/> 日期</label><input type="date" className="w-full border border-slate-300 p-2.5 rounded-lg outline-none cursor-text" value={raceData.date} onChange={e => setRaceData({...raceData, date: e.target.value})}/></div>
-                          <div><label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-1"><Clock size={14}/> 比賽最早鳴槍時間</label><input type="text" placeholder="例如: 05:30" className="w-full border border-slate-300 p-2.5 rounded-lg outline-none cursor-text" value={raceData.startTime} onChange={e => setRaceData({...raceData, startTime: e.target.value})}/></div>
+                          <div><label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-1"><Clock size={14}/> 最早鳴槍時間</label><input type="text" placeholder="例如: 05:30" className="w-full border border-slate-300 p-2.5 rounded-lg outline-none cursor-text" value={raceData.startTime} onChange={e => setRaceData({...raceData, startTime: e.target.value})}/></div>
                       </div>
-                      <div><label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-1"><MapPin size={14}/> 集合地點</label><input type="text" className="w-full border border-slate-300 p-2.5 rounded-lg outline-none" value={raceData.location} onChange={e => setRaceData({...raceData, location: e.target.value})}/></div>
-                      <div>
-                          <label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-1"><ImagePlus size={14}/> 宣傳海報圖片 (URL)</label>
+                      
+                      <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 mt-2">
+                          <div className="flex justify-between items-center mb-2">
+                              <label className="block text-sm font-bold text-blue-900 flex items-center gap-1"><MapPin size={14} className="text-blue-600"/> 集合地點</label>
+                              <button onClick={handleAILocationGuess} disabled={isGuessing} className="text-xs font-bold text-blue-600 bg-white border border-blue-200 px-2 py-1 rounded shadow-sm flex items-center gap-1 hover:bg-blue-50 transition-colors disabled:opacity-50">
+                                  {isGuessing ? <Loader2 size={12} className="animate-spin"/> : <Wand2 size={12}/>} 智能帶入
+                              </button>
+                          </div>
+                          <div className="flex flex-col gap-2">
+                              <select className="w-full border border-slate-300 p-2.5 rounded-lg outline-none text-slate-700 bg-white font-medium" value={raceData.city} onChange={e => {
+                                  const newCity = e.target.value;
+                                  setRaceData(prev => ({...prev, city: newCity, location: prev.location ? prev.location : newCity}));
+                              }}>
+                                  <option value="">請選擇縣市...</option>
+                                  {TAIWAN_CITIES.map(city => <option key={city} value={city}>{city}</option>)}
+                              </select>
+                              <input type="text" placeholder="請輸入詳細地標或廣場名稱" className="w-full border border-slate-300 p-2.5 rounded-lg outline-none text-slate-700 bg-white" value={raceData.location} onChange={e => setRaceData({...raceData, location: e.target.value})}/>
+                          </div>
+                      </div>
+
+                      <div className="pt-2">
+                          <label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-1"><ImagePlus size={14}/> 宣傳海報圖片 或 報名網址</label>
                           <div className="flex gap-2 items-center">
                               <input type="text" placeholder="https://..." className="w-full border border-slate-300 p-2.5 rounded-lg outline-none text-sm font-mono flex-1" value={raceData.imageUrl} onChange={e => setRaceData({...raceData, imageUrl: e.target.value})}/>
-                              <button onClick={openImageLink} className="px-3 py-2.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-colors text-xs font-bold flex items-center gap-1 whitespace-nowrap" title="在新分頁預覽圖片"><ExternalLink size={14} />網頁連結測試確認</button>
+                              <button onClick={openImageLink} className={`px-3 py-2.5 rounded-lg transition-colors text-xs font-bold flex items-center gap-1 whitespace-nowrap ${raceData.imageUrl ? 'bg-slate-800 text-white hover:bg-slate-700' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`} title="在新分頁預覽"><ExternalLink size={14} />測試確認</button>
                           </div>
                       </div>
                   </div>
@@ -181,12 +288,14 @@ export default function RaceBuilder() {
                               <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
                                   {renderStatusIcon(raceData.status)}
                               </div>
-                              {/* 🌟 擴充了狀態選項 */}
+                              {/* 🌟 擴充至六種狀態選項 */}
                               <select className="w-full border border-slate-300 py-2.5 pl-9 pr-4 rounded-lg outline-none font-bold cursor-pointer hover:border-blue-400 transition-colors bg-white appearance-none" value={raceData.status} onChange={e => setRaceData({...raceData, status: e.target.value})}>
                                   <option value="OPEN">🟢 招募中 (開放報名)</option>
                                   <option value="NEGOTIATING">🤝 洽談中 (意願收集/預備)</option>
                                   <option value="SUBMITTED">📤 已送名單 (鎖定/停止報名)</option>
                                   <option value="FULL">⚫ 滿編 (停止報名，開放候補)</option>
+                                  <option value="CANCELLED">🚫 無合作/停辦 (結案)</option>
+                                  <option value="SHORTAGE">⚠️ 招不到人 (異常結案)</option>
                               </select>
                           </div>
                       </div>
@@ -202,20 +311,28 @@ export default function RaceBuilder() {
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 md:p-8 min-h-full">
                   <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
                       <div>
-                          <h3 className="font-black text-xl text-slate-800 flex items-center gap-2"><Users className="text-blue-600"/> 任務名額配置 (Slot Allocation)</h3>
-                          <p className="text-xs text-slate-500 mt-1">您可以自由調整隊伍、棒次名稱與需求人數。</p>
+                          <h3 className="font-black text-xl text-slate-800 flex items-center gap-2"><Users className="text-blue-600"/> 任務名額配置與報名狀況</h3>
+                          <p className="text-xs text-slate-500 mt-1">您可以自由調整隊伍、棒次名稱與需求人數，下方會即時顯示已報名人員。</p>
                       </div>
                       <button onClick={addSlot} className="flex items-center gap-1 bg-blue-100 text-blue-700 hover:bg-blue-200 px-4 py-2 rounded-lg font-bold text-sm transition-colors shadow-sm"><Plus size={16}/> 新增賽段</button>
                   </div>
 
-                  <div className="space-y-4">
-                      {slots.map((slot, index) => (
-                          <div key={slot.id} className="p-5 rounded-xl border-2 border-slate-100 bg-slate-50 relative group hover:border-blue-300 transition-all">
+                  <div className="space-y-6">
+                      {slots.map((slot, index) => {
+                          const assignees = parseAssignees(slot.assignee);
+                          const isFull = slot.filled >= slot.capacity && slot.capacity > 0;
+
+                          return (
+                          <div key={slot.id} className={`p-5 rounded-xl border-2 relative group transition-all ${isFull ? 'border-green-300 bg-green-50/20' : 'border-slate-100 bg-slate-50 hover:border-blue-300'}`}>
                               <div className="absolute -left-3 -top-3 w-8 h-8 bg-slate-800 text-white rounded-full flex items-center justify-center font-black text-sm border-4 border-white shadow-sm">{index + 1}</div>
-                              <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                              
+                              <div className="grid grid-cols-1 md:grid-cols-12 gap-4 mb-4">
                                   <div className="md:col-span-3"><label className="block text-xs font-bold text-slate-500 mb-1">隊伍 / 組別</label><input type="text" placeholder="例如：A組" className="w-full border border-slate-300 p-2 rounded outline-none font-bold text-blue-700 bg-white cursor-text" value={slot.group} onChange={e => updateSlot(slot.id, 'group', e.target.value)} /></div>
                                   <div className="md:col-span-4"><label className="block text-xs font-bold text-slate-500 mb-1">賽段 / 棒次名稱</label><input type="text" placeholder="例如：第1棒：游泳" className="w-full border border-slate-300 p-2 rounded outline-none font-bold text-slate-800 bg-white cursor-text" value={slot.name} onChange={e => updateSlot(slot.id, 'name', e.target.value)} /></div>
-                                  <div className="md:col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">需求人數</label><input type="number" min="1" className="w-full border border-slate-300 p-2 rounded outline-none text-center font-bold text-blue-600 bg-white cursor-text" value={slot.capacity} onChange={e => updateSlot(slot.id, 'capacity', e.target.value)} /></div>
+                                  <div className="md:col-span-2">
+                                      <label className="block text-xs font-bold text-slate-500 mb-1">需求人數</label>
+                                      <input type="number" min="0" className={`w-full border p-2 rounded outline-none text-center font-bold bg-white cursor-text ${isFull ? 'text-green-600 border-green-300 bg-green-50' : 'text-blue-600 border-slate-300'}`} value={slot.capacity} onChange={e => updateSlot(slot.id, 'capacity', e.target.value)} />
+                                  </div>
                                   <div className="md:col-span-2">
                                       <label className="block text-xs font-bold text-slate-500 mb-1">性別限制</label>
                                       <select className={`w-full border border-slate-300 p-2 rounded outline-none text-xs font-bold ${slot.genderLimit === 'F' ? 'bg-pink-50 text-pink-600 border-pink-200' : 'bg-white text-slate-600'}`} value={slot.genderLimit} onChange={e => updateSlot(slot.id, 'genderLimit', e.target.value)}>
@@ -224,8 +341,48 @@ export default function RaceBuilder() {
                                   </div>
                                   <div className="md:col-span-1 flex items-end justify-end"><button onClick={() => removeSlot(slot.id)} className="p-2 text-red-400 hover:bg-red-100 hover:text-red-600 rounded-lg transition-colors mb-0.5"><Trash2 size={20}/></button></div>
                               </div>
+
+                              <div className="bg-white rounded-lg p-4 border border-slate-200 shadow-inner">
+                                  <div className="text-xs font-bold text-slate-500 mb-3 flex items-center justify-between border-b border-slate-100 pb-2">
+                                      <span className="flex items-center gap-1"><UsersRound size={14}/> 報名名單與職務指派</span>
+                                      <span className={`${isFull ? 'text-green-600' : 'text-blue-600'}`}>已報名: {slot.filled || 0} / {slot.capacity}</span>
+                                  </div>
+                                  
+                                  {assignees.length > 0 ? (
+                                      <div className="flex flex-col gap-2">
+                                          {assignees.map((p, i) => (
+                                              <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg">
+                                                  <div className="flex items-center gap-2">
+                                                      <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black text-white" style={{ backgroundColor: `hsl(${i * 60 + 200}, 70%, 50%)` }}>
+                                                          {getInitial(p.name)}
+                                                      </div>
+                                                      <span className="text-sm font-bold text-slate-700">{p.name}</span>
+                                                      {p.isLegacy && <span className="text-[9px] bg-slate-200 text-slate-600 px-1 rounded border border-slate-300">舊</span>}
+                                                  </div>
+                                                  
+                                                  <div className="flex items-center gap-2">
+                                                      {/* 🌟 自由指定教官身份 */}
+                                                      <select 
+                                                          className={`text-xs font-bold p-1 rounded border outline-none ${p.roleTag ? 'bg-amber-50 text-amber-700 border-amber-300' : 'bg-white text-slate-500 border-slate-300'}`}
+                                                          value={p.roleTag || ""}
+                                                          onChange={(e) => handleSetRole(slot.id, p.id, e.target.value)}
+                                                      >
+                                                          <option value="">無特殊職務</option>
+                                                          <option value="帶隊教官">🛡️ 帶隊教官</option>
+                                                          <option value="賽道教官">🚩 賽道教官</option>
+                                                          <option value="醫護教官">🏥 醫護教官</option>
+                                                          <option value="官方代表">👑 官方代表</option>
+                                                      </select>
+                                                  </div>
+                                              </div>
+                                          ))}
+                                      </div>
+                                  ) : (
+                                      <div className="text-xs text-slate-400 font-medium text-center py-2">目前尚無人員報名此賽段</div>
+                                  )}
+                              </div>
                           </div>
-                      ))}
+                      )})}
                   </div>
                   
                   <div className="mt-6 p-4 bg-blue-50 border border-blue-100 rounded-xl flex items-center justify-between">

@@ -1,8 +1,7 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef } from 'react'
 import { supabase } from '../supabaseClient'
 import * as XLSX from 'xlsx' 
-// 🌟 修正：補上漏掉的 FileDown 圖示
-import { FileSpreadsheet, CheckCircle, ArrowRight, Save, Database, Settings, LayoutList, Merge, Plus, Target, UserCheck, XCircle, BrainCircuit, Trash2, Edit, Download, FileText, Filter, FileDown, Upload, AlertTriangle, Users, Flag } from 'lucide-react'
+import { FileSpreadsheet, CheckCircle, ArrowRight, Save, Database, Settings, LayoutList, Merge, Plus, Target, UserCheck, XCircle, BrainCircuit, Trash2, Edit, Download, FileText, Filter, Users, Flag, Upload, AlertTriangle, FileDown, Loader2 } from 'lucide-react'
 
 const TARGET_FIELDS = [
     { group: '🟢 【A~O】基本與聯絡資料', options: [
@@ -41,40 +40,46 @@ const TARGET_FIELDS = [
 const FLAT_TARGETS = TARGET_FIELDS.flatMap(g => g.options)
 const MAPPING_MEMORY_KEY = 'ironmedic_mapping_memory'
 
-// 賽事匯入模板表頭
+// 🌟 賽事匯入模板表頭
 const RACE_IMPORT_TEMPLATE_HEADERS = [
     "賽事名稱", "日期(YYYY-MM-DD)", "鳴槍時間(HH:MM)", "地點", "賽事類型(馬拉松/鐵人三項...)", 
     "海報圖片URL", "狀態(OPEN/NEGOTIATING/SUBMITTED)", "是否火熱(Y/N)", 
-    "賽段配置(JSON格式字串)"
+    "賽段配置(分組+人數)", "參賽總人數", "教官", "主辦單位或承辦單位", 
+    "贊助方（鐵人醫護有限公司）代表1", "贊助方（鐵人醫護有限公司）代表2", "贊助方（鐵人醫護有限公司）代表3",
+    ...Array.from({length: 40}, (_, i) => `參加人員${i + 1}`)
 ]
 
 export default function DataImportCenter() {
-  // 🌟 頂層切換：分為「會員匯入」與「賽事建檔」兩個分支
   const [mainTab, setMainTab] = useState('members') 
 
+  // --- 會員匯入專用 State ---
   const [mode, setMode] = useState('full') 
   const [step, setStep] = useState(1) 
-  
   const [fileMaster, setFileMaster] = useState(null)
   const [fileWix, setFileWix] = useState(null)
   const [rawHeaders, setRawHeaders] = useState([])
   const [rawData, setRawData] = useState([])
-  
   const [fieldMapping, setFieldMapping] = useState({}) 
   const [memoryFlags, setMemoryFlags] = useState({}) 
-  
   const [patchAnchorExcel, setPatchAnchorExcel] = useState('') 
   const [patchAnchorDB, setPatchAnchorDB] = useState('full_name') 
-  
   const [previewData, setPreviewData] = useState([]) 
   const [viewFilter, setViewFilter] = useState('all') 
+  
+  // --- 賽事匯入專用 State ---
+  const [isUploadingRace, setIsUploadingRace] = useState(false)
+  const [uploadRaceStatus, setUploadRaceStatus] = useState(null)
+  const [raceFile, setRaceFile] = useState(null)
+
+  // --- 共用 State ---
   const [logs, setLogs] = useState([])
   const [processing, setProcessing] = useState(false)
   const logsEndRef = useRef(null)
 
-  // 賽事匯入的狀態模擬
-  const [isUploadingRace, setIsUploadingRace] = useState(false)
-  const [uploadRaceStatus, setUploadRaceStatus] = useState(null)
+  const handleDragOver = (e) => { e.preventDefault(); e.stopPropagation(); }
+  const handleDropMaster = (e) => { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer.files && e.dataTransfer.files.length > 0) setFileMaster(e.dataTransfer.files[0]); }
+  const handleDropWix = (e) => { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer.files && e.dataTransfer.files.length > 0) setFileWix(e.dataTransfer.files[0]); }
+  const handleDropRace = (e) => { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer.files && e.dataTransfer.files.length > 0) setRaceFile(e.dataTransfer.files[0]); }
 
   const addLog = (msg, type = 'info') => {
     const time = new Date().toLocaleTimeString('zh-TW', { hour12: false })
@@ -97,6 +102,24 @@ export default function DataImportCenter() {
         };
         reader.readAsBinaryString(file);
     });
+  }
+
+  const handleDownloadTemplate = (type) => {
+      let headers = [];
+      let filename = "";
+      if (type === 'members') {
+          headers = FLAT_TARGETS.map(f => f.label.split('(')[0]); 
+          filename = "醫護鐵人_會員匯入標準範本.xlsx";
+      } else {
+          headers = RACE_IMPORT_TEMPLATE_HEADERS;
+          filename = "醫護鐵人_賽事年度總表標準範本.xlsx";
+      }
+
+      const ws = XLSX.utils.aoa_to_sheet([headers]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Template");
+      XLSX.writeFile(wb, filename);
+      addLog(`已下載 ${filename}`, 'info');
   }
 
   const handleModeSwitch = (newMode) => {
@@ -161,6 +184,9 @@ export default function DataImportCenter() {
       XLSX.writeFile(wb, `Import_Report_${new Date().toISOString().slice(0,10)}.xlsx`);
   }
 
+  // ==========================================
+  // 🌟 會員匯入核心邏輯 (完整保留)
+  // ==========================================
   const handleStep1Submit = async () => {
     if (!fileMaster) return alert("請上傳主要資料檔案！")
     setProcessing(true)
@@ -415,23 +441,267 @@ export default function DataImportCenter() {
       });
   }
 
-  // 🌟 賽事匯入模擬處理
-  const handleSimulateRaceUpload = () => {
-    setIsUploadingRace(true)
-    setUploadRaceStatus(null)
-    addLog("開始執行賽事批次建檔掃描...", 'info')
-    
-    setTimeout(() => {
-        setIsUploadingRace(false)
-        setUploadRaceStatus('success')
-        addLog("賽事批次建檔成功，共匯入 12 筆新賽事。", 'success')
-    }, 2000)
+  // ==========================================
+  // 🌟 賽事匯入核心邏輯 (真．智慧去重版)
+  // ==========================================
+  const handleExecuteRaceUpload = async () => {
+      if (!raceFile) return alert("請先選擇賽事建檔表！");
+      
+      setIsUploadingRace(true);
+      setUploadRaceStatus(null);
+      addLog("開始讀取賽事 Excel 檔案...", 'info');
+
+      try {
+          const rows = await readExcel(raceFile);
+          if (rows.length === 0) throw new Error("上傳的檔案沒有資料");
+
+          const racesToInsert = [];
+          let errorCount = 0;
+
+          // 預先載入所有會員資料，供姓名精準匹配使用
+          const { data: dbProfiles } = await supabase.from('profiles').select('id, full_name, email');
+          const profileMap = new Map();
+          if (dbProfiles) {
+              dbProfiles.forEach(p => profileMap.set(p.full_name, p));
+          }
+
+          for (let i = 0; i < rows.length; i++) {
+              const row = rows[i];
+              try {
+                  const name = row['賽事名稱'] || row.name || '';
+                  if (!name) {
+                      addLog(`警告：第 ${i+2} 行缺少「賽事名稱」，自動略過此筆`, 'warning');
+                      continue;
+                  }
+
+                  let rawDate = row['日期(YYYY-MM-DD)'] || row.date || '';
+                  let location = row['地點'] || row.location || '';
+                  const imgUrl = row['海報圖片URL'] || row['賽事URL'] || '';
+                  
+                  // 日期容錯處理
+                  let parsedDate = null;
+                  if (rawDate) {
+                      let dateStr = String(rawDate).trim();
+                      if (dateStr.includes('-') && dateStr.includes('/')) dateStr = dateStr.split('-')[0].trim();
+                      dateStr = dateStr.replace(/\//g, '-');
+                      const d = new Date(dateStr);
+                      if (!isNaN(d.getTime())) parsedDate = d.toISOString().split('T')[0];
+                  }
+
+                  if (!parsedDate) {
+                      parsedDate = '2025-01-01'; 
+                      addLog(`⚠️ 賽事「${name}」日期異常 [${rawDate}]，已暫時代入 2025-01-01 以防崩潰`, 'warning');
+                  }
+
+                  if (!location || String(location).trim() === '') {
+                      location = imgUrl ? "詳見賽事連結" : "地點未定";
+                  }
+
+                  // 🌟🌟 建立人員地圖 (Deduplication Map) 以防重複計算
+                  const participantsMap = new Map(); 
+
+                  // 1. 抓取一般參加人員 1~40
+                  for(let j = 1; j <= 40; j++) {
+                      const person = row[`參加人員${j}`];
+                      if (person && String(person).trim() !== '') {
+                          let rawString = String(person).trim();
+                          let pSlotName = null;
+                          const match = rawString.match(/(.*?)\((.*?)\)/) || rawString.match(/(.*?)（(.*?)）/);
+                          if (match) {
+                              rawString = match[1].trim();
+                              pSlotName = match[2].trim();
+                          }
+                          let cleanName = rawString.replace(/[A-Za-z0-9\s]+$/, '').trim(); 
+                          if (!cleanName) cleanName = rawString.trim(); 
+                          
+                          if (!participantsMap.has(cleanName)) {
+                              participantsMap.set(cleanName, { cleanName, pSlotName, roleTag: null });
+                          }
+                      }
+                  }
+
+                  // 2. 處理教官與代表，若已存在則「只貼標籤」，不存在才新增
+                  const assignSpecialRole = (rawSpecialName, role) => {
+                      if (!rawSpecialName) return;
+                      let cleanSpecial = String(rawSpecialName).replace(/[A-Za-z0-9\s]+$/, '').trim();
+                      if (!cleanSpecial) cleanSpecial = String(rawSpecialName).trim();
+                      
+                      if (participantsMap.has(cleanSpecial)) {
+                          participantsMap.get(cleanSpecial).roleTag = role;
+                      } else {
+                          participantsMap.set(cleanSpecial, { cleanName: cleanSpecial, pSlotName: null, roleTag: role });
+                      }
+                  };
+
+                  const sponsor1 = row['贊助方（鐵人醫護有限公司）代表1'] || '';
+                  const sponsor2 = row['贊助方（鐵人醫護有限公司）代表2'] || '';
+                  const sponsor3 = row['贊助方（鐵人醫護有限公司）代表3'] || '';
+                  assignSpecialRole(sponsor1, '官方代表');
+                  assignSpecialRole(sponsor2, '官方代表');
+                  assignSpecialRole(sponsor3, '官方代表');
+
+                  const instructors = row['教官'] || '';
+                  if (instructors) {
+                      const lines = String(instructors).split('\n');
+                      lines.forEach(line => {
+                          let rawInst = line.replace(/^[0-9\.\s]+/, '').trim();
+                          if (rawInst) {
+                              let role = '帶隊教官'; 
+                              if (rawInst.includes('賽道')) role = '賽道教官';
+                              if (rawInst.includes('醫護')) role = '醫護教官';
+                              rawInst = rawInst.replace(/帶隊教官[：:]?|賽道教官[：:]?|醫護教官[：:]?/g, '').trim();
+                              if(rawInst) assignSpecialRole(rawInst, role);
+                          }
+                      });
+                  }
+
+                  const extraInfo = {
+                      organizer: row['主辦單位或承辦單位'] || '',
+                      instructor: instructors,
+                      sponsor1: sponsor1,
+                      sponsor2: sponsor2,
+                      sponsor3: sponsor3
+                  };
+
+                  let slotsArray = [];
+                  let totalRequiredInput = parseInt(row['參賽總人數'], 10);
+                  if (isNaN(totalRequiredInput)) totalRequiredInput = 0;
+
+                  const rawSlotsText = row['賽段配置(分組+人數)'] || row['賽段配置(快速語法)'] || '';
+                  
+                  if (!rawSlotsText) {
+                      slotsArray = [{ 
+                          id: Date.now(), 
+                          group: '一般組別', 
+                          name: '全賽段', 
+                          capacity: Math.max(1, participantsMap.size, totalRequiredInput), 
+                          genderLimit: 'ANY', 
+                          filled: 0, 
+                          assignee: '',
+                          ...extraInfo
+                      }];
+                  } else {
+                      const parts = String(rawSlotsText).split(/[,，、]/);
+                      slotsArray = parts.map((part, idx) => {
+                          let sName = part.trim();
+                          let cap = 0;
+                          let group = '一般組別';
+
+                          const numMatch = sName.match(/(\d+)\s*(人|位|名)/);
+                          if (numMatch) {
+                              cap = parseInt(numMatch[1], 10);
+                              sName = sName.replace(numMatch[0], '').trim() || `組別${idx+1}`;
+                          } else {
+                              cap = 0;
+                          }
+
+                          if (sName.includes('-')) {
+                              const sp = sName.split('-');
+                              group = sp[0].trim();
+                              sName = sp.slice(1).join('-').trim();
+                          }
+
+                          if (!sName) sName = `組別${idx+1}`;
+
+                          return {
+                              id: Date.now() + idx,
+                              group: group,
+                              name: sName,
+                              capacity: cap,
+                              genderLimit: 'ANY',
+                              filled: 0,
+                              assignee: '',
+                              ...extraInfo
+                          };
+                      });
+                  }
+
+                  // 3. 把 Map 中的人員真正放進 Slots 中
+                  Array.from(participantsMap.values()).forEach(pData => {
+                      let targetSlot = slotsArray[0];
+                      if (pData.pSlotName) {
+                          const found = slotsArray.find(s => s.name.includes(pData.pSlotName) || pData.pSlotName.includes(s.name));
+                          if (found) targetSlot = found;
+                      }
+
+                      const dbMatch = profileMap.get(pData.cleanName);
+                      let assigneesList = targetSlot.assignee ? targetSlot.assignee.split('|') : [];
+                      
+                      const pObj = {
+                          id: dbMatch ? dbMatch.id : `legacy-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                          name: pData.cleanName,
+                          email: dbMatch ? dbMatch.email : '',
+                          timestamp: '舊表單匯入',
+                          isLegacy: !dbMatch,
+                          roleTag: pData.roleTag 
+                      };
+                      assigneesList.push(JSON.stringify(pObj));
+                      
+                      targetSlot.assignee = assigneesList.join('|');
+                      targetSlot.filled = assigneesList.length;
+                      
+                      if (targetSlot.filled > targetSlot.capacity) {
+                          targetSlot.capacity = targetSlot.filled;
+                      }
+                  });
+
+                  slotsArray.forEach(s => {
+                      if (s.capacity === 0) s.capacity = Math.max(1, s.filled);
+                  });
+
+                  const calcRequired = slotsArray.reduce((acc, cur) => acc + cur.capacity, 0);
+                  let finalRequired = Math.max(totalRequiredInput || 0, calcRequired);
+
+                  racesToInsert.push({
+                      name: name,
+                      date: parsedDate, 
+                      gather_time: row['鳴槍時間(HH:MM)'] || null,
+                      location: location, 
+                      type: row['賽事類型(馬拉松/鐵人三項...)'] || '馬拉松',
+                      image_url: imgUrl,
+                      status: row['狀態(OPEN/NEGOTIATING/SUBMITTED)'] || 'OPEN',
+                      is_hot: (row['是否火熱(Y/N)'] === 'Y' || row['是否火熱(Y/N)'] === 'y'),
+                      medic_required: finalRequired,
+                      medic_registered: participantsMap.size, 
+                      slots_data: slotsArray,
+                      waitlist_data: []
+                  });
+
+              } catch (e) {
+                  errorCount++;
+                  addLog(`❌ 解析失敗 (${row['賽事名稱'] || `第${i+2}行`}): ${e.message}`, 'error');
+              }
+          }
+
+          if (racesToInsert.length > 0) {
+              addLog(`準備將 ${racesToInsert.length} 筆清洗完畢的賽事寫入資料庫...`, 'info');
+              
+              const BATCH_SIZE = 50;
+              for (let i = 0; i < racesToInsert.length; i += BATCH_SIZE) {
+                  const chunk = racesToInsert.slice(i, i + BATCH_SIZE);
+                  const { error } = await supabase.from('races').insert(chunk);
+                  if (error) throw error;
+              }
+              
+              setUploadRaceStatus('success');
+              addLog(`🎉 賽事建檔成功！共新增 ${racesToInsert.length} 筆賽事。${errorCount > 0 ? `(有 ${errorCount} 筆遭略過)` : ''}`, 'success');
+              setRaceFile(null); 
+          } else {
+              setUploadRaceStatus('error');
+              addLog("未能解析出任何有效的賽事資料。", 'warning');
+          }
+
+      } catch (err) {
+          setUploadRaceStatus('error');
+          addLog(`賽事檔案讀取錯誤: ${err.message}`, 'error');
+      } finally {
+          setIsUploadingRace(false);
+      }
   }
 
   return (
     <div className="w-full space-y-6 pb-20 animate-fade-in text-slate-800">
       
-      {/* 🌟 頂層切換頁籤 */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex">
           <button 
               onClick={() => setMainTab('members')}
@@ -450,7 +720,6 @@ export default function DataImportCenter() {
       </div>
 
       {mainTab === 'members' ? (
-        /* 原有的會員匯入介面 */
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 w-full animate-fade-in-up">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
                 <div>
@@ -476,43 +745,62 @@ export default function DataImportCenter() {
             {step === 1 && (
             <div className="space-y-6">
                 {mode === 'patch' ? (
-                    <div className="border-2 border-dashed border-slate-300 rounded-2xl p-12 text-center hover:border-amber-400 bg-white transition-all cursor-pointer">
+                    <div 
+                        onDragOver={handleDragOver} 
+                        onDrop={handleDropMaster}
+                        className="border-2 border-dashed border-slate-300 rounded-2xl p-12 text-center hover:border-amber-400 bg-white transition-all cursor-pointer"
+                    >
                         <input type="file" id="upload-patch" className="hidden" accept=".xlsx,.csv" onChange={(e)=>setFileMaster(e.target.files[0])}/>
-                        <label htmlFor="upload-patch" className="cursor-pointer block">
+                        <label htmlFor="upload-patch" className="cursor-pointer block w-full h-full">
                             <div className="w-16 h-16 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mb-4 mx-auto border border-amber-100"><Edit size={32}/></div>
-                            <h3 className="text-xl font-bold text-slate-800 mb-2">上傳「特定欄位更新」資料表</h3>
+                            <h3 className="text-xl font-bold text-slate-800 mb-2">點擊選擇檔案，或將檔案拖曳至此</h3>
                             <p className="text-sm text-slate-500 mb-4">此模式僅會更新您指定的欄位，不會影響人員的其他資料。</p>
                             {fileMaster && <div className="font-bold text-blue-600 bg-blue-50 border border-blue-100 inline-block px-4 py-2 rounded-full">已選取檔案: {fileMaster.name}</div>}
                         </label>
                     </div>
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className={`border-2 border-dashed rounded-2xl p-8 text-center transition-all cursor-pointer ${fileMaster ? 'border-blue-400 bg-blue-50' : 'border-slate-300 bg-white hover:border-blue-400'}`}>
+                        <div 
+                            onDragOver={handleDragOver} 
+                            onDrop={handleDropMaster}
+                            className={`border-2 border-dashed rounded-2xl p-8 text-center transition-all cursor-pointer ${fileMaster ? 'border-blue-400 bg-blue-50' : 'border-slate-300 bg-white hover:border-blue-400'}`}
+                        >
                             <input type="file" id="master-up" className="hidden" accept=".xlsx,.csv" onChange={(e)=>setFileMaster(e.target.files[0])}/>
-                            <label htmlFor="master-up" className="cursor-pointer block">
+                            <label htmlFor="master-up" className="cursor-pointer block w-full h-full">
                                 <FileSpreadsheet size={40} className={`mx-auto mb-4 ${fileMaster ? 'text-blue-600' : 'text-slate-400'}`}/>
-                                <h3 className="text-lg font-bold text-slate-700">1. 上傳主要資料表 (Master)</h3>
+                                <h3 className="text-lg font-bold text-slate-700">1. 上傳或拖曳主要資料表 (Master)</h3>
                                 <p className="text-xs text-slate-500 mb-2">包含 A~AO 欄位的完整名單</p>
                                 {fileMaster && <div className="text-sm font-bold text-blue-600">{fileMaster.name}</div>}
                             </label>
                         </div>
-                        <div className={`border-2 border-dashed rounded-2xl p-8 text-center transition-all cursor-pointer ${fileWix ? 'border-purple-400 bg-purple-50' : 'border-slate-300 bg-white hover:border-purple-400'}`}>
+                        <div 
+                            onDragOver={handleDragOver} 
+                            onDrop={handleDropWix}
+                            className={`border-2 border-dashed rounded-2xl p-8 text-center transition-all cursor-pointer ${fileWix ? 'border-purple-400 bg-purple-50' : 'border-slate-300 bg-white hover:border-purple-400'}`}
+                        >
                             <input type="file" id="wix-up" className="hidden" accept=".xlsx,.csv" onChange={(e)=>setFileWix(e.target.files[0])}/>
-                            <label htmlFor="wix-up" className="cursor-pointer block">
+                            <label htmlFor="wix-up" className="cursor-pointer block w-full h-full">
                                 <Plus size={40} className={`mx-auto mb-4 ${fileWix ? 'text-purple-600' : 'text-slate-400'}`}/>
-                                <h3 className="text-lg font-bold text-slate-700">2. 上傳輔助資料表 (選項)</h3>
+                                <h3 className="text-lg font-bold text-slate-700">2. 上傳或拖曳輔助資料表 (選項)</h3>
                                 <p className="text-xs text-slate-500 mb-2">用於合併比對，例如 Wix 報名系統匯出的資料</p>
                                 {fileWix && <div className="text-sm font-bold text-purple-600">{fileWix.name}</div>}
                             </label>
                         </div>
                     </div>
                 )}
-                <div className="flex justify-center mt-6">
+                <div className="flex justify-between items-center mt-6">
+                    <button 
+                        onClick={() => handleDownloadTemplate('members')} 
+                        className="text-sm font-bold text-slate-500 hover:text-blue-600 transition-colors flex items-center gap-1 border-b border-dashed border-slate-300 pb-0.5"
+                    >
+                        <FileDown size={16}/> 找不到格式？下載會員標準範本
+                    </button>
+
                     <button 
                         onClick={handleStep1Submit} disabled={!fileMaster || processing}
                         className="px-10 py-3 text-white rounded-xl font-bold bg-slate-800 hover:bg-slate-700 shadow-md flex items-center justify-center gap-2 transition-transform active:scale-95 disabled:opacity-50"
                     >
-                        {processing ? '資料解析中...' : '確認檔案，進入下一步'}
+                        {processing ? <><Loader2 className="animate-spin" size={20}/> 資料解析中...</> : '確認檔案，進入下一步'}
                     </button>
                 </div>
             </div>
@@ -595,13 +883,13 @@ export default function DataImportCenter() {
                 <div className="flex justify-end gap-4">
                     <button onClick={() => setStep(1)} className="px-6 py-2 rounded-xl font-medium text-slate-600 hover:bg-slate-100 border border-slate-200">返回上一步</button>
                     <button onClick={handleMatchAndTransform} disabled={processing} className="px-8 py-2 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-md flex items-center gap-2">
-                        <LayoutList size={18}/> 確認對應，產生預覽
+                        {processing ? <><Loader2 className="animate-spin" size={18}/> 處理中...</> : <><LayoutList size={18}/> 確認對應，產生預覽</>}
                     </button>
                 </div>
             </div>
-            )}
+          )}
 
-            {step === 3 && (
+          {step === 3 && (
             <div className="space-y-4 animate-fade-in-up w-full">
                 
                 <div className="flex flex-wrap items-center justify-start p-4 rounded-xl shadow-sm bg-white border border-slate-200 gap-6">
@@ -636,7 +924,7 @@ export default function DataImportCenter() {
                     <div className="flex items-center gap-3">
                         <button onClick={() => setStep(2)} className="px-5 py-2.5 rounded-xl font-medium text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200 transition-colors">返回修改設定</button>
                         <button onClick={handleExecute} disabled={processing || previewData.filter(r=>mode==='patch' ? ['perfect','resolved'].includes(r._status) : r._status==='valid').length === 0} className="px-8 py-2.5 rounded-xl font-bold text-white shadow-md flex items-center gap-2 disabled:opacity-50 bg-slate-800 hover:bg-slate-700 transition-transform active:scale-95">
-                            <Save size={18}/> {processing ? '系統處理中...' : '確認無誤，執行匯入'}
+                            {processing ? <><Loader2 className="animate-spin" size={18}/> 系統處理中...</> : <><Save size={18}/> 確認無誤，執行匯入</>}
                         </button>
                     </div>
                 </div>
@@ -716,38 +1004,45 @@ export default function DataImportCenter() {
                     </div>
                 </div>
             </div>
-            )}
+          )}
         </div>
       ) : (
       
-      /* 🌟 賽事任務批次建檔分支 */
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 w-full animate-fade-in-up">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4 border-b border-slate-100 pb-6">
             <div>
                 <h2 className="text-2xl font-black text-amber-600 flex items-center gap-2">
-                    <Flag className="text-amber-500"/> 賽事任務批次建檔
+                    <Flag className="text-amber-500"/> 賽事年度總表批次建檔
                 </h2>
-                <p className="text-slate-500 text-sm mt-1">透過 Excel/CSV 檔案，一次性建立整年度的所有賽事與賽段配置。</p>
+                <p className="text-slate-500 text-sm mt-1">配備「智慧去重引擎」，教官與一般人員完美整合，保證人數不再失真！</p>
             </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 md:gap-12">
               <div>
-                  <div className="border-2 border-dashed border-amber-300 rounded-2xl p-8 text-center hover:bg-amber-50 hover:border-amber-400 transition-colors cursor-pointer group mb-6 bg-slate-50/50">
-                      <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
-                          <FileSpreadsheet size={32} />
-                      </div>
-                      <p className="font-bold text-slate-700 mb-1">點擊或拖曳 賽事建檔表 至此</p>
-                      <p className="text-xs text-slate-500 font-medium">支援格式：.xlsx, .csv</p>
+                  <div 
+                      onDragOver={handleDragOver} 
+                      onDrop={handleDropRace}
+                      className={`border-2 border-dashed rounded-2xl p-8 text-center transition-all cursor-pointer group mb-6 ${raceFile ? 'border-amber-400 bg-amber-50' : 'border-amber-300 hover:border-amber-400 bg-slate-50/50'}`}
+                  >
+                      <input type="file" id="race-upload" className="hidden" accept=".xlsx,.csv" onChange={(e)=>setRaceFile(e.target.files[0])}/>
+                      <label htmlFor="race-upload" className="cursor-pointer block w-full h-full">
+                          <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
+                              <FileSpreadsheet size={32} />
+                          </div>
+                          <h3 className="text-xl font-bold text-slate-800 mb-2">點擊選擇檔案，或將檔案拖曳至此</h3>
+                          <p className="text-xs text-slate-500 font-medium">支援格式：.xlsx, .csv</p>
+                          {raceFile && <div className="mt-4 font-bold text-amber-600 bg-amber-50 inline-block px-4 py-1.5 rounded-full border border-amber-200 shadow-sm">{raceFile.name}</div>}
+                      </label>
                   </div>
 
                   <button 
-                      onClick={handleSimulateRaceUpload}
-                      disabled={isUploadingRace}
+                      onClick={handleExecuteRaceUpload}
+                      disabled={isUploadingRace || !raceFile}
                       className={`w-full py-4 rounded-xl font-black flex items-center justify-center gap-2 transition-all shadow-lg
-                          ${isUploadingRace ? 'bg-slate-400 text-white cursor-not-allowed shadow-none' : 'bg-amber-500 hover:bg-amber-600 text-white shadow-amber-500/30 active:scale-95'}`}
+                          ${isUploadingRace || !raceFile ? 'bg-slate-400 text-white cursor-not-allowed shadow-none' : 'bg-amber-500 hover:bg-amber-600 text-white shadow-amber-500/30 active:scale-95'}`}
                   >
-                      {isUploadingRace ? <><Loader2 className="animate-spin" size={20}/> 系統解析賽事資料中...</> : <><Upload size={20}/> 開始執行賽事匯入</>}
+                      {isUploadingRace ? <><Loader2 className="animate-spin" size={20}/> 系統去重解析與寫入中...</> : <><Upload size={20}/> 開始執行賽事匯入</>}
                   </button>
 
                   {uploadRaceStatus === 'success' && (
@@ -755,7 +1050,16 @@ export default function DataImportCenter() {
                           <CheckCircle className="text-green-500 shrink-0 mt-0.5" size={20}/>
                           <div>
                               <h4 className="font-bold text-green-800">賽事批次建檔成功！</h4>
-                              <p className="text-sm text-green-600 mt-1">已成功匯入 12 場賽事，您可至「賽事任務總覽」查看。</p>
+                              <p className="text-sm text-green-600 mt-1">人員資料已去重並寫入，您可至「賽事任務總覽」查看精準數據。</p>
+                          </div>
+                      </div>
+                  )}
+                  {uploadRaceStatus === 'error' && (
+                      <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3 animate-bounce-in">
+                          <AlertTriangle className="text-red-500 shrink-0 mt-0.5" size={20}/>
+                          <div>
+                              <h4 className="font-bold text-red-800">賽事建檔發生錯誤</h4>
+                              <p className="text-sm text-red-600 mt-1">請查看下方系統日誌了解詳細錯誤原因。</p>
                           </div>
                       </div>
                   )}
@@ -763,50 +1067,24 @@ export default function DataImportCenter() {
 
               <div className="bg-amber-50/30 rounded-2xl p-6 border border-amber-100">
                   <h3 className="text-lg font-black text-amber-800 mb-4 flex items-center gap-2">
-                      <FileDown className="text-amber-500"/> 標準格式下載與說明
+                      <FileDown className="text-amber-500"/> 下載 年度賽事總表 格式
                   </h3>
-                  <p className="text-sm text-slate-600 mb-6 leading-relaxed">
-                      賽事資料較為複雜，請務必下載標準模板。各欄位需嚴格遵守格式，特別是<strong className="text-amber-600">「賽段配置」</strong>需使用 JSON 陣列。
-                  </p>
-                  
-                  <button className="w-full py-3 mb-6 bg-white border border-amber-300 hover:border-amber-500 hover:text-amber-600 text-slate-700 font-bold rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm group">
+                  <button onClick={() => handleDownloadTemplate('races')} className="w-full py-3 mb-6 bg-white border border-amber-300 hover:border-amber-500 hover:text-amber-600 text-slate-700 font-bold rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm group">
                       <FileDown size={18} className="group-hover:-translate-y-1 transition-transform text-amber-500"/> 
-                      下載 賽事建檔 標準模板 (.csv)
+                      下載 賽事總表標準範本 (.xlsx)
                   </button>
-
-                  <div className="space-y-3">
-                      <div className="text-xs font-black text-slate-500 uppercase tracking-widest border-b border-slate-200 pb-2 mb-3">
-                          賽事建檔 必填欄位對應
-                      </div>
-                      
-                      <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-2">
-                          {RACE_IMPORT_TEMPLATE_HEADERS.map((header, idx) => (
-                              <div key={idx} className="bg-white p-2.5 rounded-lg border border-slate-200 shadow-sm text-sm font-bold text-slate-700 flex items-center gap-2">
-                                  <span className="bg-amber-100 text-amber-700 text-[10px] px-1.5 py-0.5 rounded font-black">{String.fromCharCode(65 + idx)}</span> 
-                                  {header}
-                              </div>
-                          ))}
-                          <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg text-xs font-medium text-amber-800 leading-relaxed shadow-inner">
-                              <span className="font-bold text-amber-600 block mb-1 flex items-center gap-1"><AlertTriangle size={14}/>賽段配置 (JSON) 範例：</span>
-                              <code className="bg-white p-2 rounded border border-amber-100 mt-2 block font-mono text-[11px] overflow-x-auto text-slate-600 whitespace-pre">
-{`[
-  {
-    "group": "一般組別",
-    "name": "全程馬拉松組",
-    "capacity": 10,
-    "genderLimit": "ANY"
-  }
-]`}
-                              </code>
-                          </div>
-                      </div>
+                  <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg text-xs font-medium text-amber-800 leading-relaxed shadow-inner">
+                      <span className="font-bold text-amber-600 block mb-1 flex items-center gap-1"><AlertTriangle size={14}/> 人員防呆與去重說明：</span>
+                      <ul className="list-disc pl-4 space-y-1 text-slate-700 mt-2">
+                          <li>系統會自動辨識並清除非人名的後綴 (如 da1)。</li>
+                          <li><span className="font-bold text-red-600">不會重複計算：</span>若「教官」已存在於「參加人員 1~40」中，系統會自動將其合併為同一人，並掛上教官徽章。</li>
+                      </ul>
                   </div>
               </div>
           </div>
       </div>
       )}
 
-      {/* 系統執行紀錄區 */}
       <div className="bg-slate-900 rounded-xl p-4 h-40 overflow-hidden flex flex-col shadow-inner w-full">
           <div className="text-slate-400 text-xs font-bold border-b border-slate-700 pb-2 mb-2 flex justify-between items-center">
               <span className="flex items-center gap-2"><Database size={14}/> 系統執行紀錄 (System Logs)</span>

@@ -3,10 +3,11 @@ import { Medal, Calendar, ShieldCheck, AlertTriangle, Clock, MapPin, ChevronRigh
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 
-// 🌟 淨化：測試帳號名稱
+// 🌟 對齊資料庫的真實資料，讓退賽邏輯不會抓錯人
 const CURRENT_USER = {
     id: 'admin001', 
-    full_name: '測試管理員', 
+    email: 'marco1104@gmail.com', // 🌟 加入信箱
+    full_name: '測試者',          // 🌟 真實姓名
     role: 'SUPER_ADMIN', 
     is_current_member: 'Y', 
     license_expiry: '2028-01-01', 

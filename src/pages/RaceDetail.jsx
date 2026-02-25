@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Calendar, MapPin, Clock, CheckCircle, XCircle, Crown, Sprout, Timer, AlertTriangle, Activity, Users, ChevronLeft, Flag, Edit3, Zap, UserCheck, Loader2, ChevronRight, X } from 'lucide-react'
+import { Calendar, MapPin, Clock, CheckCircle, XCircle, Crown, Sprout, Timer, AlertTriangle, Activity, Users, ChevronLeft, Flag, Edit3, Zap, UserCheck, Loader2, ChevronRight, X, ShieldAlert } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 
-// 🌟 修正：換成資料庫裡真實存在的名字！這樣匯出時才能關聯到資料。
 const CURRENT_USER = {
-    id: 'marco_real_id', // 理想情況下這裡要塞您的真實 UUID
-    full_name: '陳霖毅',    // 🚨 注意：這個名字必須和您 profiles 裡面的姓名一模一樣！
+    id: 'admin001', 
+    email: 'marco1104@gmail.com', 
+    full_name: '測試者',          
     role: 'SUPER_ADMIN', 
     is_current_member: 'Y', 
     license_expiry: '2028-01-01', 
@@ -83,13 +83,12 @@ export default function RaceDetail() {
 
       const now = new Date();
       const timestamp = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}:${now.getMilliseconds().toString().padStart(3,'0')}`;
-      
-      // 🌟 我們保留後面的 #數字，但匯出時只會抓前面的名字去比對
       const entryName = `${CURRENT_USER.full_name} #${testCounter}`;
       
       const participantInfo = {
           id: `${CURRENT_USER.id}-${testCounter}`,
           name: entryName,
+          email: CURRENT_USER.email,
           tier: getUserTier(CURRENT_USER),
           isVip: CURRENT_USER.is_vip === 'Y',
           isNew: CURRENT_USER.total_races < 2,
@@ -158,6 +157,7 @@ export default function RaceDetail() {
       return acc;
   }, {});
 
+  // 🌟 讓內頁也讀得懂 roleTag (教官標記)
   const parseAssignees = (assigneeString) => {
       if (!assigneeString) return [];
       const rawAssignees = assigneeString.split('|');
@@ -165,16 +165,26 @@ export default function RaceDetail() {
           try {
               return JSON.parse(item); 
           } catch (e) {
-              return { name: item.trim(), timestamp: '10:00:00:000', isVip: false, isNew: false };
+              return { name: item.trim(), timestamp: '舊資料匯入', isVip: false, isNew: false, isLegacy: true };
           }
       });
+  }
+
+  // 動態渲染徽章
+  const renderRoleBadge = (roleTag) => {
+      if (!roleTag) return null;
+      if (roleTag === '帶隊教官') return <span className="flex items-center text-[10px] bg-indigo-100 text-indigo-700 border border-indigo-300 px-1.5 py-0.5 rounded font-black"><ShieldAlert size={10} className="mr-1"/> 帶隊官</span>;
+      if (roleTag === '賽道教官') return <span className="flex items-center text-[10px] bg-orange-100 text-orange-700 border border-orange-300 px-1.5 py-0.5 rounded font-black"><Flag size={10} className="mr-1"/> 賽道官</span>;
+      if (roleTag === '醫護教官') return <span className="flex items-center text-[10px] bg-rose-100 text-rose-700 border border-rose-300 px-1.5 py-0.5 rounded font-black"><Activity size={10} className="mr-1"/> 醫護官</span>;
+      if (roleTag === '官方代表') return <span className="flex items-center text-[10px] bg-slate-800 text-amber-400 border border-slate-600 px-1.5 py-0.5 rounded font-black"><Crown size={10} className="mr-1"/> 代表</span>;
+      return null;
   }
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans animate-fade-in flex flex-col">
       
       <div className="relative w-full bg-slate-900 pt-8 pb-48 lg:pb-56">
-          <div className="absolute inset-0 opacity-40 bg-cover bg-center" style={{ backgroundImage: `url(${activeRace.imageUrl || 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&q=80&w=1920'})` }}></div>
+          <div className="absolute inset-0 opacity-40 bg-cover bg-center" style={{ backgroundImage: `url(${activeRace.imageUrl || '/default-race.jpg'})` }}></div>
           <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/80 to-transparent"></div>
           
           <div className="relative z-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full flex justify-between items-center mb-10 lg:mb-16">
@@ -230,7 +240,7 @@ export default function RaceDetail() {
                                   {slotsInGroup.map(slot => {
                                       const filledCount = slot.filled || 0;
                                       const slotCapacity = slot.capacity || 1; 
-                                      const isFull = filledCount >= slotCapacity;
+                                      const isFull = filledCount >= slotCapacity && slotCapacity > 0;
                                       const isSelected = selectedSlot === slot.id;
                                       
                                       const assignees = parseAssignees(slot.assignee);
@@ -438,17 +448,18 @@ export default function RaceDetail() {
           </div>
       </div>
 
+      {/* 🌟 內頁預覽 Modal：完整顯示教官徽章 */}
       {previewSlot && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-fade-in" onClick={() => setPreviewSlot(null)}>
-              <div className="bg-white rounded-[2rem] shadow-2xl max-w-sm md:max-w-md w-full p-6 animate-bounce-in" onClick={e => e.stopPropagation()}>
-                  <div className="flex justify-between items-center mb-4">
+              <div className="bg-white rounded-[2rem] shadow-2xl max-w-sm md:max-w-md w-full p-6 animate-bounce-in flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
+                  <div className="flex justify-between items-center mb-4 shrink-0">
                       <h3 className="font-black text-xl text-slate-800 flex items-center gap-2"><Users className="text-blue-600"/> 已報名夥伴名單</h3>
                       <button onClick={() => setPreviewSlot(null)} className="text-slate-400 hover:bg-slate-100 p-2 rounded-full transition-colors"><X size={20}/></button>
                   </div>
-                  <div className="text-sm font-bold text-slate-500 mb-4 pb-4 border-b border-slate-100 leading-snug">
+                  <div className="text-sm font-bold text-slate-500 mb-4 pb-4 border-b border-slate-100 leading-snug shrink-0">
                       {previewSlot.group} - {previewSlot.name}
                   </div>
-                  <div className="max-h-80 overflow-y-auto space-y-3 custom-scrollbar pr-2">
+                  <div className="overflow-y-auto space-y-3 custom-scrollbar pr-2 flex-1">
                       {previewSlot.assignees.map((participant, i) => {
                           const cleanName = participant.name.split('#')[0].trim();
                           
@@ -460,20 +471,24 @@ export default function RaceDetail() {
                                   </div>
                                   <div>
                                       <div className="font-bold text-slate-800 flex items-center gap-2 flex-wrap">
-                                          {participant.name}
-                                          {participant.isVip && <span className="flex items-center text-[10px] bg-amber-100 text-amber-700 border border-amber-300 px-1.5 py-0.5 rounded font-black"><Crown size={10} className="mr-1"/> VIP</span>}
+                                          {cleanName}
+                                          {/* 🌟 在這裡將後台指定的教官徽章渲染出來！ */}
+                                          {renderRoleBadge(participant.roleTag)}
+                                          {!participant.roleTag && participant.isVip && <span className="flex items-center text-[10px] bg-amber-100 text-amber-700 border border-amber-300 px-1.5 py-0.5 rounded font-black"><Crown size={10} className="mr-1"/> VIP</span>}
                                           {participant.isNew && <span className="flex items-center text-[10px] bg-green-100 text-green-700 border border-green-300 px-1.5 py-0.5 rounded font-black"><Sprout size={10} className="mr-1"/> 新人</span>}
+                                          {participant.isLegacy && <span className="flex items-center text-[10px] bg-slate-100 text-slate-600 border border-slate-300 px-1.5 py-0.5 rounded font-black">舊名單</span>}
                                       </div>
                                       <div className="text-xs text-slate-400 font-mono mt-1 flex items-center gap-1">
                                           <Clock size={10}/> 登記時間: {participant.timestamp}
                                       </div>
                                   </div>
                               </div>
-                              <div className="mt-2 sm:mt-0 sm:ml-auto text-xs text-green-600 font-bold bg-green-50 px-2 py-1 rounded w-fit">已確認報名</div>
+                              <div className="mt-2 sm:mt-0 sm:ml-auto text-xs text-green-600 font-bold bg-green-50 px-2 py-1 rounded w-fit border border-green-100">已確認報名</div>
                           </div>
                       )})}
+                      {(!previewSlot.assignees || previewSlot.assignees.length === 0) && <div className="text-center text-slate-400 py-10 font-medium">目前尚無人員報名</div>}
                   </div>
-                  <button onClick={() => setPreviewSlot(null)} className="w-full mt-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl transition-colors active:scale-95">關閉名單</button>
+                  <button onClick={() => setPreviewSlot(null)} className="w-full mt-6 py-3.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl transition-colors active:scale-95 shrink-0">關閉名單</button>
               </div>
           </div>
       )}
