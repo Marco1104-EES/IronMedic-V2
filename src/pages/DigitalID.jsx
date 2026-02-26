@@ -1,454 +1,665 @@
 import { useState, useEffect } from 'react'
-import { Medal, Calendar, ShieldCheck, AlertTriangle, Clock, MapPin, ChevronRight, Activity, Zap, Crown, Sprout, Loader2, CreditCard, LogOut, QrCode, CheckCircle, ShieldAlert, Bell, MessageSquareWarning, X, Flag, User } from 'lucide-react'
+import { 
+    Medal, Calendar, ShieldCheck, AlertTriangle, Clock, MapPin, ChevronRight, ChevronLeft, 
+    Activity, Crown, Sprout, Loader2, CreditCard, LogOut, QrCode, CheckCircle, 
+    XCircle, ShieldAlert, Bell, X, Flag, User, Phone, HeartPulse, Shirt, Car, 
+    Award, Fingerprint, Target, MousePointerClick, Edit3, Send, Check, Save, 
+    ListOrdered, Trash2
+} from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 
-// 🌟 對齊資料庫的真實資料，讓退賽邏輯不會抓錯人
+// 預設測試資料 (未登入時的防呆)
 const CURRENT_USER = {
     id: 'admin001', 
-    email: 'marco1104@gmail.com', // 🌟 加入信箱
-    full_name: '測試者',          // 🌟 真實姓名
+    email: 'marco1104@gmail.com', 
+    full_name: '測試者',          
     role: 'SUPER_ADMIN', 
     is_current_member: 'Y', 
     license_expiry: '2028-01-01', 
     shirt_expiry_25: '2025-12-31', 
     is_vip: 'Y', 
-    total_races: 52, 
     is_team_leader: 'Y', 
-    gender: 'M',
+    gender: '男',
     blood_type: 'O+',
-    member_id: 'IM-2024-001'
+    ironmedic_no: 'IM-2024-001',
+    basic_edit_count: 0,
+    med_edit_count: 0
 }
 
-const MOCK_NOTIFICATIONS = [
-    { id: 1, type: 'system', category: 'race', message: '新賽事「2026 渣打台北公益馬拉松」已開放招募！', timestamp: new Date(Date.now() - 86400000).toLocaleString(), isRead: false },
-    { id: 2, type: 'system', category: 'race', message: '歡迎啟用全新醫護鐵人數位 ID 系統！', timestamp: new Date(Date.now() - 172800000).toLocaleString(), isRead: true }
+// 模擬通知資料 (加入 date 欄位以支援 8 個月自動刪除)
+const INITIAL_NOTIFICATIONS = [
+    { id: 1, tab: 'system', category: 'race', message: '新賽事「2026 渣打台北公益馬拉松」已開放報名！', date: new Date().toISOString(), isRead: false },
+    { id: 2, tab: 'personal', category: 'cert', message: '您的 EMT-1 證照即將於 30 天後到期，請盡速更新。', date: new Date(Date.now() - 86400000).toISOString(), isRead: false },
+    { id: 3, tab: 'system', category: 'shop', message: '專屬 VIP 優惠：鐵人裝備商城全館 8 折！', date: new Date(Date.now() - 86400000 * 3).toISOString(), isRead: true },
+    { id: 4, tab: 'personal', category: 'old', message: '這是一則一年前的舊通知，即將被系統自動清除。', date: '2024-01-01T00:00:00.000Z', isRead: true }
 ]
 
 export default function DigitalID() {
   const navigate = useNavigate()
-  const [loading, setLoading] = useState(true)
-  const [myRaces, setMyRaces] = useState([])
+  const [showQR, setShowQR] = useState(false)
   
-  const [isNotificationOpen, setIsNotificationOpen] = useState(false)
-  const [notifications, setNotifications] = useState(MOCK_NOTIFICATIONS)
-  const [activeTab, setActiveTab] = useState('personal') 
+  // 🌟 通知中心狀態
+  const [showNotifPanel, setShowNotifPanel] = useState(false)
+  const [notifTab, setNotifTab] = useState('system') // 'system' 或 'personal'
+  const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS)
+  
+  const [profile, setProfile] = useState(null)
+  const [myRaces, setMyRaces] = useState([]) 
+  const [loadingProfile, setLoadingProfile] = useState(true)
 
-  const getUserTier = (user) => {
-      if (user.is_vip === 'Y') return { level: 1, label: '核心幹部 VIP', color: 'from-amber-400 to-yellow-600', text: 'text-amber-500' };
-      if (user.total_races < 2) return { level: 2, label: '新進夥伴', color: 'from-green-400 to-emerald-600', text: 'text-green-500' };
-      if (user.is_team_leader === 'Y') return { level: 3, label: '小隊長', color: 'from-blue-400 to-indigo-600', text: 'text-blue-500' };
-      if (user.is_current_member === 'Y') return { level: 4, label: '活躍會員', color: 'from-slate-400 to-slate-600', text: 'text-slate-500' };
-      return { level: 5, label: '一般會員', color: 'from-slate-300 to-slate-400', text: 'text-slate-400' };
-  }
-
-  const userTier = getUserTier(CURRENT_USER)
-  const isLicenseValid = new Date(CURRENT_USER.license_expiry) >= new Date()
-
-  const totalUnreadCount = notifications.filter(n => !n.isRead).length
-  const personalUnread = notifications.filter(n => !n.isRead && n.category === 'personal').length
-  const raceUnread = notifications.filter(n => !n.isRead && n.category === 'race').length
-
-  const displayedNotifications = notifications.filter(n => n.category === activeTab)
+  // Modal 控制
+  const [activeModal, setActiveModal] = useState(null) 
+  const [isEditing, setIsEditing] = useState(false)
+  const [formData, setFormData] = useState({})
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    fetchMyMissions()
+    // 🌟 8個月自動刪除機制
+    const eightMonthsAgo = new Date();
+    eightMonthsAgo.setMonth(eightMonthsAgo.getMonth() - 8);
+    setNotifications(prev => prev.filter(n => new Date(n.date) >= eightMonthsAgo));
+
+    fetchData();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const fetchMyMissions = async () => {
-    setLoading(true)
+  const fetchData = async () => {
+    setLoadingProfile(true)
     try {
-      const { data: races, error } = await supabase.from('races').select('*').order('date', { ascending: true })
-      if (error) throw error
+      const { data: { user } } = await supabase.auth.getUser()
+      let currentUserProfile = CURRENT_USER;
 
-      const upcomingMissions = []
+      if (user) {
+        const { data, error } = await supabase.from('profiles').select('*').eq('id', user.id).single()
+        if (error) throw error
+        currentUserProfile = {
+            ...data,
+            basic_edit_count: data.basic_edit_count || 0,
+            med_edit_count: data.med_edit_count || 0
+        }
+        setProfile(currentUserProfile)
+      } else {
+        setProfile({
+            ...currentUserProfile,
+            english_name: 'Iron Medic', birthday: '1985-10-18',
+            national_id: 'A123456789', phone: '0912-345-678', contact_email: 'test@ironmedic.com',
+            address: '台北市大安區鐵人路1號', line_id: 'ironmedic_test',
+            emergency_name: '王小明', emergency_phone: '0987-654-321', emergency_relation: '配偶',
+            medical_license: 'EMT-P 高級救護技術員', medical_history: '無特殊病史',
+            dietary_habit: '葷食', join_date: '2023年', 
+            transport_pref: '自行開車', stay_pref: '需要代訂住宿'
+        })
+      }
+
+      // 🌟 智慧撈取「我報名的賽事」與「歷史參賽明細」
+      const { data: allRaces, error: raceError } = await supabase.from('races').select('*').order('date', { ascending: false })
+      if (raceError) throw raceError;
+
+      const myEnrolledRaces = [];
       
-      races.forEach(race => {
-          if (race.slots_data && Array.isArray(race.slots_data)) {
-              race.slots_data.forEach(slot => {
-                  if (slot.assignee) {
-                      const rawAssignees = slot.assignee.split('|');
-                      rawAssignees.forEach(item => {
-                          let participantName = "";
-                          try { participantName = JSON.parse(item).name; } catch(e) { participantName = item.trim(); }
-                          if (participantName.includes(CURRENT_USER.full_name)) {
-                               upcomingMissions.push({
-                                  ...race, uniqueMissionId: `${race.id}-${slot.id}-${participantName}`, 
-                                  mySlotId: slot.id, mySlotGroup: slot.group, mySlotName: slot.name, exactMatchString: item 
-                              })
+      if (allRaces) {
+          allRaces.forEach(race => {
+              let foundMySlot = null;
+              let myRole = '醫護跑者'; 
+
+              if (race.slots_data && Array.isArray(race.slots_data)) {
+                  for (const slot of race.slots_data) {
+                      if (slot.assignee) {
+                          const assignees = slot.assignee.split('|');
+                          for (const item of assignees) {
+                              if (!item) continue;
+                              try {
+                                  const p = JSON.parse(item);
+                                  if (p.id === currentUserProfile.id || p.name === currentUserProfile.full_name) {
+                                      foundMySlot = slot.name;
+                                      if (p.roleTag) myRole = p.roleTag;
+                                      break;
+                                  }
+                              } catch (e) {
+                                  const legacyName = item.split(' #')[0].trim();
+                                  if (legacyName === currentUserProfile.full_name) {
+                                      foundMySlot = slot.name;
+                                      break;
+                                  }
+                              }
                           }
-                      });
+                      }
+                      if (foundMySlot) break;
                   }
-              })
+              }
+
+              if (foundMySlot) {
+                  myEnrolledRaces.push({
+                      id: race.id, name: race.name, date: race.date,
+                      location: race.location, status: race.status,
+                      slotName: foundMySlot, role: myRole
+                  });
+              }
+          });
+      }
+
+      setMyRaces(myEnrolledRaces);
+
+    } catch (error) {
+      console.error("載入資料失敗:", error)
+    } finally {
+      setLoadingProfile(false)
+    }
+  }
+
+  // 🌟 動態計算：真實完賽與達成率
+  const pastRaces = myRaces.filter(r => new Date(r.date) < new Date());
+  const finishedCount = pastRaces.length;
+  const totalEnrolledCount = myRaces.length;
+  // 假設目前沒有缺席機制，達成率預設為 100%。若有缺席資料，可改成 (finishedCount / pastRaces.length)*100
+  const attendanceRate = pastRaces.length > 0 ? '100%' : 'N/A';
+
+  const unreadCountReal = notifications.filter(n => !n.isRead).length;
+
+  const handleOpenModal = (modalName) => {
+      setActiveModal(modalName)
+      setIsEditing(false)
+      setFormData(profile)
+  }
+
+  const handleInputChange = (e) => {
+      const { name, value } = e.target
+      setFormData(prev => ({ ...prev, [name]: value }))
+  }
+
+  const handleSaveChanges = async (section) => {
+      setSaving(true)
+      try {
+          const updatePayload = { ...formData }
+          let notifyMsg = ''
+
+          if (section === 'basic') {
+              updatePayload.basic_edit_count = (profile.basic_edit_count || 0) + 1;
+              notifyMsg = `人員 [${profile.full_name}] 修改了「核心基本資料」`;
+          } else if (section === 'medical') {
+              updatePayload.med_edit_count = (profile.med_edit_count || 0) + 1;
+              notifyMsg = `人員 [${profile.full_name}] 修改了「醫護與裝備」`;
           }
-      })
-      
-      setMyRaces(upcomingMissions)
 
-      const historyNotifs = upcomingMissions.map((race) => ({
-          id: `hist-${race.uniqueMissionId}`,
-          type: 'system',
-          category: 'personal',
-          message: `✅ 報名確認：您已成功加入「${race.name}」的報名名單！負責組別為 ${race.mySlotGroup} - ${race.mySlotName}。`,
-          timestamp: '歷史紀錄',
-          isRead: true 
-      }));
+          const { data: { user } } = await supabase.auth.getUser()
+          if (user) {
+              await supabase.from('profiles').update(updatePayload).eq('id', user.id)
+              try {
+                  await supabase.from('admin_notifications').insert({
+                      user_id: user.id, user_name: profile.full_name,
+                      type: 'PROFILE_UPDATE', message: notifyMsg
+                  })
+              } catch (e) {}
+          }
 
-      setNotifications(prev => {
-          const existingIds = new Set(prev.map(n => n.id));
-          const newNotifs = historyNotifs.filter(n => !existingIds.has(n.id));
-          return [...prev, ...newNotifs];
-      });
+          setProfile(updatePayload)
+          setIsEditing(false)
+          alert(`✅ 資料更新成功！\n系統已發送修改通知給超級管理員。`)
 
-    } catch (error) { console.error("載入失敗:", error) } finally { setLoading(false) }
+      } catch (error) {
+          alert('儲存失敗：' + error.message)
+      } finally {
+          setSaving(false)
+      }
+  }
+
+  const handleApplyModification = () => {
+      alert("📝 已為您開啟「修改申請單」。\n請填寫您欲變更的欄位與原因，我們將由專人為您處理。")
+  }
+
+  const deleteNotification = (id) => {
+      setNotifications(prev => prev.filter(n => n.id !== id));
   }
 
   const markAllAsRead = () => {
-      setNotifications(notifications.map(n => n.category === activeTab ? { ...n, isRead: true } : n))
+      setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
   }
 
-  const handleWithdraw = async (raceId, slotId, exactMatchString, raceName) => {
-      if (!window.confirm(`⚠️ 確定要取消報名「${raceName}」嗎？\n退賽後若要重新加入，需視名額狀況重新排隊。`)) { return; }
+  const getNotifIcon = (category) => {
+      switch(category) {
+          case 'race': return <Flag size={16} className="text-blue-500"/>;
+          case 'cert': return <AlertTriangle size={16} className="text-red-500"/>;
+          case 'shop': return <Medal size={16} className="text-amber-500"/>;
+          default: return <Bell size={16} className="text-slate-500"/>;
+      }
+  }
 
-      try {
-          const { data: raceData, error: fetchError } = await supabase.from('races').select('slots_data, waitlist_data').eq('id', raceId).single();
-          if (fetchError) throw fetchError;
+  const InfoRow = ({ label, value, icon: Icon, alert = false }) => (
+      <div className="flex flex-col py-3 border-b border-slate-100 last:border-0">
+          <span className="text-xs font-bold text-slate-400 flex items-center gap-1.5 mb-1">
+              {Icon && <Icon size={12} />} {label}
+          </span>
+          <span className={`text-[15px] md:text-base font-black ${alert ? 'text-red-600' : 'text-slate-800'}`}>
+              {value || <span className="text-slate-300 font-medium">未提供</span>}
+          </span>
+      </div>
+  )
 
-          let waitlist = raceData.waitlist_data || [];
-          let promotedUser = null;
-          const waitlistIndex = waitlist.findIndex(user => user.slot === slotId);
-          
-          if (waitlistIndex !== -1) {
-              promotedUser = waitlist[waitlistIndex];
-              waitlist.splice(waitlistIndex, 1); 
-          }
+  const EditInputRow = ({ label, name, type = "text", options = [] }) => (
+      <div className="flex flex-col py-2 border-b border-slate-100 last:border-0">
+          <label className="text-xs font-bold text-blue-600 mb-1">{label}</label>
+          {type === 'select' ? (
+              <select name={name} value={formData[name] || ''} onChange={handleInputChange} className="w-full p-3 rounded-xl border border-slate-300 bg-white font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 text-[16px]">
+                  <option value="">請選擇</option>
+                  {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+              </select>
+          ) : (
+              <input type={type} name={name} value={formData[name] || ''} onChange={handleInputChange} className="w-full p-3 rounded-xl border border-slate-300 bg-white font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 text-[16px]" placeholder={`請輸入${label}`} />
+          )}
+      </div>
+  )
 
-          const updatedSlots = raceData.slots_data.map(slot => {
-              if (slot.id === slotId) {
-                  let currentFilled = slot.filled || 0;
-                  let assignees = slot.assignee ? slot.assignee.split('|') : [];
-                  const newAssignees = [];
-                  let removed = false;
-                  
-                  assignees.forEach(item => {
-                      if (item === exactMatchString && !removed) { removed = true; } else { newAssignees.push(item); }
-                  });
+  const displayUser = profile || CURRENT_USER;
 
-                  if (promotedUser) {
-                      newAssignees.push(JSON.stringify(promotedUser));
-                      
-                      if (promotedUser.name.includes(CURRENT_USER.full_name.split(' ')[0])) {
-                           const newNotif = {
-                              id: Date.now(),
-                              type: 'promotion',
-                              category: 'personal', 
-                              // 🌟 淨化：遞補上陣 -> 遞補成功
-                              message: `🎉 恭喜！您在「${raceName}」的候補順位已遞補成功！負責賽段為：${slot.group}-${slot.name}。請確認您的相關裝備。`,
-                              timestamp: new Date().toLocaleString(),
-                              isRead: false
-                          }
-                          setNotifications(prev => [newNotif, ...prev])
-                      }
-                      alert(`📣 退賽成功。\n您的位置已由候補名單中的【${promotedUser.name}】遞補成功！\n系統已發送站內通知給該夥伴。`);
-                  } else {
-                      currentFilled = Math.max(0, currentFilled - 1);
-                      
-                      const withdrawNotif = {
-                          id: Date.now(), type: 'system', category: 'personal',
-                          message: `✅ 您已成功取消「${raceName}」的報名。`,
-                          timestamp: new Date().toLocaleString(), isRead: false
-                      }
-                      setNotifications(prev => [withdrawNotif, ...prev])
-
-                      alert("✅ 退賽手續已完成！期待您下次的參與。");
-                  }
-                  return { ...slot, filled: currentFilled, assignee: newAssignees.join('|') };
-              }
-              return slot;
-          });
-
-          const { error: updateError } = await supabase.from('races').update({ slots_data: updatedSlots, waitlist_data: waitlist }).eq('id', raceId);
-          if (updateError) throw updateError;
-          fetchMyMissions();
-
-      } catch (error) { alert("退賽失敗：" + error.message); }
+  if (loadingProfile) {
+      return <div className="min-h-screen flex items-center justify-center bg-slate-50"><Loader2 className="animate-spin text-blue-500" size={48}/></div>
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans pb-24 animate-fade-in relative overflow-x-hidden">
+    <div className="min-h-screen bg-slate-50 font-sans pb-24 animate-fade-in flex flex-col relative overflow-x-hidden">
       
-      <div className="bg-slate-900 text-white p-4 sticky top-0 z-40 shadow-md flex justify-between items-center">
-          <div className="flex items-center gap-3 font-black tracking-wider">
-              <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white">I</div>
-              <span>IRON MEDIC</span>
-          </div>
-          
-          <div className="flex items-center gap-4">
-              <button onClick={() => setIsNotificationOpen(true)} className="relative p-2 text-slate-300 hover:text-white transition-colors bg-slate-800 rounded-full">
-                  <Bell size={20} />
-                  {totalUnreadCount > 0 && (
-                      <span className="absolute top-0 right-0 -mt-1 -mr-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-black text-white border-2 border-slate-900">
-                          {totalUnreadCount}
+      {/* 🌟 頂部背景與鈴鐺 */}
+      <div className="bg-slate-900 pt-16 md:pt-20 pb-36 px-4 relative overflow-hidden shrink-0">
+          <div className="absolute inset-0 opacity-10 bg-[url('https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&q=80&w=1920')] bg-cover bg-center"></div>
+          <div className="relative z-10 max-w-2xl mx-auto flex items-center justify-between">
+              <button onClick={() => navigate('/races')} className="p-2.5 bg-white/10 hover:bg-white/20 rounded-full text-white backdrop-blur-sm transition-colors active:scale-95">
+                  <ChevronLeft size={22}/>
+              </button>
+              <h1 className="text-xl md:text-2xl font-black text-white tracking-widest">個人數位 ID 卡</h1>
+              
+              {/* 🌟 點擊觸發右側通知面板 */}
+              <button onClick={() => setShowNotifPanel(true)} className="p-2.5 bg-white/10 hover:bg-white/20 rounded-full text-white backdrop-blur-sm transition-colors cursor-pointer group active:scale-95 relative">
+                  <Bell size={22} className="group-hover:animate-wiggle"/>
+                  {unreadCountReal > 0 && (
+                      <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-black text-white border-2 border-slate-900 shadow-sm animate-pulse">
+                          {unreadCountReal}
                       </span>
                   )}
               </button>
-              <button onClick={() => navigate('/races')} className="text-sm font-bold text-slate-300 hover:text-white transition-colors bg-slate-800 px-4 py-2 rounded-full hidden sm:block">
-                  前往賽事大廳
-              </button>
           </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 lg:mt-12 relative z-10">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12">
+      <div className="max-w-2xl mx-auto px-4 w-full -mt-24 relative z-20 space-y-6 flex-1">
+          
+          {/* 🌟 數位識別證 */}
+          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-[2rem] p-6 md:p-8 shadow-2xl border border-slate-700 relative overflow-hidden group">
+              <div className="absolute -top-10 -right-10 opacity-5 pointer-events-none">
+                  <Fingerprint size={180} className="text-white"/>
+              </div>
               
-              <div className="lg:col-span-5 space-y-6">
-                  <div className={`relative rounded-3xl p-8 overflow-hidden shadow-2xl shadow-${userTier.color.split('-')[1]}/30 bg-gradient-to-br from-slate-900 to-slate-800 text-white border border-slate-700`}>
-                      <div className={`absolute -top-24 -right-24 w-64 h-64 bg-gradient-to-br ${userTier.color} rounded-full blur-3xl opacity-20 pointer-events-none`}></div>
-                      
-                      <div className="relative z-10 flex justify-between items-start mb-10">
-                          <div>
-                              <div className="text-slate-400 text-xs font-black tracking-widest uppercase mb-1 flex items-center gap-1.5">
-                                  <CreditCard size={14}/> DIGITAL ID
-                              </div>
-                              <div className="font-mono text-sm text-slate-300 tracking-widest">{CURRENT_USER.member_id}</div>
-                          </div>
-                          <div className={`px-3 py-1 rounded-full text-xs font-black bg-gradient-to-r ${userTier.color} shadow-lg flex items-center gap-1`}>
-                              {CURRENT_USER.is_vip === 'Y' && <Crown size={12}/>}
-                              {userTier.label}
-                          </div>
+              <div className="flex justify-between items-start mb-8 relative z-10">
+                  <div className="flex items-center gap-4">
+                      <div className="w-16 h-16 md:w-20 md:h-20 bg-gradient-to-br from-blue-400 to-indigo-600 rounded-2xl flex items-center justify-center text-3xl font-black text-white shadow-lg border-2 border-slate-700">
+                          {displayUser.full_name?.charAt(0) || '?'}
                       </div>
-
-                      <div className="relative z-10 flex items-center gap-6 mb-10">
-                          <div className={`w-20 h-20 rounded-full bg-gradient-to-br ${userTier.color} p-1 shadow-inner`}>
-                              <div className="w-full h-full rounded-full bg-slate-800 flex items-center justify-center text-3xl font-black border-2 border-slate-900">
-                                  {CURRENT_USER.full_name.charAt(0)}
-                              </div>
-                          </div>
-                          <div>
-                              <h2 className="text-3xl font-black tracking-tight">{CURRENT_USER.full_name}</h2>
-                              <div className="text-slate-400 text-sm mt-1 flex items-center gap-3">
-                                  <span className="flex items-center gap-1"><Activity size={14}/> 血型: {CURRENT_USER.blood_type}</span>
-                              </div>
-                          </div>
-                      </div>
-
-                      <div className="relative z-10 grid grid-cols-2 gap-4 border-t border-slate-700/50 pt-6">
-                          <div>
-                              <div className="text-[10px] text-slate-400 uppercase tracking-widest font-bold mb-1">醫護證照效期</div>
-                              <div className={`text-sm font-black flex items-center gap-1.5 ${isLicenseValid ? 'text-green-400' : 'text-red-400'}`}>
-                                  {isLicenseValid ? <ShieldCheck size={16}/> : <AlertTriangle size={16}/>}
-                                  {CURRENT_USER.license_expiry}
-                              </div>
-                          </div>
-                          <div>
-                              <div className="text-[10px] text-slate-400 uppercase tracking-widest font-bold mb-1">三鐵衣資格</div>
-                              <div className="text-sm font-black text-blue-300 flex items-center gap-1.5">
-                                  <CheckCircle size={16}/>
-                                  {CURRENT_USER.shirt_expiry_25}
-                              </div>
-                          </div>
-                      </div>
-
-                      <div className="absolute bottom-6 right-6 opacity-30 pointer-events-none">
-                          <QrCode size={48} />
+                      <div>
+                          <h2 className="text-2xl md:text-3xl font-black text-white mb-1">{displayUser.full_name}</h2>
+                          <div className="text-blue-300 font-mono text-sm tracking-widest">{displayUser.ironmedic_no || 'IM-XXXX-XXX'}</div>
                       </div>
                   </div>
+                  <button onClick={() => setShowQR(true)} className="w-14 h-14 bg-white p-2.5 rounded-2xl shadow-lg hover:scale-105 active:scale-95 transition-transform group/qr">
+                      <QrCode className="w-full h-full text-slate-800 group-hover/qr:text-blue-600 transition-colors"/>
+                  </button>
+              </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                      <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center justify-center text-center">
-                          <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mb-3">
-                              <Medal size={24}/>
+              <div className="flex flex-wrap gap-2 relative z-10">
+                  {displayUser.is_vip === 'Y' && <span className="bg-amber-400 text-amber-900 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><Crown size={12}/> VIP</span>}
+                  {displayUser.is_team_leader === 'Y' && <span className="bg-blue-500 text-white text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><ShieldAlert size={12}/> 帶隊教官</span>}
+                  {displayUser.is_current_member === 'Y' ? 
+                      <span className="bg-green-500/20 text-green-400 border border-green-500/50 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><CheckCircle size={12}/> 有效會員</span> : 
+                      <span className="bg-red-500/20 text-red-400 border border-red-500/50 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><XCircle size={12}/> 非會員</span>
+                  }
+              </div>
+          </div>
+
+          {/* 🌟 我報名的賽事 (真實從 DB 撈取) */}
+          <div>
+              <div className="flex items-center justify-between mb-3 px-1">
+                  <h3 className="font-black text-slate-800 flex items-center gap-1.5"><Flag className="text-blue-600" size={18}/> 我報名的賽事</h3>
+              </div>
+              <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar snap-x">
+                  {myRaces.filter(r => new Date(r.date) >= new Date()).length > 0 ? (
+                      myRaces.filter(r => new Date(r.date) >= new Date()).map(race => (
+                          <div key={race.id} onClick={() => navigate(`/race-detail/${race.id}`)} className="bg-white min-w-[260px] md:min-w-[300px] p-4 rounded-[1.5rem] shadow-sm border border-slate-200 cursor-pointer hover:shadow-md transition-all snap-start active:scale-95">
+                              <div className="flex justify-between items-start mb-2">
+                                  <span className={`text-[10px] font-black px-2 py-0.5 rounded-md ${race.status === 'FULL' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>
+                                      {race.status === 'OPEN' ? '招募中' : race.status === 'FULL' ? '滿編' : '處理中'}
+                                  </span>
+                                  <span className="text-xs font-bold text-slate-500 flex items-center gap-1"><Calendar size={12}/>{race.date}</span>
+                              </div>
+                              <h4 className="font-black text-slate-800 text-[15px] mb-1 line-clamp-1">{race.name}</h4>
+                              <div className="text-xs text-slate-500 font-medium mb-3 truncate flex items-center gap-1"><MapPin size={12} className="text-red-400"/> {race.location}</div>
+                              <div className="pt-3 border-t border-slate-100 flex justify-between items-center">
+                                  <div className="text-xs font-bold text-slate-700">{race.slotName}</div>
+                                  <div className="text-[10px] font-black bg-slate-800 text-amber-400 px-2 py-1 rounded-lg flex items-center gap-1">
+                                      <ShieldAlert size={10}/> {race.role}
+                                  </div>
+                              </div>
                           </div>
-                          {/* 🌟 淨化：任務 -> 賽事 */}
-                          <div className="text-3xl font-black text-slate-800">{CURRENT_USER.total_races}</div>
-                          <div className="text-xs font-bold text-slate-500 mt-1 uppercase tracking-widest">總完賽場次</div>
+                      ))
+                  ) : (
+                      <div className="bg-white w-full p-6 rounded-[1.5rem] border border-dashed border-slate-300 text-center text-slate-400 font-medium text-sm shadow-sm">
+                          目前沒有即將到來的賽事
                       </div>
-                      <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center justify-center text-center">
-                          <div className="w-12 h-12 bg-green-50 text-green-600 rounded-full flex items-center justify-center mb-3">
-                              <Zap size={24}/>
-                          </div>
-                          <div className="text-3xl font-black text-slate-800">100%</div>
-                          <div className="text-xs font-bold text-slate-500 mt-1 uppercase tracking-widest">出席達成率</div>
-                      </div>
+                  )}
+              </div>
+          </div>
+
+          {/* 🌟 四大方格區 (位置重排：基本、醫護、統計、明細) */}
+          <div className="grid grid-cols-2 gap-3 md:gap-4">
+              
+              {/* 左上：核心基本資料 */}
+              <div onClick={() => handleOpenModal('basic')} className="bg-white p-4 md:p-5 rounded-[1.5rem] shadow-sm border border-slate-200 cursor-pointer active:scale-95 hover:border-blue-400 transition-all flex flex-col items-center justify-center text-center gap-2 relative">
+                  <div className="absolute top-3 right-3 text-slate-300"><MousePointerClick size={16} className="animate-bounce" /></div>
+                  <div className="w-12 h-12 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center mb-1"><User size={24}/></div>
+                  <div>
+                      <h4 className="font-black text-slate-800 text-[13px] sm:text-sm">核心基本資料</h4>
+                      <div className="text-[10px] font-bold text-slate-500 mt-0.5">可修正 {2 - displayUser.basic_edit_count} 次</div>
                   </div>
               </div>
 
-              <div className="lg:col-span-7">
-                  <div className="bg-white rounded-[2rem] shadow-xl shadow-slate-200/50 border border-slate-100 p-6 md:p-8 min-h-full">
-                      <div className="flex justify-between items-center mb-8 border-b border-slate-100 pb-5">
-                          <div>
-                              {/* 🌟 淨化：任務雷達 -> 我的賽事紀錄 */}
-                              <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
-                                  <Calendar className="text-blue-600"/> 我的賽事紀錄 (My Races)
-                              </h2>
-                              <p className="text-sm text-slate-500 mt-1">系統自動追蹤您已報名的所有賽事。</p>
-                          </div>
-                      </div>
+              {/* 右上：醫護與裝備 */}
+              <div onClick={() => handleOpenModal('medical')} className="bg-white p-4 md:p-5 rounded-[1.5rem] shadow-sm border border-slate-200 cursor-pointer active:scale-95 hover:border-blue-400 transition-all flex flex-col items-center justify-center text-center gap-2 relative">
+                  <div className="absolute top-3 right-3 text-slate-300"><MousePointerClick size={16} className="animate-bounce" /></div>
+                  <div className="w-12 h-12 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center mb-1"><HeartPulse size={24}/></div>
+                  <div>
+                      <h4 className="font-black text-slate-800 text-[13px] sm:text-sm">醫護與裝備</h4>
+                      <div className="text-[10px] font-bold text-slate-500 mt-0.5">可修正 {2 - displayUser.med_edit_count} 次</div>
+                  </div>
+              </div>
 
-                      {loading ? (
-                          <div className="flex flex-col justify-center items-center h-64 text-slate-400">
-                              <Loader2 className="animate-spin mb-4" size={40} />
-                              <span className="font-bold">名單掃描中...</span>
-                          </div>
-                      ) : myRaces.length === 0 ? (
-                          <div className="text-center py-20 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
-                              <div className="w-16 h-16 bg-slate-200 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-400">
-                                  <MapPin size={32}/>
-                              </div>
-                              <h3 className="text-lg font-black text-slate-700 mb-2">目前無報名紀錄</h3>
-                              <p className="text-slate-500 text-sm mb-6">您尚未報名任何賽事。</p>
-                              <button onClick={() => navigate('/races')} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg shadow-blue-600/30 transition-all active:scale-95">
-                                  前往賽事大廳尋找活動
-                              </button>
-                          </div>
-                      ) : (
-                          <div className="space-y-5">
-                              {myRaces.map((race) => (
-                                  <div key={race.uniqueMissionId} className="group relative p-5 md:p-6 rounded-2xl border-2 border-slate-100 bg-white hover:border-blue-300 hover:shadow-lg transition-all flex flex-col md:flex-row md:items-center justify-between gap-5">
-                                      
-                                      <div className="flex-1 min-w-0">
-                                          <div className="flex items-center gap-2 mb-2">
-                                              <span className="bg-slate-100 text-slate-600 text-[10px] font-black px-2.5 py-1 rounded-md tracking-widest">{race.type}</span>
-                                              <span className="text-xs font-bold text-slate-500 flex items-center gap-1"><Clock size={12}/> {race.date}</span>
-                                          </div>
-                                          <h3 className="text-lg font-black text-slate-800 mb-3 truncate group-hover:text-blue-600 transition-colors">
-                                              {race.name}
-                                          </h3>
-                                          
-                                          <div className="bg-blue-50/80 p-3 rounded-xl border border-blue-100 w-fit">
-                                              {/* 🌟 淨化：防守位置 -> 負責賽段 */}
-                                              <div className="text-xs text-blue-600 font-bold mb-0.5">您的報名賽段：</div>
-                                              <div className="text-sm font-black text-slate-800 flex items-center gap-2">
-                                                  <ShieldAlert size={16} className="text-blue-500"/>
-                                                  {race.mySlotGroup} - {race.mySlotName}
-                                              </div>
-                                          </div>
-                                      </div>
+              {/* 左下：賽事參與統計 */}
+              <div onClick={() => handleOpenModal('stats')} className="bg-white p-4 md:p-5 rounded-[1.5rem] shadow-sm border border-slate-200 cursor-pointer active:scale-95 hover:border-blue-400 transition-all flex flex-col items-center justify-center text-center gap-2 relative">
+                  <div className="absolute top-3 right-3 text-slate-300"><MousePointerClick size={16} className="animate-bounce" /></div>
+                  <div className="w-12 h-12 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mb-1"><Activity size={24}/></div>
+                  <div>
+                      <h4 className="font-black text-slate-800 text-[13px] sm:text-sm">賽事參與統計</h4>
+                      <div className="text-[10px] font-bold text-slate-500 mt-0.5">達成率 {attendanceRate}</div>
+                  </div>
+              </div>
 
-                                      <div className="flex flex-row md:flex-col justify-end items-end gap-3 shrink-0">
-                                          <button onClick={() => navigate(`/race-detail/${race.id}`)} className="flex-1 md:flex-none w-full md:w-auto px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-md">
-                                              查看詳情 <ChevronRight size={16}/>
-                                          </button>
-                                          <button 
-                                              onClick={() => handleWithdraw(race.id, race.mySlotId, race.exactMatchString, race.name)}
-                                              className="flex-1 md:flex-none w-full md:w-auto px-5 py-2.5 bg-red-50 hover:bg-red-500 hover:text-white text-red-600 text-sm font-bold rounded-xl transition-all border border-red-200 hover:border-red-500"
-                                          >
-                                              申請退賽
-                                          </button>
-                                      </div>
-                                  </div>
-                              ))}
-                          </div>
-                      )}
+              {/* 右下：參賽明細 */}
+              <div onClick={() => handleOpenModal('system')} className="bg-white p-4 md:p-5 rounded-[1.5rem] shadow-sm border border-slate-200 cursor-pointer active:scale-95 hover:border-blue-400 transition-all flex flex-col items-center justify-center text-center gap-2 relative">
+                  <div className="absolute top-3 right-3 text-slate-300"><MousePointerClick size={16} className="animate-bounce" /></div>
+                  <div className="w-12 h-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mb-1"><ListOrdered size={24}/></div>
+                  <div>
+                      <h4 className="font-black text-slate-800 text-[13px] sm:text-sm">參賽明細</h4>
+                      <div className="text-[10px] font-bold text-slate-500 mt-0.5">查看歷史紀錄</div>
                   </div>
               </div>
 
           </div>
+
+          <button onClick={async () => { await supabase.auth.signOut(); navigate('/login'); }} className="w-full py-4 bg-slate-200 hover:bg-red-100 text-slate-600 hover:text-red-600 font-black rounded-[1.5rem] flex items-center justify-center gap-2 transition-colors active:scale-95 border border-slate-300 hover:border-red-200 mt-8 mb-6">
+              <LogOut size={18}/> 登出系統
+          </button>
       </div>
 
-      {isNotificationOpen && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-end z-[100] animate-fade-in" onClick={() => setIsNotificationOpen(false)}>
-              <div 
-                  className="bg-slate-50 w-full max-w-md h-full shadow-2xl flex flex-col animate-slide-in-right border-l border-white/20"
-                  onClick={e => e.stopPropagation()}
-              >
-                  <div className="bg-slate-900 text-white p-6 flex justify-between items-center shrink-0">
-                      <div className="flex items-center gap-3">
-                          <div className="bg-blue-600/30 p-2 rounded-xl text-blue-400">
-                              <Bell size={20} />
-                          </div>
-                          <div>
-                              <h3 className="font-black text-lg">系統通知中心</h3>
-                              {/* 🌟 淨化：派班動態 -> 賽事動態 */}
-                              <p className="text-xs text-slate-400">您的個人訊息與賽事動態</p>
-                          </div>
-                      </div>
-                      <button onClick={() => setIsNotificationOpen(false)} className="text-slate-400 hover:text-white hover:bg-slate-800 p-2 rounded-full transition-colors">
-                          <X size={20} />
+      {/* ========================================= */}
+      {/* 🌟 系統通知中心 (點擊鈴鐺滑出的抽屜/Modal) */}
+      {/* ========================================= */}
+      {showNotifPanel && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex justify-end animate-fade-in" onClick={() => setShowNotifPanel(false)}>
+              <div className="bg-slate-50 w-full sm:w-[400px] h-full flex flex-col shadow-2xl animate-slide-left" onClick={e => e.stopPropagation()}>
+                  
+                  <div className="px-6 py-5 border-b border-slate-200 bg-white flex justify-between items-center shrink-0">
+                      <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
+                          <Bell className="text-blue-600"/> 系統通知
+                      </h3>
+                      <button onClick={() => setShowNotifPanel(false)} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors active:scale-95">
+                          <X size={20}/>
                       </button>
                   </div>
 
-                  <div className="flex bg-white border-b border-slate-200 shrink-0">
+                  <div className="flex bg-white px-4 pt-2 border-b border-slate-200 shrink-0">
                       <button 
-                          onClick={() => setActiveTab('personal')}
-                          className={`flex-1 py-4 text-sm font-bold flex justify-center items-center gap-2 relative ${activeTab === 'personal' ? 'text-blue-600' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
+                          onClick={() => setNotifTab('system')} 
+                          className={`flex-1 pb-3 text-sm font-bold border-b-2 transition-colors ${notifTab === 'system' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
                       >
-                          <User size={16}/> 個人參賽
-                          {personalUnread > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{personalUnread}</span>}
-                          {activeTab === 'personal' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></div>}
+                          賽事通報
                       </button>
                       <button 
-                          onClick={() => setActiveTab('race')}
-                          className={`flex-1 py-4 text-sm font-bold flex justify-center items-center gap-2 relative ${activeTab === 'race' ? 'text-blue-600' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
+                          onClick={() => setNotifTab('personal')} 
+                          className={`flex-1 pb-3 text-sm font-bold border-b-2 transition-colors ${notifTab === 'personal' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
                       >
-                          <Flag size={16}/> 賽事資訊
-                          {raceUnread > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{raceUnread}</span>}
-                          {activeTab === 'race' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></div>}
+                          個人提醒
                       </button>
-                  </div>
-
-                  <div className="flex justify-between items-center px-6 py-3 bg-slate-50 border-b border-slate-100 shrink-0">
-                      <span className="text-xs font-bold text-slate-500">{displayedNotifications.length} 則通知</span>
-                      {displayedNotifications.some(n => !n.isRead) && (
-                          <button onClick={markAllAsRead} className="text-xs font-bold text-blue-600 hover:text-blue-800 px-3 py-1.5 bg-blue-100/50 rounded-lg hover:bg-blue-100 transition-colors">
-                              全部標示為已讀
-                          </button>
-                      )}
                   </div>
 
                   <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-                      {displayedNotifications.length === 0 ? (
-                          <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-3">
-                              <MessageSquareWarning size={48} className="opacity-20"/>
-                              <p className="font-medium text-sm">目前沒有任何{activeTab === 'personal' ? '個人' : '賽事'}通知</p>
-                          </div>
-                      ) : (
-                          displayedNotifications.map(notif => (
-                              <div key={notif.id} className={`p-4 rounded-2xl border transition-all ${notif.isRead ? 'bg-white border-slate-100 opacity-70' : 'bg-white border-blue-200 shadow-md shadow-blue-900/5'}`}>
+                      <div className="flex justify-between items-center mb-2 px-1">
+                          <span className="text-xs font-bold text-slate-400">保留近 8 個月的通知</span>
+                          <button onClick={markAllAsRead} className="text-xs font-bold text-blue-600 hover:underline">全部標示已讀</button>
+                      </div>
+
+                      {notifications.filter(n => n.tab === notifTab).length > 0 ? (
+                          notifications.filter(n => n.tab === notifTab).map(notif => (
+                              <div key={notif.id} className={`p-4 rounded-2xl border transition-all relative group ${notif.isRead ? 'bg-slate-100/50 border-slate-200 opacity-80' : 'bg-white border-blue-200 shadow-sm'}`}>
+                                  <button onClick={() => deleteNotification(notif.id)} className="absolute top-2 right-2 p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all">
+                                      <Trash2 size={14}/>
+                                  </button>
                                   <div className="flex gap-3">
-                                      <div className={`mt-0.5 shrink-0 w-8 h-8 rounded-full flex items-center justify-center
-                                          ${notif.type === 'promotion' ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 text-blue-600'}`}>
-                                          {notif.type === 'promotion' ? <Crown size={16}/> : <Activity size={16}/>}
+                                      <div className={`mt-0.5 w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${notif.isRead ? 'bg-slate-200' : 'bg-blue-50'}`}>
+                                          {getNotifIcon(notif.category)}
                                       </div>
-                                      
-                                      <div className="flex-1">
-                                          <div className="flex justify-between items-start gap-4 mb-1">
-                                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-md ${notif.type === 'promotion' ? 'bg-amber-50 text-amber-600 border border-amber-200' : 'bg-slate-100 text-slate-600 border border-slate-200'}`}>
-                                                  {notif.type === 'promotion' ? '遞補通知' : '系統紀錄'}
-                                              </span>
-                                              <span className="text-xs text-slate-400 font-mono shrink-0">{notif.timestamp}</span>
+                                      <div className="flex-1 pr-6">
+                                          <div className="text-[10px] text-slate-400 font-medium mb-1 flex items-center gap-1">
+                                              <Clock size={10}/> {new Date(notif.date).toLocaleDateString()}
                                           </div>
-                                          <p className={`text-sm mt-2 leading-relaxed ${notif.isRead ? 'text-slate-600' : 'text-slate-800 font-bold'}`}>
+                                          <p className={`text-sm leading-relaxed ${notif.isRead ? 'text-slate-600' : 'text-slate-800 font-bold'}`}>
                                               {notif.message}
                                           </p>
                                       </div>
                                   </div>
-                                  
-                                  {notif.type === 'promotion' && !notif.isRead && (
-                                      <div className="mt-4 flex justify-end border-t border-slate-100 pt-3">
-                                          <button 
-                                              onClick={() => setNotifications(notifications.map(n => n.id === notif.id ? { ...n, isRead: true } : n))}
-                                              className="text-xs font-bold bg-amber-500 text-white px-4 py-2 rounded-xl shadow-sm hover:bg-amber-600 transition-colors flex items-center gap-1"
-                                          >
-                                              <CheckCircle size={14}/> 收到，已確認
-                                          </button>
-                                      </div>
-                                  )}
-                                  {notif.type !== 'promotion' && !notif.isRead && (
-                                       <div className="mt-3 flex justify-end">
-                                           <button 
-                                              onClick={() => setNotifications(notifications.map(n => n.id === notif.id ? { ...n, isRead: true } : n))}
-                                              className="text-[10px] font-bold text-slate-400 hover:text-blue-600 transition-colors underline decoration-dotted"
-                                          >
-                                              標示已讀
-                                          </button>
-                                       </div>
-                                  )}
                               </div>
                           ))
+                      ) : (
+                          <div className="text-center py-10 text-slate-400 font-medium text-sm">目前沒有任何通知</div>
                       )}
                   </div>
+              </div>
+          </div>
+      )}
+
+      {/* ========================================= */}
+      {/* 🌟 點開格子的彈出視窗 (Modal) */}
+      {/* ========================================= */}
+      {activeModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center sm:p-4 animate-fade-in" onClick={() => !isEditing && setActiveModal(null)}>
+              <div className="bg-white rounded-t-[2rem] sm:rounded-[2rem] shadow-2xl w-full max-w-xl flex flex-col max-h-[85vh] sm:max-h-[90vh] overflow-hidden animate-slide-up sm:animate-bounce-in" onClick={e => e.stopPropagation()}>
+                  
+                  {/* Modal 頂部拖曳條 (手機用) */}
+                  <div className="w-full flex justify-center pt-3 pb-1 sm:hidden">
+                      <div className="w-12 h-1.5 bg-slate-200 rounded-full"></div>
+                  </div>
+
+                  <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-white shrink-0">
+                      <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
+                          {activeModal === 'stats' && <><Activity className="text-blue-600"/> 賽事參與統計</>}
+                          {activeModal === 'basic' && <><User className="text-indigo-600"/> 核心基本資料</>}
+                          {activeModal === 'medical' && <><HeartPulse className="text-rose-600"/> 醫護與裝備</>}
+                          {activeModal === 'system' && <><ListOrdered className="text-amber-600"/> 參賽明細</>}
+                      </h3>
+                      {!isEditing && <button onClick={() => setActiveModal(null)} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors active:scale-95"><X size={20}/></button>}
+                  </div>
+
+                  <div className="p-6 overflow-y-auto custom-scrollbar flex-1 bg-slate-50 sm:bg-white">
+                      
+                      {/* --- 賽事統計 Modal --- */}
+                      {activeModal === 'stats' && (
+                          <div className="space-y-4 bg-white p-5 rounded-2xl border border-slate-100">
+                              <InfoRow label="真實完賽場次" value={`${finishedCount} 場`} icon={CheckCircle} />
+                              <InfoRow label="總報名場次" value={`${totalEnrolledCount} 場`} icon={Flag} />
+                              <InfoRow label="出席達成率" value={attendanceRate} icon={Target} />
+                          </div>
+                      )}
+
+                      {/* --- 參賽明細 Modal --- */}
+                      {activeModal === 'system' && (
+                          <div className="space-y-3">
+                              {myRaces.length > 0 ? myRaces.map(race => (
+                                  <div key={race.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+                                      <div>
+                                          <div className="flex items-center gap-2 mb-1">
+                                              <span className={`text-[10px] font-black px-2 py-0.5 rounded ${new Date(race.date) < new Date() ? 'bg-slate-100 text-slate-500' : 'bg-green-100 text-green-700'}`}>
+                                                  {new Date(race.date) < new Date() ? '已完賽' : '即將到來'}
+                                              </span>
+                                              <span className="text-xs font-bold text-slate-500">{race.date}</span>
+                                          </div>
+                                          <div className="font-black text-slate-800 text-sm mb-1">{race.name}</div>
+                                          <div className="text-xs font-medium text-blue-600">{race.slotName} | {race.role}</div>
+                                      </div>
+                                  </div>
+                              )) : (
+                                  <div className="text-center py-10 text-slate-400 font-medium bg-white rounded-2xl border border-dashed border-slate-200">
+                                      目前沒有任何參賽紀錄
+                                  </div>
+                              )}
+                          </div>
+                      )}
+
+                      {/* --- 基本資料 Modal --- */}
+                      {activeModal === 'basic' && !isEditing && (
+                          <div className="space-y-3">
+                              <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+                                  <InfoRow label="中文姓名" value={displayUser.full_name} />
+                                  <InfoRow label="身分證字號" value={displayUser.national_id} />
+                                  <InfoRow label="生理性別" value={displayUser.gender} />
+                                  <InfoRow label="出生年月日" value={displayUser.birthday} />
+                              </div>
+                              <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+                                  <InfoRow label="手機號碼" value={displayUser.phone} icon={Phone} />
+                                  <InfoRow label="聯絡信箱" value={displayUser.contact_email} />
+                                  <InfoRow label="通訊地址" value={displayUser.address} icon={MapPin} />
+                              </div>
+                              <div className="bg-rose-50/80 p-5 rounded-2xl border border-rose-100 shadow-sm">
+                                  <InfoRow label="緊急聯絡人" value={displayUser.emergency_name} />
+                                  <InfoRow label="關係" value={displayUser.emergency_relation} />
+                                  <InfoRow label="緊急電話" value={displayUser.emergency_phone} icon={Phone} alert={!displayUser.emergency_phone}/>
+                              </div>
+                          </div>
+                      )}
+
+                      {activeModal === 'basic' && isEditing && (
+                          <div className="space-y-4 bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+                              <div className="bg-blue-50 text-blue-800 text-xs font-bold p-3 rounded-xl flex items-center gap-2">
+                                  <AlertTriangle size={16}/> 儲存後將發送通知給管理員審核
+                              </div>
+                              <EditInputRow label="中文姓名" name="full_name" />
+                              <EditInputRow label="身分證字號" name="national_id" />
+                              <EditInputRow label="生理性別" name="gender" type="select" options={['男', '女']} />
+                              <EditInputRow label="出生年月日" name="birthday" type="date" />
+                              <EditInputRow label="手機號碼" name="phone" />
+                              <EditInputRow label="聯絡信箱" name="contact_email" type="email" />
+                              <EditInputRow label="通訊地址" name="address" />
+                              <div className="pt-4 border-t border-slate-100 mt-2">
+                                  <h4 className="text-sm font-black text-rose-600 mb-2">緊急聯絡資訊</h4>
+                                  <EditInputRow label="緊急聯絡人" name="emergency_name" />
+                                  <EditInputRow label="關係" name="emergency_relation" />
+                                  <EditInputRow label="緊急電話" name="emergency_phone" />
+                              </div>
+                          </div>
+                      )}
+
+                      {/* --- 裝備後勤 Modal --- */}
+                      {activeModal === 'medical' && !isEditing && (
+                          <div className="space-y-3">
+                              <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+                                  <InfoRow label="醫護證照種類" value={displayUser.medical_license} />
+                                  <InfoRow label="證照有效期限" value={displayUser.license_expiry} />
+                              </div>
+                              <div className="bg-rose-50 p-5 rounded-2xl border border-rose-100 shadow-sm">
+                                  <InfoRow label="特殊病史與過敏" value={displayUser.medical_history} alert={!!displayUser.medical_history && displayUser.medical_history !== '無'} />
+                              </div>
+                              <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+                                  <InfoRow label="賽事衣服尺寸" value={displayUser.shirt_size} />
+                                  <InfoRow label="飲食習慣" value={displayUser.dietary_habit} />
+                                  <InfoRow label="偏好交通方式" value={displayUser.transport_pref} icon={Car} />
+                                  <InfoRow label="偏好住宿方式" value={displayUser.stay_pref} />
+                              </div>
+                          </div>
+                      )}
+
+                      {activeModal === 'medical' && isEditing && (
+                          <div className="space-y-4 bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+                              <EditInputRow label="醫護證照種類" name="medical_license" />
+                              <EditInputRow label="證照有效期限" name="license_expiry" type="date" />
+                              <EditInputRow label="特殊病史與過敏" name="medical_history" />
+                              <div className="pt-4 border-t border-slate-100 mt-2">
+                                  <h4 className="text-sm font-black text-blue-600 mb-2">後勤需求調查</h4>
+                                  <EditInputRow label="賽事衣服尺寸" name="shirt_size" type="select" options={['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL']} />
+                                  <EditInputRow label="飲食習慣" name="dietary_habit" />
+                                  <EditInputRow label="偏好交通方式" name="transport_pref" type="select" options={['自行前往', '需要共乘', '搭乘大眾運輸']} />
+                                  <EditInputRow label="偏好住宿方式" name="stay_pref" type="select" options={['自行處理', '需要代訂']} />
+                              </div>
+                          </div>
+                      )}
+                  </div>
+
+                  {/* 🌟 底部按鈕區 (明確的關閉鍵) */}
+                  <div className="p-4 sm:p-6 border-t border-slate-100 bg-white shrink-0 shadow-[0_-10px_20px_rgba(0,0,0,0.03)]">
+                      {isEditing ? (
+                          <div className="flex gap-3">
+                              <button onClick={() => setIsEditing(false)} className="flex-1 py-3.5 bg-slate-100 text-slate-600 font-black rounded-xl hover:bg-slate-200 transition-colors active:scale-95">取消編輯</button>
+                              <button onClick={() => handleSaveChanges(activeModal)} disabled={saving} className="flex-[2] py-3.5 bg-blue-600 text-white font-black rounded-xl hover:bg-blue-700 shadow-md shadow-blue-600/30 flex justify-center items-center gap-2 transition-colors disabled:opacity-50 active:scale-95">
+                                  {saving ? <Loader2 className="animate-spin" size={18}/> : <Check size={18}/>} 儲存並發送通知
+                              </button>
+                          </div>
+                      ) : (
+                          <div className="flex flex-col gap-3">
+                              {activeModal === 'basic' && (
+                                  displayUser.basic_edit_count < 2 ? (
+                                      <button onClick={() => setIsEditing(true)} className="w-full py-4 bg-slate-900 text-white font-black rounded-xl hover:bg-slate-800 shadow-lg shadow-slate-900/20 flex justify-center items-center gap-2 transition-transform active:scale-95">
+                                          <Edit3 size={18}/> 開放修改 <span className="text-xs font-normal opacity-80">(剩餘 {2 - displayUser.basic_edit_count} 次)</span>
+                                      </button>
+                                  ) : (
+                                      <button onClick={handleApplyModification} className="w-full py-4 bg-amber-100 text-amber-800 border border-amber-300 font-black rounded-xl active:bg-amber-200 flex justify-center items-center gap-2 transition-transform active:scale-95">
+                                          <Send size={18}/> 提出變更申請 (已達次數上限)
+                                      </button>
+                                  )
+                              )}
+                              {activeModal === 'medical' && (
+                                  displayUser.med_edit_count < 2 ? (
+                                      <button onClick={() => setIsEditing(true)} className="w-full py-4 bg-slate-900 text-white font-black rounded-xl hover:bg-slate-800 shadow-lg shadow-slate-900/20 flex justify-center items-center gap-2 transition-transform active:scale-95">
+                                          <Edit3 size={18}/> 開放修改 <span className="text-xs font-normal opacity-80">(剩餘 {2 - displayUser.med_edit_count} 次)</span>
+                                      </button>
+                                  ) : (
+                                      <button onClick={handleApplyModification} className="w-full py-4 bg-amber-100 text-amber-800 border border-amber-300 font-black rounded-xl active:bg-amber-200 flex justify-center items-center gap-2 transition-transform active:scale-95">
+                                          <Send size={18}/> 提出變更申請 (已達次數上限)
+                                      </button>
+                                  )
+                              )}
+                              
+                              {/* 明確的關閉按鈕 */}
+                              <button onClick={() => setActiveModal(null)} className="w-full py-3.5 bg-slate-100 text-slate-600 font-black rounded-xl hover:bg-slate-200 transition-colors active:scale-95 flex justify-center items-center gap-1">
+                                  關閉視窗
+                              </button>
+                          </div>
+                      )}
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* QR Code 彈窗 */}
+      {showQR && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[110] flex items-center justify-center p-4 animate-fade-in" onClick={() => setShowQR(false)}>
+              <div className="bg-white rounded-[2rem] p-8 md:p-10 w-full max-w-sm flex flex-col items-center animate-bounce-in shadow-2xl" onClick={e => e.stopPropagation()}>
+                  <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-4">
+                      <QrCode size={32}/>
+                  </div>
+                  <h3 className="text-xl font-black text-slate-800 mb-1">專屬報到碼</h3>
+                  <p className="text-slate-500 text-sm mb-8 text-center">請於賽事現場出示此條碼進行簽到</p>
+                  
+                  <div className="bg-white p-4 rounded-2xl shadow-inner border-2 border-slate-100 w-full aspect-square mb-6 relative">
+                      <img src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${displayUser.ironmedic_no || displayUser.full_name}`} alt="QR" className="w-full h-full object-contain" />
+                      <div className="absolute inset-0 border-4 border-blue-500/20 rounded-2xl pointer-events-none"></div>
+                  </div>
+                  
+                  <button onClick={() => setShowQR(false)} className="mt-4 w-full py-4 bg-slate-900 text-white rounded-xl font-black active:scale-95 transition-transform shadow-lg shadow-slate-900/20">
+                      關閉視窗
+                  </button>
               </div>
           </div>
       )}

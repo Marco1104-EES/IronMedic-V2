@@ -1,44 +1,10 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
 import * as XLSX from 'xlsx' 
-import { FileSpreadsheet, CheckCircle, ArrowRight, Save, Database, Settings, LayoutList, Merge, Plus, Target, UserCheck, XCircle, BrainCircuit, Trash2, Edit, Download, FileText, Filter, Users, Flag, Upload, AlertTriangle, FileDown, Loader2 } from 'lucide-react'
+import { FileSpreadsheet, CheckCircle, ArrowRight, Save, Database, Settings, LayoutList, Merge, Plus, Target, UserCheck, XCircle, BrainCircuit, Trash2, Edit, Download, FileText, Filter, Users, Flag, Upload, AlertTriangle, FileDown, Loader2, Settings2, Fingerprint } from 'lucide-react'
 
-const TARGET_FIELDS = [
-    { group: '🟢 【A~O】基本與聯絡資料', options: [
-        { key: 'full_name', label: '姓名(A) *必填' }, { key: 'birthday', label: '出生年月日(B)' },
-        { key: 'national_id', label: '身分證字號(C)' }, { key: 'phone', label: '手機(D)' },
-        { key: 'contact_email', label: 'e-mail(E) (聯絡信箱)' }, { key: 'address', label: '通訊地址(F)' },
-        { key: 'shirt_size', label: '賽事衣服(G)' }, { key: 'emergency_name', label: '緊急聯繫人(H)' },
-        { key: 'emergency_phone', label: '緊急聯繫人電話(I)' }, { key: 'emergency_relation', label: '緊急聯繫人關係(J)' },
-        { key: 'english_name', label: '英文名(K)' }, { key: 'medical_license', label: '醫護證照繳交情況(L)' },
-        { key: 'dietary_habit', label: '飲食(M)' }, { key: 'resume_url', label: '醫鐵履歷網址(N)' },
-        { key: 'badges', label: '成就徽章(O)' }
-    ]},
-    { group: '🔵 【P~AB】權限與醫療設定', options: [
-        { key: 'role', label: '醫鐵權限(P)' }, { key: 'is_current_member', label: '當年度會員(Q)' },
-        { key: 'training_status', label: '會員訓練(R)' }, { key: 'is_team_leader', label: '帶隊官(S)' },
-        { key: 'is_new_member', label: '新人(T)' }, { key: 'license_expiry', label: '醫護證照有效期(U)' },
-        { key: 'shirt_expiry_25', label: '三鐵服期限-25(V)' }, { key: 'shirt_expiry_26', label: '三鐵服期限-26(W)' },
-        { key: 'is_vip', label: 'VIP(X)' }, { key: 'email', label: '報名系統登入/WIX(Y) *系統帳號' },
-        { key: 'blood_type', label: '血型(Z)' }, { key: 'medical_history', label: '病史(AA)' },
-        { key: 'is_blacklisted', label: '黑名單(AB)' }
-    ]},
-    { group: '🟣 【AC~AO】賽事與後勤數據', options: [
-        { key: 'total_points', label: '積分(AC)' }, { key: 'total_races', label: '場次(AD)' },
-        { key: 'volunteer_hours', label: '時數(AE)' }, { key: 'rank_level', label: '等級(AF)' },
-        { key: 'line_id', label: 'LineID(AG)' }, { key: 'fb_id', label: 'FB(AH)' },
-        { key: 'ig_id', label: 'IG(AI)' }, { key: 'admin_note', label: '備註(AJ)' },
-        { key: 'shirt_receive_date', label: '領衣日(AK)' }, { key: 'cert_send_date', label: '證書日(AL)' },
-        { key: 'transport_pref', label: '交通(AM)' }, { key: 'stay_pref', label: '住宿(AN)' },
-        { key: 'family_count', label: '眷屬(AO)' }
-    ]},
-    { group: '⚙️ 【AP~BI】擴充資料欄位', options: Array.from({length: 20}, (_, i) => ({ 
-        key: `ext_${String(i+1).padStart(2,'0')}`, label: `Ext_${String(i+1).padStart(2,'0')} (備用欄位 ${i+1})` 
-    }))}
-]
-
-const FLAT_TARGETS = TARGET_FIELDS.flatMap(g => g.options)
 const MAPPING_MEMORY_KEY = 'ironmedic_mapping_memory'
+const EXT_LABELS_KEY = 'ironmedic_ext_labels'
 
 // 🌟 賽事匯入模板表頭
 const RACE_IMPORT_TEMPLATE_HEADERS = [
@@ -66,6 +32,9 @@ export default function DataImportCenter() {
   const [previewData, setPreviewData] = useState([]) 
   const [viewFilter, setViewFilter] = useState('all') 
   
+  // 🌟 擴充欄位標籤管理器 State
+  const [extLabels, setExtLabels] = useState(() => JSON.parse(localStorage.getItem(EXT_LABELS_KEY) || '{}'))
+
   // --- 賽事匯入專用 State ---
   const [isUploadingRace, setIsUploadingRace] = useState(false)
   const [uploadRaceStatus, setUploadRaceStatus] = useState(null)
@@ -75,6 +44,44 @@ export default function DataImportCenter() {
   const [logs, setLogs] = useState([])
   const [processing, setProcessing] = useState(false)
   const logsEndRef = useRef(null)
+
+  // 🌟 動態產生 TARGET_FIELDS (包含動態擴充欄位名稱)
+  const TARGET_FIELDS = [
+      { group: '🟢 【基本與聯絡資料】', options: [
+          { key: 'full_name', label: '姓名(A) *必填' }, { key: 'birthday', label: '出生年月日(B)' },
+          { key: 'national_id', label: '身分證字號(C)' }, { key: 'phone', label: '手機(D)' },
+          { key: 'contact_email', label: 'e-mail(E) (聯絡信箱)' }, { key: 'address', label: '通訊地址(F)' },
+          { key: 'shirt_size', label: '賽事衣服(G)' }, { key: 'emergency_name', label: '緊急聯繫人(H)' },
+          { key: 'emergency_phone', label: '緊急聯繫人電話(I)' }, { key: 'emergency_relation', label: '緊急聯繫人關係(J)' },
+          { key: 'english_name', label: '英文名(K)' }, { key: 'medical_license', label: '醫護證照繳交情況(L)' },
+          { key: 'dietary_habit', label: '飲食(M)' }, { key: 'resume_url', label: '醫鐵履歷網址(N)' },
+          { key: 'badges', label: '成就徽章(O)' }, { key: 'gender', label: '生理性別 (自動判定)' }
+      ]},
+      { group: '🔵 【權限與醫療設定】', options: [
+          { key: 'role', label: '醫鐵權限(P)' }, { key: 'is_current_member', label: '當年度會員(Q)' },
+          { key: 'training_status', label: '會員訓練(R)' }, { key: 'is_team_leader', label: '帶隊官(S)' },
+          { key: 'is_new_member', label: '新人(T)' }, { key: 'license_expiry', label: '醫護證照有效期(U)' },
+          { key: 'shirt_expiry_25', label: '三鐵服期限-25(V)' }, { key: 'shirt_expiry_26', label: '三鐵服期限-26(W)' },
+          { key: 'is_vip', label: 'VIP(X)' }, { key: 'email', label: '報名系統登入/WIX(Y) *系統帳號' },
+          { key: 'blood_type', label: '血型(Z)' }, { key: 'medical_history', label: '病史(AA)' },
+          { key: 'is_blacklisted', label: '黑名單(AB)' }
+      ]},
+      { group: '🟣 【賽事與後勤數據】', options: [
+          { key: 'total_points', label: '積分(AC)' }, { key: 'total_races', label: '場次(AD)' },
+          { key: 'volunteer_hours', label: '時數(AE)' }, { key: 'rank_level', label: '等級(AF)' },
+          { key: 'line_id', label: 'LineID(AG)' }, { key: 'fb_id', label: 'FB(AH)' },
+          { key: 'ig_id', label: 'IG(AI)' }, { key: 'admin_note', label: '備註(AJ)' },
+          { key: 'shirt_receive_date', label: '領衣日(AK)' }, { key: 'cert_send_date', label: '證書日(AL)' },
+          { key: 'transport_pref', label: '交通(AM)' }, { key: 'stay_pref', label: '住宿(AN)' },
+          { key: 'family_count', label: '眷屬(AO)' }, { key: 'join_date', label: '加入年月/申請年份' },
+          { key: 'ironmedic_no', label: '醫護鐵人編號' }
+      ]},
+      { group: '⚙️ 【自定義擴充資料欄位】', options: Array.from({length: 40}, (_, i) => { 
+          const k = `ext_${String(i+1).padStart(2,'0')}`;
+          return { key: k, label: extLabels[k] ? `${k} (${extLabels[k]})` : `${k} (未命名)` };
+      })}
+  ];
+  const FLAT_TARGETS = TARGET_FIELDS.flatMap(g => g.options);
 
   const handleDragOver = (e) => { e.preventDefault(); e.stopPropagation(); }
   const handleDropMaster = (e) => { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer.files && e.dataTransfer.files.length > 0) setFileMaster(e.dataTransfer.files[0]); }
@@ -114,7 +121,6 @@ export default function DataImportCenter() {
           headers = RACE_IMPORT_TEMPLATE_HEADERS;
           filename = "醫護鐵人_賽事年度總表標準範本.xlsx";
       }
-
       const ws = XLSX.utils.aoa_to_sheet([headers]);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Template");
@@ -135,7 +141,7 @@ export default function DataImportCenter() {
           if (dbField === "") delete savedMemory[excelHeader]
           else savedMemory[excelHeader] = dbField 
           localStorage.setItem(MAPPING_MEMORY_KEY, JSON.stringify(savedMemory))
-      } catch(e) { console.error("記憶寫入失敗", e) }
+      } catch(e) {}
   }
 
   const handleClearMemory = () => {
@@ -185,7 +191,7 @@ export default function DataImportCenter() {
   }
 
   // ==========================================
-  // 🌟 會員匯入核心邏輯 (完整保留)
+  // 🌟 會員名單匯入：終極防覆蓋與防呆版
   // ==========================================
   const handleStep1Submit = async () => {
     if (!fileMaster) return alert("請上傳主要資料檔案！")
@@ -241,10 +247,22 @@ export default function DataImportCenter() {
         const initialMap = {}
         const memFlags = {}
         const savedMemory = JSON.parse(localStorage.getItem(MAPPING_MEMORY_KEY) || '{}')
+        
+        // 🌟 防呆一：確保同一個系統欄位不會被多個 Excel 欄位重複對應
+        const assignedDbFields = new Set();
 
         headers.forEach(h => {
-            let matchedKey = null;
+            if (savedMemory[h]) {
+                initialMap[h] = savedMemory[h]; 
+                memFlags[h] = true;
+                assignedDbFields.add(savedMemory[h]);
+            }
+        });
 
+        headers.forEach(h => {
+            if (initialMap[h]) return; 
+
+            let matchedKey = null;
             const letterMatch = h.match(/\([A-Z]{1,2}\)/);
             if (letterMatch) {
                 const code = letterMatch[0]; 
@@ -267,12 +285,14 @@ export default function DataImportCenter() {
                 else if (lowerH.includes('緊急聯繫人關係') || lowerH.includes('relationship')) matchedKey = 'emergency_relation'
                 else if (lowerH.includes('緊急聯繫人') || lowerH.includes('emergencycontact')) matchedKey = 'emergency_name'
                 else if (lowerH.includes('英文名') || lowerH.includes('englishname')) matchedKey = 'english_name'
+                else if (lowerH.includes('性別') || lowerH === 'gender' || lowerH === 'sex') matchedKey = 'gender'
+                else if (lowerH.includes('加入') || lowerH.includes('申請年月')) matchedKey = 'join_date'
+                else if (lowerH.includes('編號') || lowerH.includes('no.')) matchedKey = 'ironmedic_no'
             }
 
-            if (savedMemory[h]) {
-                initialMap[h] = savedMemory[h]; memFlags[h] = true 
-            } else if (matchedKey) {
+            if (matchedKey && !assignedDbFields.has(matchedKey)) {
                 initialMap[h] = matchedKey;
+                assignedDbFields.add(matchedKey);
             }
         })
         
@@ -314,8 +334,21 @@ export default function DataImportCenter() {
                   const updateData = {}
                   Object.keys(fieldMapping).forEach(exCol => {
                       const dbField = fieldMapping[exCol]
-                      if (dbField && exCol !== patchAnchorExcel) updateData[dbField] = row[exCol]
+                      if (dbField && exCol !== patchAnchorExcel) {
+                          const cellVal = row[exCol];
+                          // 🌟 防呆二：拒絕空值覆蓋已有的有效資料
+                          if (updateData[dbField] && (!cellVal || String(cellVal).trim() === '')) {
+                              return;
+                          }
+                          updateData[dbField] = cellVal;
+                      }
                   })
+
+                  const tempId = updateData.national_id || dbInfo.national_id || '';
+                  if (tempId && /^[A-Za-z][12]\d{8}$/.test(tempId)) {
+                      updateData.gender = tempId.charAt(1) === '1' ? '男' : '女';
+                      row._gender_deduced = true;
+                  }
 
                   return { _id: idx, _rawAnchor: anchorValue, _status: status, _dbId: dbId, _duplicates: duplicateOptions, _updateData: updateData, ...dbInfo, ...updateData }
               })
@@ -336,9 +369,22 @@ export default function DataImportCenter() {
               const newRow = { _id: idx, _status: 'pending', _source: row._source || '主名單' }
               Object.keys(fieldMapping).forEach(excelHeader => {
                   const dbField = fieldMapping[excelHeader]
-                  if (dbField && dbField !== "") newRow[dbField] = row[excelHeader]
+                  if (dbField && dbField !== "") {
+                      const cellVal = row[excelHeader];
+                      // 🌟 防呆二：拒絕空值覆蓋已有的有效資料
+                      if (newRow[dbField] && (!cellVal || String(cellVal).trim() === '')) {
+                          return;
+                      }
+                      newRow[dbField] = cellVal;
+                  }
               })
               
+              const idToCheck = newRow.national_id || '';
+              if (idToCheck && /^[A-Za-z][12]\d{8}$/.test(idToCheck)) {
+                  newRow.gender = idToCheck.charAt(1) === '1' ? '男' : '女';
+                  newRow._gender_deduced = true;
+              }
+
               if (!newRow.full_name || (!newRow.email && !newRow.contact_email)) {
                   newRow._status = 'invalid'
                   newRow._error = !newRow.full_name ? '姓名欄位空白' : '聯絡信箱空白'
@@ -377,7 +423,7 @@ export default function DataImportCenter() {
           const BATCH = 50
           let success = 0, fail = 0
 
-          const cleanRows = validRows.map(({ _id, _status, _error, _source, ...rest }) => ({
+          const cleanRows = validRows.map(({ _id, _status, _error, _source, _gender_deduced, ...rest }) => ({
               ...rest, role: rest.role || 'USER', updated_at: new Date()
           }))
 
@@ -442,7 +488,7 @@ export default function DataImportCenter() {
   }
 
   // ==========================================
-  // 🌟 賽事匯入核心邏輯 (真．智慧去重版)
+  // 🌟 賽事匯入核心邏輯 
   // ==========================================
   const handleExecuteRaceUpload = async () => {
       if (!raceFile) return alert("請先選擇賽事建檔表！");
@@ -458,7 +504,6 @@ export default function DataImportCenter() {
           const racesToInsert = [];
           let errorCount = 0;
 
-          // 預先載入所有會員資料，供姓名精準匹配使用
           const { data: dbProfiles } = await supabase.from('profiles').select('id, full_name, email');
           const profileMap = new Map();
           if (dbProfiles) {
@@ -478,7 +523,6 @@ export default function DataImportCenter() {
                   let location = row['地點'] || row.location || '';
                   const imgUrl = row['海報圖片URL'] || row['賽事URL'] || '';
                   
-                  // 日期容錯處理
                   let parsedDate = null;
                   if (rawDate) {
                       let dateStr = String(rawDate).trim();
@@ -497,10 +541,8 @@ export default function DataImportCenter() {
                       location = imgUrl ? "詳見賽事連結" : "地點未定";
                   }
 
-                  // 🌟🌟 建立人員地圖 (Deduplication Map) 以防重複計算
                   const participantsMap = new Map(); 
 
-                  // 1. 抓取一般參加人員 1~40
                   for(let j = 1; j <= 40; j++) {
                       const person = row[`參加人員${j}`];
                       if (person && String(person).trim() !== '') {
@@ -520,7 +562,6 @@ export default function DataImportCenter() {
                       }
                   }
 
-                  // 2. 處理教官與代表，若已存在則「只貼標籤」，不存在才新增
                   const assignSpecialRole = (rawSpecialName, role) => {
                       if (!rawSpecialName) return;
                       let cleanSpecial = String(rawSpecialName).replace(/[A-Za-z0-9\s]+$/, '').trim();
@@ -616,7 +657,6 @@ export default function DataImportCenter() {
                       });
                   }
 
-                  // 3. 把 Map 中的人員真正放進 Slots 中
                   Array.from(participantsMap.values()).forEach(pData => {
                       let targetSlot = slotsArray[0];
                       if (pData.pSlotName) {
@@ -717,16 +757,52 @@ export default function DataImportCenter() {
               <Flag size={18}/> 🚩 賽事批次建檔
               {mainTab === 'races' && <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-amber-500"></div>}
           </button>
+          <button 
+              onClick={() => setMainTab('ext_settings')}
+              className={`flex-1 py-4 text-sm font-black flex justify-center items-center gap-2 relative transition-colors ${mainTab === 'ext_settings' ? 'text-purple-600 bg-purple-50/30' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
+          >
+              <Settings2 size={18}/> ⚙️ 擴充欄位管理
+              {mainTab === 'ext_settings' && <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-purple-500"></div>}
+          </button>
       </div>
 
-      {mainTab === 'members' ? (
+      {mainTab === 'ext_settings' ? (
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 w-full animate-fade-in-up">
+              <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2 mb-2">
+                  <Settings2 className="text-purple-600"/> 擴充資料欄位控制中心
+              </h2>
+              <p className="text-slate-500 text-sm mb-6">您可以在此自定義 <code className="bg-slate-100 px-1 rounded">ext_01</code> ~ <code className="bg-slate-100 px-1 rounded">ext_40</code> 的中文顯示名稱。設定後將在「會員名單整合」的對應選單中即刻生效。</p>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 max-h-[65vh] overflow-y-auto pr-2 custom-scrollbar">
+                  {Array.from({length: 40}, (_, i) => {
+                      const key = `ext_${String(i+1).padStart(2,'0')}`;
+                      return (
+                          <div key={key} className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex flex-col gap-1.5 focus-within:border-purple-300 focus-within:bg-purple-50/20 transition-colors">
+                              <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">{key}</label>
+                              <input 
+                                  type="text" 
+                                  placeholder="未命名欄位"
+                                  className="w-full p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-purple-500 outline-none text-sm font-bold text-slate-700 bg-white shadow-sm"
+                                  value={extLabels[key] || ''}
+                                  onChange={(e) => {
+                                      const newLabels = {...extLabels, [key]: e.target.value};
+                                      setExtLabels(newLabels);
+                                      localStorage.setItem(EXT_LABELS_KEY, JSON.stringify(newLabels));
+                                  }}
+                              />
+                          </div>
+                      )
+                  })}
+              </div>
+          </div>
+      ) : mainTab === 'members' ? (
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 w-full animate-fade-in-up">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
                 <div>
                     <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
-                        <Database className="text-blue-600"/> 資料整合匯入中心 <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold border border-slate-200">System V9.6 AI 智慧版</span>
+                        <Database className="text-blue-600"/> 資料整合匯入中心 <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold border border-slate-200">System V9.8 防覆蓋版</span>
                     </h2>
-                    <p className="text-slate-500 text-sm mt-1">企業級資料處理模組。支援自動對接欄位與大螢幕滿版檢視。</p>
+                    <p className="text-slate-500 text-sm mt-1">搭載智慧身分證辨識、防呆欄位鎖定與自定義擴充系統。</p>
                 </div>
                 <div className="flex bg-slate-50 p-1 rounded-lg border border-slate-200">
                     <button onClick={()=>handleModeSwitch('full')} className={`px-4 py-2 rounded-md font-bold text-sm flex items-center gap-2 transition-all ${mode==='full' ? 'bg-white shadow-sm border border-slate-200 text-blue-600' : 'text-slate-500 hover:text-slate-700'} `}><Merge size={16}/> 完整資料整合</button>
@@ -957,6 +1033,7 @@ export default function DataImportCenter() {
                                 <tr>
                                     <th className="px-6 py-4 bg-white/95 backdrop-blur">資料狀態</th>
                                     <th className="px-6 py-4 bg-white/95 backdrop-blur text-slate-800">姓名(A)</th>
+                                    <th className="px-6 py-4 bg-white/95 backdrop-blur text-slate-800">生理性別</th>
                                     <th className="px-6 py-4 bg-white/95 backdrop-blur text-slate-800">聯絡信箱(E)</th>
                                     <th className="px-6 py-4 bg-white/95 backdrop-blur text-slate-800">登入帳號/WIX(Y)</th>
                                     {mode === 'patch' && <th className="px-6 py-4 bg-amber-50/95 backdrop-blur text-amber-800 border-l border-amber-100">比對基準 ({patchAnchorExcel})</th>}
@@ -991,6 +1068,14 @@ export default function DataImportCenter() {
                                             )}
                                         </td>
                                         <td className="px-6 py-3 font-bold text-slate-800">{row.full_name || '-'}</td>
+                                        <td className="px-6 py-3">
+                                            {row.gender ? (
+                                                <span className={`px-2 py-0.5 rounded text-xs font-bold ${row.gender === '男' ? 'bg-blue-100 text-blue-700' : 'bg-pink-100 text-pink-700'}`}>
+                                                    {row.gender}
+                                                    {row._gender_deduced && <span title="由身分證自動判定" className="ml-1 cursor-help opacity-70">🤖</span>}
+                                                </span>
+                                            ) : '-'}
+                                        </td>
                                         <td className="px-6 py-3 text-slate-600">{row.contact_email || '-'}</td>
                                         <td className="px-6 py-3 text-slate-600">{row.email || '-'}</td>
                                         {mode === 'patch' && <td className="px-6 py-3 font-bold text-amber-700 bg-amber-50/30 border-l border-amber-100/50">{row._rawAnchor}</td>}
