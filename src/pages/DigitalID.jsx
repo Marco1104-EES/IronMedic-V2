@@ -9,27 +9,8 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 
-// 預設測試資料 (未登入時的防呆)
-const CURRENT_USER = {
-    id: 'admin001', 
-    email: 'marco1104@gmail.com', 
-    full_name: '測試者',          
-    role: 'SUPER_ADMIN', 
-    is_current_member: 'Y', 
-    license_expiry: '2028-01-01', 
-    shirt_expiry_25: '2025-12-31', 
-    is_vip: 'Y', 
-    is_team_leader: 'Y', 
-    gender: '男',
-    blood_type: 'O+',
-    ironmedic_no: 'IM-2024-001',
-    basic_edit_count: 0,
-    med_edit_count: 0
-}
-
-// 模擬通知資料 (加入 date 欄位以支援 8 個月自動刪除)
 const INITIAL_NOTIFICATIONS = [
-    { id: 1, tab: 'system', category: 'race', message: '新賽事「2026 渣打台北公益馬拉松」已開放報名！', date: new Date().toISOString(), isRead: false },
+    { id: 1, tab: 'system', category: 'race', message: '新賽事已開放報名！', date: new Date().toISOString(), isRead: false },
     { id: 2, tab: 'personal', category: 'cert', message: '您的 EMT-1 證照即將於 30 天後到期，請盡速更新。', date: new Date(Date.now() - 86400000).toISOString(), isRead: false },
     { id: 3, tab: 'system', category: 'shop', message: '專屬 VIP 優惠：鐵人裝備商城全館 8 折！', date: new Date(Date.now() - 86400000 * 3).toISOString(), isRead: true },
     { id: 4, tab: 'personal', category: 'old', message: '這是一則一年前的舊通知，即將被系統自動清除。', date: '2024-01-01T00:00:00.000Z', isRead: true }
@@ -68,31 +49,29 @@ export default function DigitalID() {
     setLoadingProfile(true)
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      let currentUserProfile = CURRENT_USER;
+      
+      // 🌟 移除寫死的測試者，若查無資料，用 Email 作為姓名預設值
+      let currentUserProfile = {
+          id: user?.id || 'unknown',
+          email: user?.email || '',
+          full_name: user?.email ? user.email.split('@')[0] : '未登入',
+          role: 'USER',
+          gender: '未提供',
+          basic_edit_count: 0,
+          med_edit_count: 0
+      };
 
-      if (user) {
-        const { data, error } = await supabase.from('profiles').select('*').eq('id', user.id).single()
-        if (error) throw error
-        currentUserProfile = {
-            ...data,
-            basic_edit_count: data.basic_edit_count || 0,
-            med_edit_count: data.med_edit_count || 0
+      if (user && user.email) { 
+        // 🌟 關鍵修復：使用 maybeSingle，防止查無資料崩潰
+        const { data, error } = await supabase.from('profiles').select('*').eq('email', user.email.toLowerCase()).maybeSingle()
+        if (data) {
+            currentUserProfile = { ...currentUserProfile, ...data }
         }
-        setProfile(currentUserProfile)
-      } else {
-        setProfile({
-            ...currentUserProfile,
-            english_name: 'Iron Medic', birthday: '1985-10-18',
-            national_id: 'A123456789', phone: '0912-345-678', contact_email: 'test@ironmedic.com',
-            address: '台北市大安區鐵人路1號', line_id: 'ironmedic_test',
-            emergency_name: '王小明', emergency_phone: '0987-654-321', emergency_relation: '配偶',
-            medical_license: 'EMT-P 高級救護技術員', medical_history: '無特殊病史',
-            dietary_habit: '葷食', join_date: '2023年', 
-            transport_pref: '自行開車', stay_pref: '需要代訂住宿'
-        })
-      }
+      } 
+      
+      setProfile(currentUserProfile)
 
-      // 🌟 智慧撈取「我報名的賽事」與「歷史參賽明細」
+      // 2. 🌟 智慧撈取「我報名的賽事」與「歷史參賽明細」
       const { data: allRaces, error: raceError } = await supabase.from('races').select('*').order('date', { ascending: false })
       if (raceError) throw raceError;
 
@@ -111,7 +90,8 @@ export default function DigitalID() {
                               if (!item) continue;
                               try {
                                   const p = JSON.parse(item);
-                                  if (p.id === currentUserProfile.id || p.name === currentUserProfile.full_name) {
+                                  // 同步修正：判斷名字或 Email 是否吻合
+                                  if (p.name === currentUserProfile.full_name || (user && p.email === user.email)) {
                                       foundMySlot = slot.name;
                                       if (p.roleTag) myRole = p.roleTag;
                                       break;
@@ -152,7 +132,6 @@ export default function DigitalID() {
   const pastRaces = myRaces.filter(r => new Date(r.date) < new Date());
   const finishedCount = pastRaces.length;
   const totalEnrolledCount = myRaces.length;
-  // 假設目前沒有缺席機制，達成率預設為 100%。若有缺席資料，可改成 (finishedCount / pastRaces.length)*100
   const attendanceRate = pastRaces.length > 0 ? '100%' : 'N/A';
 
   const unreadCountReal = notifications.filter(n => !n.isRead).length;
@@ -183,8 +162,8 @@ export default function DigitalID() {
           }
 
           const { data: { user } } = await supabase.auth.getUser()
-          if (user) {
-              await supabase.from('profiles').update(updatePayload).eq('id', user.id)
+          if (user && user.email) { // 🌟 儲存時也是鎖定 Email 寫入
+              await supabase.from('profiles').update(updatePayload).eq('email', user.email.toLowerCase())
               try {
                   await supabase.from('admin_notifications').insert({
                       user_id: user.id, user_name: profile.full_name,
@@ -250,9 +229,9 @@ export default function DigitalID() {
       </div>
   )
 
-  const displayUser = profile || CURRENT_USER;
+  const displayUser = profile;
 
-  if (loadingProfile) {
+  if (loadingProfile || !displayUser) {
       return <div className="min-h-screen flex items-center justify-center bg-slate-50"><Loader2 className="animate-spin text-blue-500" size={48}/></div>
   }
 
@@ -305,7 +284,7 @@ export default function DigitalID() {
 
               <div className="flex flex-wrap gap-2 relative z-10">
                   {displayUser.is_vip === 'Y' && <span className="bg-amber-400 text-amber-900 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><Crown size={12}/> VIP</span>}
-                  {displayUser.is_team_leader === 'Y' && <span className="bg-blue-500 text-white text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><ShieldAlert size={12}/> 帶隊教官</span>}
+                  {displayUser.is_team_leader === 'Y' && <span className="bg-blue-500 text-white text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><ShieldAlert size={12}/> 帶隊官</span>}
                   {displayUser.is_current_member === 'Y' ? 
                       <span className="bg-green-500/20 text-green-400 border border-green-500/50 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><CheckCircle size={12}/> 有效會員</span> : 
                       <span className="bg-red-500/20 text-red-400 border border-red-500/50 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><XCircle size={12}/> 非會員</span>
@@ -313,7 +292,7 @@ export default function DigitalID() {
               </div>
           </div>
 
-          {/* 🌟 我報名的賽事 (真實從 DB 撈取) */}
+          {/* 🌟 我報名的賽事 (自動撈取真實資料) */}
           <div>
               <div className="flex items-center justify-between mb-3 px-1">
                   <h3 className="font-black text-slate-800 flex items-center gap-1.5"><Flag className="text-blue-600" size={18}/> 我報名的賽事</h3>
@@ -346,7 +325,7 @@ export default function DigitalID() {
               </div>
           </div>
 
-          {/* 🌟 四大方格區 (位置重排：基本、醫護、統計、明細) */}
+          {/* 🌟 四大方格區 (位置重排，名稱內外統一) */}
           <div className="grid grid-cols-2 gap-3 md:gap-4">
               
               {/* 左上：核心基本資料 */}
@@ -523,6 +502,10 @@ export default function DigitalID() {
                       {activeModal === 'basic' && !isEditing && (
                           <div className="space-y-3">
                               <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+                                  {/* 加入年月 / 醫護鐵人編號 可以讓測試者確認是否寫入成功 */}
+                                  <InfoRow label="醫護鐵人編號" value={displayUser.ironmedic_no} />
+                                  <InfoRow label="加入年月" value={displayUser.join_date} />
+                                  <div className="h-px bg-slate-100 my-2"></div>
                                   <InfoRow label="中文姓名" value={displayUser.full_name} />
                                   <InfoRow label="身分證字號" value={displayUser.national_id} />
                                   <InfoRow label="生理性別" value={displayUser.gender} />
@@ -546,6 +529,8 @@ export default function DigitalID() {
                               <div className="bg-blue-50 text-blue-800 text-xs font-bold p-3 rounded-xl flex items-center gap-2">
                                   <AlertTriangle size={16}/> 儲存後將發送通知給管理員審核
                               </div>
+                              <EditInputRow label="醫護鐵人編號 (測試驗證用)" name="ironmedic_no" />
+                              <EditInputRow label="加入年月 (測試驗證用)" name="join_date" />
                               <EditInputRow label="中文姓名" name="full_name" />
                               <EditInputRow label="身分證字號" name="national_id" />
                               <EditInputRow label="生理性別" name="gender" type="select" options={['男', '女']} />
@@ -597,7 +582,7 @@ export default function DigitalID() {
                       )}
                   </div>
 
-                  {/* 🌟 底部按鈕區 (明確的關閉鍵) */}
+                  {/* 🌟 底部按鈕區 */}
                   <div className="p-4 sm:p-6 border-t border-slate-100 bg-white shrink-0 shadow-[0_-10px_20px_rgba(0,0,0,0.03)]">
                       {isEditing ? (
                           <div className="flex gap-3">
@@ -631,8 +616,7 @@ export default function DigitalID() {
                                   )
                               )}
                               
-                              {/* 明確的關閉按鈕 */}
-                              <button onClick={() => setActiveModal(null)} className="w-full py-3.5 bg-slate-100 text-slate-600 font-black rounded-xl hover:bg-slate-200 transition-colors active:scale-95 flex justify-center items-center gap-1">
+                              <button onClick={() => setActiveModal(null)} className="w-full py-3.5 bg-slate-100 text-slate-500 font-black rounded-xl hover:bg-slate-200 transition-colors active:scale-95 flex justify-center items-center gap-1">
                                   關閉視窗
                               </button>
                           </div>
@@ -655,6 +639,12 @@ export default function DigitalID() {
                   <div className="bg-white p-4 rounded-2xl shadow-inner border-2 border-slate-100 w-full aspect-square mb-6 relative">
                       <img src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${displayUser.ironmedic_no || displayUser.full_name}`} alt="QR" className="w-full h-full object-contain" />
                       <div className="absolute inset-0 border-4 border-blue-500/20 rounded-2xl pointer-events-none"></div>
+                  </div>
+                  
+                  <div className="text-center w-full">
+                      <div className="text-lg font-black text-slate-800 tracking-widest bg-slate-50 py-3 rounded-xl border border-slate-100">
+                          {displayUser.ironmedic_no || 'IM-XXXX-XXX'}
+                      </div>
                   </div>
                   
                   <button onClick={() => setShowQR(false)} className="mt-4 w-full py-4 bg-slate-900 text-white rounded-xl font-black active:scale-95 transition-transform shadow-lg shadow-slate-900/20">

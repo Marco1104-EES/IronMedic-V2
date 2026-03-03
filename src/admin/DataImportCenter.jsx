@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
 import * as XLSX from 'xlsx' 
-import { FileSpreadsheet, CheckCircle, ArrowRight, Save, Database, Settings, LayoutList, Merge, Plus, Target, UserCheck, XCircle, BrainCircuit, Trash2, Edit, Download, FileText, Filter, Users, Flag, Upload, AlertTriangle, FileDown, Loader2, Settings2, Fingerprint } from 'lucide-react'
+// 🌟 這次絕對把 X 給加進來了！
+import { FileSpreadsheet, CheckCircle, ArrowRight, Save, Database, Settings, LayoutList, Merge, Plus, Target, UserCheck, XCircle, BrainCircuit, Trash2, Edit, Download, FileText, Filter, Users, Flag, Upload, AlertTriangle, FileDown, Loader2, Settings2, Fingerprint, GitMerge, X } from 'lucide-react'
 
 const MAPPING_MEMORY_KEY = 'ironmedic_mapping_memory'
 const EXT_LABELS_KEY = 'ironmedic_ext_labels'
@@ -35,6 +36,10 @@ export default function DataImportCenter() {
   // 🌟 擴充欄位標籤管理器 State
   const [extLabels, setExtLabels] = useState(() => JSON.parse(localStorage.getItem(EXT_LABELS_KEY) || '{}'))
 
+  // 🌟 合體視窗 (Conflict Resolution Modal) 專用 State
+  const [conflictModalData, setConflictModalData] = useState(null)
+  const [mergedData, setMergedData] = useState({})
+
   // --- 賽事匯入專用 State ---
   const [isUploadingRace, setIsUploadingRace] = useState(false)
   const [uploadRaceStatus, setUploadRaceStatus] = useState(null)
@@ -45,7 +50,7 @@ export default function DataImportCenter() {
   const [processing, setProcessing] = useState(false)
   const logsEndRef = useRef(null)
 
-  // 🌟 動態產生 TARGET_FIELDS (包含動態擴充欄位名稱)
+  // 🌟 動態產生 TARGET_FIELDS
   const TARGET_FIELDS = [
       { group: '🟢 【基本與聯絡資料】', options: [
           { key: 'full_name', label: '姓名(A) *必填' }, { key: 'birthday', label: '出生年月日(B)' },
@@ -167,7 +172,7 @@ export default function DataImportCenter() {
       if (previewData.length === 0) return alert("目前沒有資料可匯出");
       const exportData = previewData.map(row => {
           const exportRow = {
-              '狀態': row._status === 'valid' || row._status === 'perfect' || row._status === 'resolved' ? '🟢 正常' : '🔴 異常',
+              '狀態': row._status === 'valid' || row._status === 'perfect' || row._status === 'resolved' ? '🟢 正常' : (row._status === 'internal_conflict' ? '🟣 內部衝突' : '🔴 異常'),
               '錯誤/異常原因': row._error || (row._status === 'duplicate' ? '發現同名者' : (row._status === 'not_found' ? '查無此人' : '無')),
               '姓名(A)': row.full_name || '未提供',
               '聯絡信箱(E)': row.contact_email || '未提供',
@@ -191,7 +196,7 @@ export default function DataImportCenter() {
   }
 
   // ==========================================
-  // 🌟 會員名單匯入：終極防覆蓋與防呆版
+  // 🌟 會員名單匯入：終極防覆蓋與防呆版 (Wix 配對升級)
   // ==========================================
   const handleStep1Submit = async () => {
     if (!fileMaster) return alert("請上傳主要資料檔案！")
@@ -212,17 +217,37 @@ export default function DataImportCenter() {
             
             if (fileWix) {
                 const wixRows = await readExcel(fileWix)
-                const wixMap = {}
+                const wixMapByEmail = {}
+                const wixMapByName = {}
+                
+                // 🌟 Wix 輔助配對升級：優先建立 Email 對照表 (解決 "陳霖毅" 與 "霖毅 陳" 的名字亂配對問題)
                 wixRows.forEach(row => {
+                    const wEmailKey = Object.keys(row).find(k => k.toLowerCase().includes('mail') || k.toLowerCase().includes('email'))
+                    if (wEmailKey && row[wEmailKey]) {
+                        wixMapByEmail[String(row[wEmailKey]).trim().toLowerCase()] = row
+                    }
+                    
                     const nameKey = Object.keys(row).find(k => k.includes('姓名') || k.toLowerCase().includes('name'))
-                    if (nameKey && row[nameKey]) wixMap[String(row[nameKey]).replace(/\s+/g, '')] = row
+                    if (nameKey && row[nameKey]) wixMapByName[String(row[nameKey]).replace(/\s+/g, '')] = row
                 })
 
                 finalRows = finalRows.map(mRow => {
+                    const mEmailKey = Object.keys(mRow).find(k => k.toLowerCase() === 'e-mail' || k.toLowerCase() === 'email' || k.toLowerCase().includes('信箱'))
                     const mNameKey = Object.keys(mRow).find(k => k.includes('姓名') || k.toLowerCase().includes('name'))
-                    if (!mNameKey) return mRow
-                    const mName = String(mRow[mNameKey]).replace(/\s+/g, '')
-                    let match = wixMap[mName] || wixMap[Object.keys(wixMap).find(k => mName.includes(k) || k.includes(mName))]
+                    
+                    let match = null;
+                    
+                    // 1. 優先用 Email 配對 (絕對精準，不怕名字有空格或倒裝)
+                    if (mEmailKey && mRow[mEmailKey]) {
+                        const mEmail = String(mRow[mEmailKey]).trim().toLowerCase();
+                        match = wixMapByEmail[mEmail];
+                    }
+
+                    // 2. 如果沒有 Email，退而求其次用名字配對
+                    if (!match && mNameKey && mRow[mNameKey]) {
+                        const mName = String(mRow[mNameKey]).replace(/\s+/g, '')
+                        match = wixMapByName[mName] || wixMapByName[Object.keys(wixMapByName).find(k => mName.includes(k) || k.includes(mName))]
+                    }
 
                     if (match) {
                         const enrichedRow = { ...mRow, _source: '主名單 + 輔助資料' }
@@ -247,8 +272,6 @@ export default function DataImportCenter() {
         const initialMap = {}
         const memFlags = {}
         const savedMemory = JSON.parse(localStorage.getItem(MAPPING_MEMORY_KEY) || '{}')
-        
-        // 🌟 防呆一：確保同一個系統欄位不會被多個 Excel 欄位重複對應
         const assignedDbFields = new Set();
 
         headers.forEach(h => {
@@ -336,10 +359,7 @@ export default function DataImportCenter() {
                       const dbField = fieldMapping[exCol]
                       if (dbField && exCol !== patchAnchorExcel) {
                           const cellVal = row[exCol];
-                          // 🌟 防呆二：拒絕空值覆蓋已有的有效資料
-                          if (updateData[dbField] && (!cellVal || String(cellVal).trim() === '')) {
-                              return;
-                          }
+                          if (updateData[dbField] && (!cellVal || String(cellVal).trim() === '')) return;
                           updateData[dbField] = cellVal;
                       }
                   })
@@ -353,7 +373,33 @@ export default function DataImportCenter() {
                   return { _id: idx, _rawAnchor: anchorValue, _status: status, _dbId: dbId, _duplicates: duplicateOptions, _updateData: updateData, ...dbInfo, ...updateData }
               })
 
-              setPreviewData(transformed)
+              const groupedMap = new Map();
+              const finalPreview = [];
+              transformed.forEach(row => {
+                  const key = row._rawAnchor;
+                  if (!key || key === '') finalPreview.push(row);
+                  else {
+                      if (!groupedMap.has(key)) groupedMap.set(key, []);
+                      groupedMap.get(key).push(row);
+                  }
+              });
+
+              groupedMap.forEach((rows, key) => {
+                  if (rows.length === 1) {
+                      finalPreview.push(rows[0]);
+                  } else {
+                      finalPreview.push({
+                          _id: `conflict_${key}_${Date.now()}`,
+                          _status: 'internal_conflict',
+                          _rawAnchor: key,
+                          email: rows[0].email,
+                          full_name: rows.map(r=>r.full_name||'空').join(' 與 '),
+                          _conflictRows: rows
+                      });
+                  }
+              });
+
+              setPreviewData(finalPreview)
               setStep(3)
           } catch (err) { addLog(`資料比對異常: ${err.message}`, 'error') }
       } else {
@@ -367,15 +413,15 @@ export default function DataImportCenter() {
 
           const transformed = rawData.map((row, idx) => {
               const newRow = { _id: idx, _status: 'pending', _source: row._source || '主名單' }
+              
               Object.keys(fieldMapping).forEach(excelHeader => {
                   const dbField = fieldMapping[excelHeader]
                   if (dbField && dbField !== "") {
                       const cellVal = row[excelHeader];
-                      // 🌟 防呆二：拒絕空值覆蓋已有的有效資料
-                      if (newRow[dbField] && (!cellVal || String(cellVal).trim() === '')) {
-                          return;
-                      }
-                      newRow[dbField] = cellVal;
+                      const isEmpty = (cellVal === undefined || cellVal === null || String(cellVal).trim() === '');
+                      
+                      if (newRow[dbField] && isEmpty) return;
+                      if (!isEmpty) newRow[dbField] = String(cellVal).trim();
                   }
               })
               
@@ -394,15 +440,110 @@ export default function DataImportCenter() {
               return newRow
           })
 
-          setPreviewData(transformed)
+          const groupedMap = new Map();
+          const finalPreview = [];
+          transformed.forEach(row => {
+              // 用 email 或 contact_email 當作檢查衝突的 key
+              const key = row.email || row.contact_email;
+              if (!key || key === '') finalPreview.push(row);
+              else {
+                  if (!groupedMap.has(key)) groupedMap.set(key, []);
+                  groupedMap.get(key).push(row);
+              }
+          });
+
+          groupedMap.forEach((rows, key) => {
+              if (rows.length === 1) {
+                  finalPreview.push(rows[0]);
+              } else {
+                  finalPreview.push({
+                      _id: `conflict_${key}_${Date.now()}`,
+                      _status: 'internal_conflict',
+                      email: key,
+                      contact_email: rows[0].contact_email,
+                      full_name: rows.map(r=>r.full_name||'空').join(' 與 '),
+                      _conflictRows: rows
+                  });
+              }
+          });
+
+          setPreviewData(finalPreview)
           setStep(3)
       }
       setProcessing(false)
   }
 
+  // 🌟 打開合體視窗
+  const handleOpenConflictModal = (row) => {
+      const rows = row._conflictRows;
+      const autoMerged = mode === 'patch' ? { ...rows[0]._updateData } : { ...rows[0] };
+      
+      // AI 預先合體邏輯 (優先保留最長姓名與非空值)
+      rows.forEach((r, idx) => {
+          if (idx === 0) return;
+          const sourceData = mode === 'patch' ? r._updateData : r;
+          Object.keys(sourceData).forEach(k => {
+              if (k.startsWith('_')) return;
+              const oldVal = autoMerged[k];
+              const newVal = sourceData[k];
+              
+              if (newVal !== undefined && newVal !== null && String(newVal).trim() !== '') {
+                  // 姓名保留最長的 (如：陳霖毅 打敗 霖)
+                  if (k === 'full_name' && oldVal) {
+                      if (String(newVal).trim().length > String(oldVal).trim().length) {
+                          autoMerged[k] = String(newVal).trim();
+                      }
+                  } else if (!oldVal || String(oldVal).trim() === '') {
+                      autoMerged[k] = String(newVal).trim();
+                  }
+              }
+          });
+      });
+      
+      setMergedData(autoMerged);
+      setConflictModalData(row);
+  }
+
+  // 🌟 儲存合體結果 (解決衝突並轉為正常狀態)
+  const handleSaveConflict = () => {
+      const newPreview = previewData.map(r => {
+          if (r._id === conflictModalData._id) {
+              if (mode === 'patch') {
+                  const baseRow = conflictModalData._conflictRows[0];
+                  return {
+                      ...baseRow,
+                      _id: Date.now(),
+                      _status: 'resolved', // 🌟 將狀態改為已解決，才能順利匯入
+                      _updateData: mergedData, 
+                      full_name: mergedData.full_name || baseRow.full_name 
+                  };
+              } else {
+                  const newRow = { ...conflictModalData._conflictRows[0], ...mergedData, _id: Date.now() };
+                  if (!newRow.full_name || (!newRow.email && !newRow.contact_email)) {
+                      newRow._status = 'invalid';
+                      newRow._error = !newRow.full_name ? '姓名欄位空白' : '聯絡信箱空白';
+                  } else {
+                      newRow._status = 'valid'; // 🌟 將狀態改為正常
+                  }
+                  return newRow;
+              }
+          }
+          return r;
+      });
+      setPreviewData(newPreview);
+      setConflictModalData(null);
+  }
+
   const handleExecute = async () => {
       setProcessing(true)
       
+      // 阻擋未處理的內部衝突
+      if (previewData.some(r => r._status === 'internal_conflict')) {
+          alert("您還有「內部衝突」尚未比對合體！請處理完畢後再執行匯入。");
+          setProcessing(false);
+          return;
+      }
+
       if (mode === 'patch') {
           const toUpdate = previewData.filter(r => ['perfect', 'resolved'].includes(r._status) && r._dbId)
           if (toUpdate.length === 0) { alert("無有效資料可更新！"); setProcessing(false); return; }
@@ -410,6 +551,7 @@ export default function DataImportCenter() {
           let success = 0, fail = 0;
           for (const row of toUpdate) {
               try {
+                  if (Object.keys(row._updateData).length === 0) continue; // 防呆：如果完全沒有要更新的資料就跳過
                   const { error } = await supabase.from('profiles').update(row._updateData).eq('id', row._dbId)
                   if (error) throw error
                   success++
@@ -423,24 +565,12 @@ export default function DataImportCenter() {
           const BATCH = 50
           let success = 0, fail = 0
 
-          const cleanRows = validRows.map(({ _id, _status, _error, _source, _gender_deduced, ...rest }) => ({
+          const cleanRows = validRows.map(({ _id, _status, _error, _source, _gender_deduced, _conflictRows, ...rest }) => ({
               ...rest, role: rest.role || 'USER', updated_at: new Date()
           }))
 
-          const uniqueRowsMap = new Map();
-          cleanRows.forEach(row => {
-              const emailKey = row.email || row.contact_email; 
-              if (emailKey) uniqueRowsMap.set(emailKey, row); 
-          });
-          const uniqueCleanRows = Array.from(uniqueRowsMap.values());
-          
-          const duplicateCount = cleanRows.length - uniqueCleanRows.length;
-          if (duplicateCount > 0) {
-              addLog(`自動過濾了 ${duplicateCount} 筆重複的 Email 資料，確保寫入安全。`, 'warning')
-          }
-
-          for (let i = 0; i < uniqueCleanRows.length; i += BATCH) {
-              const chunk = uniqueCleanRows.slice(i, i + BATCH)
+          for (let i = 0; i < cleanRows.length; i += BATCH) {
+              const chunk = cleanRows.slice(i, i + BATCH)
               try {
                   const { error } = await supabase.from('profiles').upsert(chunk, { onConflict: 'email' })
                   if (error) throw error
@@ -476,7 +606,7 @@ export default function DataImportCenter() {
   const filteredData = previewData.filter(row => {
       if (viewFilter === 'all') return true;
       if (viewFilter === 'valid') return ['valid', 'perfect', 'resolved'].includes(row._status);
-      if (viewFilter === 'error') return ['invalid', 'duplicate', 'not_found'].includes(row._status);
+      if (viewFilter === 'error') return ['invalid', 'duplicate', 'not_found', 'internal_conflict'].includes(row._status);
       return true;
   });
 
@@ -983,6 +1113,10 @@ export default function DataImportCenter() {
                                 <div className="text-xs text-slate-500 font-bold flex items-center justify-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-400"></span>查無此人</div>
                                 <div className="text-2xl font-black text-slate-600 mt-1">{previewData.filter(r=>r._status==='not_found').length}</div>
                             </div>
+                            <div className="bg-purple-50/50 px-4 py-2 rounded-lg border border-purple-200 text-center min-w-[100px] cursor-help" title="Excel 內發現有重複的 Email指向同一個人">
+                                <div className="text-xs text-purple-700 font-bold flex items-center justify-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse"></span>內部衝突</div>
+                                <div className="text-2xl font-black text-purple-800 mt-1">{previewData.filter(r=>r._status==='internal_conflict').length}</div>
+                            </div>
                         </div>
                     ) : (
                         <div className="flex gap-4 items-center border-r border-slate-200 pr-6">
@@ -994,12 +1128,16 @@ export default function DataImportCenter() {
                                 <div className="text-xs text-red-600 font-bold flex items-center justify-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500"></span>異常/缺漏</div>
                                 <div className="text-2xl font-black text-red-700 mt-1">{previewData.filter(r=>r._status==='invalid').length}</div>
                             </div>
+                            <div className="bg-purple-50/50 px-5 py-2.5 rounded-lg border border-purple-200 text-center min-w-[120px] cursor-help" title="Excel 內發現有重複的 Email指向同一個人">
+                                <div className="text-xs text-purple-700 font-bold flex items-center justify-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse"></span>內部衝突</div>
+                                <div className="text-2xl font-black text-purple-800 mt-1">{previewData.filter(r=>r._status==='internal_conflict').length}</div>
+                            </div>
                         </div>
                     )}
                     
                     <div className="flex items-center gap-3">
                         <button onClick={() => setStep(2)} className="px-5 py-2.5 rounded-xl font-medium text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200 transition-colors">返回修改設定</button>
-                        <button onClick={handleExecute} disabled={processing || previewData.filter(r=>mode==='patch' ? ['perfect','resolved'].includes(r._status) : r._status==='valid').length === 0} className="px-8 py-2.5 rounded-xl font-bold text-white shadow-md flex items-center gap-2 disabled:opacity-50 bg-slate-800 hover:bg-slate-700 transition-transform active:scale-95">
+                        <button onClick={handleExecute} disabled={processing || previewData.filter(r=>mode==='patch' ? ['perfect','resolved'].includes(r._status) : r._status==='valid').length === 0 || previewData.some(r => r._status === 'internal_conflict')} className="px-8 py-2.5 rounded-xl font-bold text-white shadow-md flex items-center gap-2 disabled:opacity-50 bg-slate-800 hover:bg-slate-700 transition-transform active:scale-95">
                             {processing ? <><Loader2 className="animate-spin" size={18}/> 系統處理中...</> : <><Save size={18}/> 確認無誤，執行匯入</>}
                         </button>
                     </div>
@@ -1016,7 +1154,7 @@ export default function DataImportCenter() {
                             >
                                 <option value="all">顯示全部名單 ({previewData.length} 筆)</option>
                                 <option value="valid">🟢 僅顯示狀態正常名單</option>
-                                <option value="error">🔴 僅顯示異常/需確認名單</option>
+                                <option value="error">🔴 僅顯示異常/衝突/需確認名單</option>
                             </select>
                         </div>
 
@@ -1045,9 +1183,10 @@ export default function DataImportCenter() {
                             <tbody className="divide-y divide-slate-100 bg-white">
                                 {filteredData.map((row) => (
                                     <tr key={row._id} className={
-                                        mode === 'patch' 
+                                        row._status === 'internal_conflict' ? 'bg-purple-50/70 border-l-4 border-l-purple-500' :
+                                        (mode === 'patch' 
                                             ? (row._status === 'duplicate' ? 'bg-amber-50/50' : row._status === 'not_found' ? 'opacity-50' : 'hover:bg-slate-50')
-                                            : (row._status === 'invalid' ? 'bg-red-50/50' : 'hover:bg-slate-50')
+                                            : (row._status === 'invalid' ? 'bg-red-50/50' : 'hover:bg-slate-50'))
                                     }>
                                         <td className="px-6 py-3">
                                             {row._status === 'valid' && <span className="text-green-600 font-bold flex items-center gap-1.5"><CheckCircle size={14}/>資料完整</span>}
@@ -1056,6 +1195,13 @@ export default function DataImportCenter() {
                                             {row._status === 'resolved' && <span className="text-blue-600 font-bold flex items-center gap-1.5"><UserCheck size={14}/>已手動指定</span>}
                                             {row._status === 'not_found' && <span className="text-slate-400 font-medium flex items-center gap-1.5"><XCircle size={14}/>查無此人(略過)</span>}
                                             
+                                            {/* 🌟 內部衝突操作按鈕 */}
+                                            {row._status === 'internal_conflict' && (
+                                                <button onClick={() => handleOpenConflictModal(row)} className="text-xs font-black bg-purple-600 text-white px-3 py-1.5 rounded-lg shadow-sm hover:bg-purple-700 transition-colors flex items-center gap-1.5 animate-pulse">
+                                                    <GitMerge size={14}/> 👀 進行比對與合體
+                                                </button>
+                                            )}
+
                                             {row._status === 'duplicate' && (
                                                 <div className="space-y-1 mt-1">
                                                     <span className="text-amber-600 font-bold text-xs">⚠️ 發現 {row._duplicates.length} 筆重複：</span>
@@ -1067,7 +1213,7 @@ export default function DataImportCenter() {
                                                 </div>
                                             )}
                                         </td>
-                                        <td className="px-6 py-3 font-bold text-slate-800">{row.full_name || '-'}</td>
+                                        <td className={`px-6 py-3 font-bold ${row._status === 'internal_conflict' ? 'text-purple-700' : 'text-slate-800'}`}>{row.full_name || '-'}</td>
                                         <td className="px-6 py-3">
                                             {row.gender ? (
                                                 <span className={`px-2 py-0.5 rounded text-xs font-bold ${row.gender === '男' ? 'bg-blue-100 text-blue-700' : 'bg-pink-100 text-pink-700'}`}>
@@ -1078,9 +1224,11 @@ export default function DataImportCenter() {
                                         </td>
                                         <td className="px-6 py-3 text-slate-600">{row.contact_email || '-'}</td>
                                         <td className="px-6 py-3 text-slate-600">{row.email || '-'}</td>
-                                        {mode === 'patch' && <td className="px-6 py-3 font-bold text-amber-700 bg-amber-50/30 border-l border-amber-100/50">{row._rawAnchor}</td>}
+                                        {mode === 'patch' && <td className={`px-6 py-3 font-bold ${row._status === 'internal_conflict' ? 'text-purple-700 bg-purple-100/50' : 'text-amber-700 bg-amber-50/30 border-l border-amber-100/50'}`}>{row._rawAnchor}</td>}
                                         {getDynamicMappedFields().map(excelCol => (
-                                            <td key={excelCol} className="px-6 py-3 text-blue-700">{row[fieldMapping[excelCol]] || '-'}</td>
+                                            <td key={excelCol} className="px-6 py-3 text-blue-700">
+                                                {row._status === 'internal_conflict' ? '待合體...' : (row[fieldMapping[excelCol]] || '-')}
+                                            </td>
                                         ))}
                                     </tr>
                                 ))}
@@ -1168,6 +1316,76 @@ export default function DataImportCenter() {
               </div>
           </div>
       </div>
+      )}
+
+      {/* ========================================= */}
+      {/* 🌟 內部資料衝突：比對與合體 Modal */}
+      {/* ========================================= */}
+      {conflictModalData && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[150] flex items-center justify-center p-4 animate-fade-in" onClick={() => setConflictModalData(null)}>
+            <div className="bg-white rounded-[2rem] w-full max-w-5xl flex flex-col max-h-[90vh] overflow-hidden shadow-2xl animate-bounce-in" onClick={e => e.stopPropagation()}>
+                
+                <div className="p-6 border-b border-purple-100 flex justify-between items-center bg-purple-50 shrink-0">
+                    <div>
+                        <h3 className="text-xl font-black text-purple-800 flex items-center gap-2">
+                            <GitMerge className="text-purple-600" size={24}/> 內部資料衝突：比對與合體
+                        </h3>
+                        <p className="text-sm text-purple-600 font-medium mt-1">
+                            系統發現表單中有 <span className="font-black px-1.5 py-0.5 bg-purple-200 rounded">{conflictModalData._conflictRows.length}</span> 筆資料指向同一個目標（Email相同）。
+                        </p>
+                    </div>
+                    <button onClick={() => setConflictModalData(null)} className="text-slate-400 hover:bg-white rounded-full p-2 transition-colors"><X size={24}/></button>
+                </div>
+
+                <div className="p-6 overflow-y-auto bg-slate-50 flex-1 custom-scrollbar">
+                    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                        <table className="w-full text-sm text-left whitespace-nowrap">
+                            <thead className="bg-slate-800 text-white font-black">
+                                <tr>
+                                    <th className="px-5 py-4 border-r border-slate-700 bg-slate-900 sticky left-0 z-10 w-48">資料欄位</th>
+                                    {conflictModalData._conflictRows.map((r, i) => (
+                                        <th key={i} className="px-5 py-4 border-r border-slate-700">來源資料 {i + 1}</th>
+                                    ))}
+                                    <th className="px-5 py-4 bg-purple-600 min-w-[250px]">✨ 最終合體結果 (可手動修改)</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {[...new Set(Object.values(fieldMapping).filter(f=>f))].map(fieldKey => {
+                                    const fieldLabel = FLAT_TARGETS.find(t => t.key === fieldKey)?.label || fieldKey;
+                                    return (
+                                        <tr key={fieldKey} className="hover:bg-slate-50 transition-colors">
+                                            <td className="px-5 py-3 font-black text-slate-700 border-r border-slate-200 bg-white sticky left-0 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">
+                                                {fieldLabel.split('(')[0]}
+                                            </td>
+                                            {conflictModalData._conflictRows.map((r, i) => {
+                                                const val = mode === 'patch' ? r._updateData[fieldKey] : r[fieldKey];
+                                                return <td key={i} className="px-5 py-3 border-r border-slate-200 text-slate-600">{val || <span className="text-slate-300 italic text-xs">空值</span>}</td>
+                                            })}
+                                            <td className="px-3 py-2 bg-purple-50/30">
+                                                <input 
+                                                    type="text"
+                                                    value={mergedData[fieldKey] || ''}
+                                                    onChange={e => setMergedData({...mergedData, [fieldKey]: e.target.value})}
+                                                    className="w-full p-2.5 border border-purple-200 rounded-xl outline-none focus:ring-2 focus:ring-purple-500 font-bold text-purple-800 bg-white shadow-sm transition-all focus:border-purple-500"
+                                                    placeholder="最終空值"
+                                                />
+                                            </td>
+                                        </tr>
+                                    )
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div className="p-6 border-t border-slate-100 bg-white flex justify-end gap-3 shrink-0">
+                    <button onClick={() => setConflictModalData(null)} className="px-6 py-3 rounded-xl font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 transition-colors">取消</button>
+                    <button onClick={handleSaveConflict} className="px-8 py-3 rounded-xl font-black text-white bg-purple-600 hover:bg-purple-700 shadow-lg shadow-purple-600/20 flex items-center gap-2 transition-transform active:scale-95">
+                        <CheckCircle size={20}/> 確認合體並儲存
+                    </button>
+                </div>
+            </div>
+        </div>
       )}
 
       <div className="bg-slate-900 rounded-xl p-4 h-40 overflow-hidden flex flex-col shadow-inner w-full">

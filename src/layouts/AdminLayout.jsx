@@ -1,13 +1,17 @@
 import { useState, useEffect } from 'react'
 import { Outlet, useNavigate, useLocation, Link } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
-import { LayoutDashboard, Users, LogOut, Loader2, ShieldAlert, ShieldCheck, UserPlus, AlertTriangle, Ban, ServerCog, UploadCloud, Flag, History, CalendarClock, Menu, X } from 'lucide-react'
+// 🌟 引入 Home 圖示，用作返回大廳按鈕
+import { LayoutDashboard, Users, LogOut, Loader2, ShieldAlert, ShieldCheck, UserPlus, AlertTriangle, Ban, ServerCog, UploadCloud, Flag, History, CalendarClock, Menu, X, Crown, Home } from 'lucide-react'
+
+// 🌟 定義四大後台通行權限
+const VALID_ADMIN_ROLES = ['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN'];
 
 export default function AdminLayout() {
   const [loading, setLoading] = useState(true)
   const [isAuthorized, setIsAuthorized] = useState(false)
   const [userEmail, setUserEmail] = useState('')
-  // 🌟 新增：控制手機版側邊欄開關
+  const [userRole, setUserRole] = useState('') 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
@@ -17,7 +21,6 @@ export default function AdminLayout() {
 
   useEffect(() => { checkAdminPrivileges() }, [])
 
-  // 🌟 偵測螢幕寬度，視窗放大時自動關閉側邊欄遮罩
   useEffect(() => {
     const handleResize = () => {
       if (window.innerWidth >= 1024) setIsSidebarOpen(false)
@@ -27,28 +30,29 @@ export default function AdminLayout() {
   }, [])
 
   const checkAdminPrivileges = async () => {
-    // 開發者最高權限模式
-    const GOD_MODE = true; 
-    
-    if (GOD_MODE) {
-        setUserEmail('marco1104@gmail.com'); 
-        setIsAuthorized(true); 
-        setLoading(false);
-        return; 
-    }
-
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { navigate('/login'); return }
-      setUserEmail(user.email)
+      if (!user || !user.email) { navigate('/login'); return }
       
-      const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle()
+      const email = user.email.toLowerCase()
+      setUserEmail(email)
+
+      const { data, error } = await supabase.from('profiles').select('role').eq('email', email).maybeSingle()
       
-      if (!profile || !['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR'].includes(profile.role)) {
-        alert("⛔ 權限不足"); navigate('/home'); return
+      const uRole = data?.role?.toUpperCase() || 'USER'
+      
+      if (VALID_ADMIN_ROLES.includes(uRole)) {
+        setIsAuthorized(true)
+        setUserRole(uRole)
+      } else {
+        navigate('/races') 
       }
-      setIsAuthorized(true)
-    } catch (e) { navigate('/login') } finally { setLoading(false) }
+    } catch (e) {
+      console.error("權限檢查失敗:", e)
+      navigate('/login') 
+    } finally { 
+      setLoading(false) 
+    }
   }
 
   const handleLogout = async () => { 
@@ -56,7 +60,6 @@ export default function AdminLayout() {
       navigate('/login') 
   }
 
-  // 🌟 手機版點擊選單後自動收起側邊欄
   const handleMenuClick = () => {
       if (window.innerWidth < 1024) {
           setIsSidebarOpen(false)
@@ -64,10 +67,8 @@ export default function AdminLayout() {
   }
 
   if (loading) return <div className="h-screen flex items-center justify-center bg-slate-900 text-white"><Loader2 className="animate-spin mr-2"/> 系統權限核對中...</div>
-  
   if (!isAuthorized) return null
 
-  // 📝 選單配置
   const menuGroups = [
       { 
           title: "系統總覽",
@@ -80,7 +81,8 @@ export default function AdminLayout() {
           items: [
               { path: '/admin/races', icon: <Flag size={18}/>, label: '🚩 賽事任務總覽' },
               { path: '/admin/races', view: 'HISTORY', icon: <History size={18}/>, label: '📜 歷史任務結算' },
-              { path: '/admin/races', view: 'FUTURE', icon: <CalendarClock size={18}/>, label: '📅 未來任務規劃' }
+              { path: '/admin/races', view: 'FUTURE', icon: <CalendarClock size={18}/>, label: '📅 未來任務規劃' },
+              { path: '/admin/race-builder', icon: <Flag size={18}/>, label: '➕ 建立新賽事' }
           ]
       },
       {
@@ -97,10 +99,8 @@ export default function AdminLayout() {
       }
   ]
 
-  // 🧠 智慧判斷頁面標題
   const getPageTitle = () => {
     const { pathname } = location;
-    
     if (pathname === '/admin/system-status') return '系統伺服器監控';
     if (pathname === '/admin/import') return '資料整合匯入中心';
     if (pathname === '/admin/race-builder') return '建立新賽事';
@@ -109,13 +109,11 @@ export default function AdminLayout() {
       i.path === pathname && (i.view ? currentView === i.view : !searchParams.get('view'))
     );
     
-    return matchedItem ? matchedItem.label.replace(/🚩 |📜 |📅 |🅰️ |🅱️ |🆎 |⚠️ |⛔ |📥 /g, '') : '系統總覽'; 
+    return matchedItem ? matchedItem.label.replace(/🚩 |📜 |📅 |➕ |🅰️ |🅱️ |🆎 |⚠️ |⛔ |📥 /g, '') : '系統總覽'; 
   }
 
   return (
     <div className="flex h-screen bg-slate-100 font-sans overflow-hidden relative">
-      
-      {/* 🌟 手機版頂部導航列 (包含漢堡按鈕) */}
       <div className="lg:hidden absolute top-0 left-0 right-0 h-16 bg-slate-900 text-white flex items-center justify-between px-4 z-40 shadow-md">
         <div className="flex items-center gap-2 font-black tracking-wider text-lg">
             <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center">I</div>
@@ -126,24 +124,22 @@ export default function AdminLayout() {
         </button>
       </div>
 
-      {/* 🌟 手機版側邊欄遮罩 */}
       {isSidebarOpen && (
         <div className="lg:hidden fixed inset-0 bg-black/50 z-40 backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)}></div>
       )}
 
-      {/* 🌟 側邊欄 (加入 RWD 控制 class) */}
       <aside className={`
         fixed lg:static inset-y-0 left-0 z-50 w-64 bg-slate-900 text-slate-300 flex flex-col transition-transform duration-300 ease-in-out shadow-2xl lg:shadow-none h-full
         ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
       `}>
-          {/* Logo (桌面版顯示) */}
           <div className="p-6 border-b border-slate-800 hidden lg:flex items-center gap-3 sticky top-0 bg-slate-900 z-10 shrink-0">
               <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold">I</div>
               <span className="font-bold text-white tracking-wider">IRON MEDIC</span>
           </div>
 
+          {/* 🌟 修正：動態顯示真實身分名稱，取代寫死的 SUPER ADMIN MODE */}
           <div className="bg-blue-900/50 p-2 text-center text-xs text-blue-200 font-bold border-b border-blue-800 mt-16 lg:mt-0 shrink-0">
-              🛡️ SUPER ADMIN MODE
+              🛡️ {userRole === 'SUPER_ADMIN' ? 'SUPER ADMIN MODE' : userRole.replace('_', ' ')}
           </div>
 
           <nav className="flex-1 p-4 space-y-6 overflow-y-auto custom-scrollbar">
@@ -164,7 +160,7 @@ export default function AdminLayout() {
                                     key={i} 
                                     to={item.view ? `${item.path}?view=${item.view}` : item.path}
                                     className={linkClasses}
-                                    onClick={handleMenuClick} // 🌟 點擊後收起選單
+                                    onClick={handleMenuClick} 
                                 >
                                     {item.icon}
                                     {item.label}
@@ -175,8 +171,7 @@ export default function AdminLayout() {
                   </div>
               ))}
 
-              {/* 系統最高權限專屬選單 */}
-              {userEmail === 'marco1104@gmail.com' && (
+              {userRole === 'SUPER_ADMIN' && (
                   <div>
                       <div className="text-xs font-bold text-amber-500 px-3 mb-2 uppercase tracking-widest border-t border-slate-800 pt-4">系統管理區</div>
                       <Link to="/admin/system-status" onClick={handleMenuClick} className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all font-bold text-sm text-amber-400 hover:bg-amber-900/20">
@@ -187,33 +182,33 @@ export default function AdminLayout() {
               )}
           </nav>
 
-          <div className="p-4 border-t border-slate-800 sticky bottom-0 bg-slate-900 shrink-0">
+          {/* 🌟 修正：補上返回賽事大廳按鈕，維持相同設計風格 */}
+          <div className="p-4 border-t border-slate-800 sticky bottom-0 bg-slate-900 shrink-0 space-y-2">
+              <button onClick={() => navigate('/races')} className="flex items-center gap-3 px-3 py-3 w-full rounded-xl hover:bg-slate-800 hover:text-white transition-colors text-sm font-bold text-slate-400">
+                  <Home size={18}/> 返回賽事大廳
+              </button>
               <button onClick={handleLogout} className="flex items-center gap-3 px-3 py-3 w-full rounded-xl hover:bg-red-900/30 hover:text-red-400 transition-colors text-sm font-bold text-slate-400">
                   <LogOut size={18}/> 登出系統
               </button>
           </div>
       </aside>
 
-      {/* 🌟 主畫面區 (移除 ml-64，改由 flex-1 自動填滿，並處理手機版的 padding-top) */}
       <main className="flex-1 flex flex-col h-screen overflow-hidden bg-slate-100 pt-16 lg:pt-0">
           <div className="flex-1 overflow-y-auto custom-scrollbar p-4 lg:p-8 relative">
-              
               <header className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6 md:mb-8 mt-2 md:mt-0">
                   <h2 className="text-xl md:text-2xl font-black text-slate-800">
                       {getPageTitle()}
                   </h2>
                   <div className="flex items-center gap-3 bg-white px-3 py-1.5 md:px-4 md:py-2 rounded-full shadow-sm border border-slate-200 w-fit">
-                      <div className={`w-2 h-2 rounded-full animate-pulse ${userEmail === 'marco1104@gmail.com' ? 'bg-amber-500' : 'bg-green-500'}`}></div>
+                      <div className={`w-2 h-2 rounded-full animate-pulse bg-amber-500`}></div>
                       <span className="text-[10px] md:text-xs font-bold text-slate-700">
-                          {userEmail === 'marco1104@gmail.com' ? 'SYSTEM ADMIN (最高權限)' : 'ADMIN'}
+                          {userEmail}
                       </span>
                   </div>
               </header>
-              
               <Outlet />
           </div>
       </main>
-
     </div>
   )
 }

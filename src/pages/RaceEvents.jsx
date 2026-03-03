@@ -1,37 +1,47 @@
 import { useState, useEffect } from 'react'
-import { Calendar, MapPin, Users, Clock, ChevronRight, Activity, Flame, ShieldAlert, Timer, CheckCircle, X, Loader2, UsersRound, Crown, Sprout, Handshake, Send, CreditCard, Flag } from 'lucide-react'
+import { Calendar, MapPin, Users, Clock, ChevronRight, Activity, Flame, ShieldAlert, Timer, CheckCircle, X, Loader2, UsersRound, Crown, Sprout, Handshake, Send, CreditCard, Flag, Settings } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 
 export default function RaceEvents() {
   const [races, setRaces] = useState([])
   const [loading, setLoading] = useState(true)
-  
   const [statusFilter, setStatusFilter] = useState('OPEN') 
   const [timeFilter, setTimeFilter] = useState('CURRENT_YEAR') 
 
   const [previewRace, setPreviewRace] = useState(null)
-  const navigate = useNavigate()
+  const [userRole, setUserRole] = useState('USER') 
   
+  const navigate = useNavigate()
   const CURRENT_YEAR = new Date().getFullYear()
 
   useEffect(() => {
-    fetchRaces()
+    fetchUserDataAndRaces()
   }, [])
 
-  const fetchRaces = async () => {
+  const fetchUserDataAndRaces = async () => {
     setLoading(true)
     try {
-      const { data, error } = await supabase
+      const { data: { user } } = await supabase.auth.getUser()
+      
+      if (user && user.email) {
+          try {
+              const { data: profile } = await supabase.from('profiles').select('role').eq('email', user.email).maybeSingle()
+              if (profile && profile.role) {
+                  setUserRole(profile.role.toUpperCase())
+              }
+          } catch (e) { console.log("獲取身分失敗，略過", e) }
+      }
+
+      const { data: racesData, error } = await supabase
         .from('races')
         .select('*')
         .order('date', { ascending: true })
 
       if (error) throw error
-      setRaces(data || [])
+      setRaces(racesData || [])
     } catch (error) {
-      console.error("無法載入賽事:", error)
-      alert("載入賽事資料失敗，請稍後重試。")
+      console.error("無法載入資料:", error)
     } finally {
       setLoading(false)
     }
@@ -99,7 +109,6 @@ export default function RaceEvents() {
     }
   }
 
-  // 🌟 加入 roleTag (教官身份) 解析邏輯
   const extractParticipantsData = (race) => {
       let totalRegistered = 0;
       let participantDetails = [];
@@ -120,7 +129,7 @@ export default function RaceEvents() {
                                       timestamp: parsedUser.timestamp || '10:00:00:000', 
                                       isVip: parsedUser.isVip || false, 
                                       isNew: parsedUser.isNew || false,
-                                      roleTag: parsedUser.roleTag || null, // 🌟 獲取後台指定的教官職位
+                                      roleTag: parsedUser.roleTag || null, 
                                       slotGroup: slot.group,
                                       slotName: slot.name
                                   });
@@ -163,7 +172,6 @@ export default function RaceEvents() {
       return matchTime && matchStatus;
   });
 
-  // 🌟 獨立的教官/特殊身分徽章渲染器
   const renderRoleBadge = (roleTag) => {
       if (!roleTag) return null;
       if (roleTag === '帶隊教官') return <span className="flex items-center text-[10px] bg-indigo-100 text-indigo-700 border border-indigo-300 px-1.5 py-0.5 rounded font-black"><ShieldAlert size={10} className="mr-1"/> 帶隊教官</span>;
@@ -177,7 +185,19 @@ export default function RaceEvents() {
     <div className="min-h-screen bg-slate-50 pb-24 font-sans flex flex-col relative">
       <div className="bg-slate-900 pt-20 md:pt-24 pb-32 px-4 md:px-8 text-center relative overflow-hidden shrink-0">
           
-          <div className="absolute top-4 right-4 md:top-6 md:right-8 z-30">
+          <div className="absolute top-4 right-4 md:top-6 md:right-8 z-30 flex items-center gap-3">
+              
+              {/* 🌟 修正：把所有四個管理員權限都包含進來，讓賽事總監可以看到按鈕 */}
+              {(['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN'].includes(userRole)) && (
+                  <button 
+                      onClick={() => navigate('/admin/dashboard')} 
+                      className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 md:px-4 md:py-2.5 rounded-full text-xs md:text-sm font-bold transition-all shadow-lg active:scale-95"
+                  >
+                      <Settings size={16} /> 
+                      <span className="hidden sm:inline">管理員後台</span>
+                  </button>
+              )}
+
               <button 
                   onClick={() => navigate('/my-id')} 
                   className="relative flex items-center gap-2 bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 px-3 py-2 md:px-4 md:py-2.5 rounded-full text-white text-xs md:text-sm font-bold transition-all shadow-lg shadow-black/20 active:scale-95 group"
@@ -185,10 +205,6 @@ export default function RaceEvents() {
                   <CreditCard size={16} className="group-hover:text-amber-400 transition-colors"/> 
                   <span className="hidden sm:inline">我的數位 ID 卡</span>
                   <span className="sm:hidden">數位 ID</span>
-                  
-                  <span className="absolute -top-1 -right-1 flex h-4 w-4 md:h-5 md:w-5 items-center justify-center rounded-full bg-red-500 text-[9px] md:text-[10px] font-black text-white border-2 border-slate-900 shadow-sm animate-pulse">
-                      2
-                  </span>
               </button>
           </div>
 

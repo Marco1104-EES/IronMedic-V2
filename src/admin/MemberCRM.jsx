@@ -99,7 +99,8 @@ export default function MemberCRM() {
   const fetchMembers = async () => {
     try {
       setLoading(true)
-      let query = supabase.from('profiles').select('*', { count: 'exact' }).order('created_at', { ascending: false })
+      // 🌟 加入 .limit(5000) 突破 1000 筆預設上限
+      let query = supabase.from('profiles').select('*', { count: 'exact' }).order('created_at', { ascending: false }).limit(5000)
       
       if (currentView === 'COMMAND') query = query.or('role.eq.SUPER_ADMIN,role.eq.TOURNAMENT_DIRECTOR,is_vip.eq.Y')
       else if (currentView === 'ACTIVE') query = query.eq('role', 'VERIFIED_MEDIC').eq('is_current_member', 'Y')
@@ -113,6 +114,7 @@ export default function MemberCRM() {
       
       const from = (page - 1) * ITEMS_PER_PAGE
       const to = from + ITEMS_PER_PAGE - 1
+      // 將 range 改放在最後面
       const { data, count, error } = await query.range(from, to)
       
       if (error) throw error
