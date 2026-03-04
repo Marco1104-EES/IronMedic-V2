@@ -513,7 +513,7 @@ export default function DataImportCenter() {
                   return {
                       ...baseRow,
                       _id: Date.now(),
-                      _status: 'resolved', // 🌟 將狀態改為已解決，才能順利匯入
+                      _status: 'resolved', 
                       _updateData: mergedData, 
                       full_name: mergedData.full_name || baseRow.full_name 
                   };
@@ -523,7 +523,7 @@ export default function DataImportCenter() {
                       newRow._status = 'invalid';
                       newRow._error = !newRow.full_name ? '姓名欄位空白' : '聯絡信箱空白';
                   } else {
-                      newRow._status = 'valid'; // 🌟 將狀態改為正常
+                      newRow._status = 'valid'; 
                   }
                   return newRow;
               }
@@ -618,17 +618,21 @@ export default function DataImportCenter() {
   }
 
   // ==========================================
-  // 🌟 賽事匯入核心邏輯 
+  // 🌟 賽事匯入核心邏輯 (智慧轉換引擎 2026 版)
   // ==========================================
   const handleExecuteRaceUpload = async () => {
       if (!raceFile) return alert("請先選擇賽事建檔表！");
       
       setIsUploadingRace(true);
       setUploadRaceStatus(null);
-      addLog("開始讀取賽事 Excel 檔案...", 'info');
+      addLog(`開始讀取賽事 Excel 檔案: ${raceFile.name}...`, 'info');
 
       try {
-          const rows = await readExcel(raceFile);
+          const data = await raceFile.arrayBuffer()
+          const workbook = XLSX.read(data, { cellDates: true })
+          const worksheet = workbook.Sheets[workbook.SheetNames[0]]
+          const rows = XLSX.utils.sheet_to_json(worksheet, { defval: '' })
+          
           if (rows.length === 0) throw new Error("上傳的檔案沒有資料");
 
           const racesToInsert = [];
@@ -642,37 +646,59 @@ export default function DataImportCenter() {
 
           for (let i = 0; i < rows.length; i++) {
               const row = rows[i];
+              const keys = Object.keys(row);
+              
               try {
-                  const name = row['賽事名稱'] || row.name || '';
-                  if (!name) {
-                      addLog(`警告：第 ${i+2} 行缺少「賽事名稱」，自動略過此筆`, 'warning');
-                      continue;
+                  // 1. 智慧尋找賽事名稱 (解決無表頭問題)
+                  let name = row['賽事名稱'] || row['賽事或活動名稱'] || '';
+                  if (!name && keys.length > 0) {
+                       for(let k of keys) {
+                           if (k.includes('EMPTY') && typeof row[k] === 'string' && row[k].length > 2) {
+                               name = row[k]; break;
+                           }
+                       }
+                       if (!name && typeof row[keys[0]] === 'string') name = row[keys[0]];
                   }
 
-                  let rawDate = row['日期(YYYY-MM-DD)'] || row.date || '';
-                  let location = row['地點'] || row.location || '';
+                  if (!name || name.includes('賽事名稱') || name.includes('賽事或活動日期')) {
+                      continue; 
+                  }
+
+                  // 2. 智慧處理日期
+                  let rawDate = row['日期(YYYY-MM-DD)'] || row['賽事或活動日期'] || row['日期'] || '';
+                  let location = row['地點'] || row['賽事地點'] || '';
                   const imgUrl = row['海報圖片URL'] || row['賽事URL'] || '';
                   
                   let parsedDate = null;
-                  if (rawDate) {
-                      let dateStr = String(rawDate).trim();
-                      if (dateStr.includes('-') && dateStr.includes('/')) dateStr = dateStr.split('-')[0].trim();
-                      dateStr = dateStr.replace(/\//g, '-');
-                      const d = new Date(dateStr);
-                      if (!isNaN(d.getTime())) parsedDate = d.toISOString().split('T')[0];
+                  if (rawDate instanceof Date) {
+                      parsedDate = new Date(rawDate.getTime() - rawDate.getTimezoneOffset() * 60000).toISOString().split('T')[0];
+                  } else if (typeof rawDate === 'number') {
+                      const excelEpoch = new Date(1899, 11, 31);
+                      parsedDate = new Date(excelEpoch.getTime() + rawDate * 86400000).toISOString().split('T')[0];
+                  } else if (typeof rawDate === 'string' && rawDate.length >= 8) {
+                      parsedDate = rawDate.replace(/\//g, '-').trim().substring(0, 10);
                   }
 
                   if (!parsedDate) {
                       parsedDate = '2025-01-01'; 
-                      addLog(`⚠️ 賽事「${name}」日期異常 [${rawDate}]，已暫時代入 2025-01-01 以防崩潰`, 'warning');
+                      addLog(`⚠️ 賽事「${name}」日期異常 [${rawDate}]，已暫時代入 2025-01-01`, 'warning');
                   }
 
                   if (!location || String(location).trim() === '') {
                       location = imgUrl ? "詳見賽事連結" : "地點未定";
                   }
 
+                  // 3. 智慧處理狀態轉換
+                  let rawStatus = String(row['狀態(OPEN/NEGOTIATING/SUBMITTED)'] || row['與主辦單位合作進度'] || '');
+                  let finalStatus = 'OPEN'; 
+                  if (rawStatus.includes('尚未開放') || rawStatus.includes('確認合作') || rawStatus.includes('洽談')) finalStatus = 'NEGOTIATING';
+                  if (rawStatus.includes('名單已送交') || rawStatus.includes('已送交主辦') || rawStatus.includes('名單送出')) finalStatus = 'SUBMITTED';
+                  if (rawStatus.includes('已額滿') || rawStatus.includes('滿編') || rawStatus.includes('已報滿')) finalStatus = 'FULL';
+                  if (['OPEN', 'NEGOTIATING', 'SUBMITTED', 'FULL', 'UPCOMING'].includes(rawStatus)) finalStatus = rawStatus; 
+
                   const participantsMap = new Map(); 
 
+                  // 4. 處理人員
                   for(let j = 1; j <= 40; j++) {
                       const person = row[`參加人員${j}`];
                       if (person && String(person).trim() !== '') {
@@ -711,6 +737,7 @@ export default function DataImportCenter() {
                   assignSpecialRole(sponsor2, '官方代表');
                   assignSpecialRole(sponsor3, '官方代表');
 
+                  // 5. 智慧拔除教官雜訊
                   const instructors = row['教官'] || '';
                   if (instructors) {
                       const lines = String(instructors).split('\n');
@@ -735,10 +762,10 @@ export default function DataImportCenter() {
                   };
 
                   let slotsArray = [];
-                  let totalRequiredInput = parseInt(row['參賽總人數'], 10);
+                  let totalRequiredInput = parseInt(row['參賽總人數'] || row['開放總名額數'] || row['需求人數'], 10);
                   if (isNaN(totalRequiredInput)) totalRequiredInput = 0;
 
-                  const rawSlotsText = row['賽段配置(分組+人數)'] || row['賽段配置(快速語法)'] || '';
+                  const rawSlotsText = row['賽段配置(分組+人數)'] || row['任務賽事名額種類及數量'] || '';
                   
                   if (!rawSlotsText) {
                       slotsArray = [{ 
@@ -752,9 +779,10 @@ export default function DataImportCenter() {
                           ...extraInfo
                       }];
                   } else {
-                      const parts = String(rawSlotsText).split(/[,，、]/);
+                      const parts = String(rawSlotsText).split(/[,，、\n]/);
                       slotsArray = parts.map((part, idx) => {
                           let sName = part.trim();
+                          if(!sName) return null;
                           let cap = 0;
                           let group = '一般組別';
 
@@ -784,7 +812,11 @@ export default function DataImportCenter() {
                               assignee: '',
                               ...extraInfo
                           };
-                      });
+                      }).filter(Boolean);
+                      
+                      if(slotsArray.length === 0) {
+                          slotsArray = [{ id: Date.now(), group: '一般組別', name: '全賽段', capacity: Math.max(1, participantsMap.size, totalRequiredInput), filled: 0, assignee: '' }];
+                      }
                   }
 
                   Array.from(participantsMap.values()).forEach(pData => {
@@ -827,9 +859,9 @@ export default function DataImportCenter() {
                       date: parsedDate, 
                       gather_time: row['鳴槍時間(HH:MM)'] || null,
                       location: location, 
-                      type: row['賽事類型(馬拉松/鐵人三項...)'] || '馬拉松',
-                      image_url: imgUrl,
-                      status: row['狀態(OPEN/NEGOTIATING/SUBMITTED)'] || 'OPEN',
+                      type: row['賽事類型(馬拉松/鐵人三項...)'] || row['賽事類型'] || '路跑＆馬拉松',
+                      image_url: imgUrl || 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&q=80&w=800',
+                      status: finalStatus,
                       is_hot: (row['是否火熱(Y/N)'] === 'Y' || row['是否火熱(Y/N)'] === 'y'),
                       medic_required: finalRequired,
                       medic_registered: participantsMap.size, 

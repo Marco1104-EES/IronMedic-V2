@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { Calendar, MapPin, Users, Plus, Edit, Trash2, Search, Loader2, Flag, Flame, History, CalendarClock, Handshake, Send, Activity, CheckCircle, Download, FileSpreadsheet, X, Clock, Crown, Sprout, UsersRound, ChevronRight, ShieldAlert, XCircle, AlertCircle } from 'lucide-react'
+import { useState, useEffect, useMemo } from 'react'
+import { Calendar, MapPin, Users, Plus, Edit, Trash2, Search, Loader2, Flag, Flame, History, CalendarClock, Handshake, Send, Activity, CheckCircle, Download, FileSpreadsheet, X, Clock, Crown, Sprout, UsersRound, ChevronRight, ShieldAlert, XCircle, AlertCircle, ArrowUpDown } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 import { useNavigate, useLocation } from 'react-router-dom'
 import * as XLSX from 'xlsx' 
@@ -18,6 +18,10 @@ export default function RaceManager() {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedYear, setSelectedYear] = useState('2025') 
   const [previewRace, setPreviewRace] = useState(null)
+  
+  // 🌟 新增：表格智慧操作 State
+  const [dateSortOrder, setDateSortOrder] = useState('desc') // 'asc' 小到大, 'desc' 大到小
+  const [statusFilter, setStatusFilter] = useState('ALL') // 下拉選單的狀態過濾
   
   const navigate = useNavigate()
   const location = useLocation()
@@ -39,7 +43,8 @@ export default function RaceManager() {
   const fetchRaces = async () => {
     setLoading(true)
     try {
-      const { data, error } = await supabase.from('races').select('*').order('date', { ascending: false }) 
+      // 在前端處理排序，所以先不依賴 supabase 的 order，確保抓取完整資料
+      const { data, error } = await supabase.from('races').select('*')
       if (error) throw error
       setRaces(data || [])
     } catch (error) {
@@ -62,7 +67,6 @@ export default function RaceManager() {
     }
   }
 
-  // 🌟 提取參與者資料，並加上 slotId 供後續更新使用
   const extractParticipantsData = (race) => {
       let totalRegistered = 0;
       let participantDetails = [];
@@ -79,7 +83,7 @@ export default function RaceManager() {
                               const parsedUser = JSON.parse(item);
                               if(parsedUser && parsedUser.name) {
                                   participantDetails.push({
-                                      id: parsedUser.id || parsedUser.name, // 必須要有識別 ID
+                                      id: parsedUser.id || parsedUser.name, 
                                       name: parsedUser.name,
                                       timestamp: parsedUser.timestamp || '10:00:00:000', 
                                       isVip: parsedUser.isVip || false, 
@@ -87,7 +91,7 @@ export default function RaceManager() {
                                       roleTag: parsedUser.roleTag || null,
                                       slotGroup: slot.group,
                                       slotName: slot.name,
-                                      slotId: slot.id, // 🌟 關鍵：記錄這個人屬於哪個賽段
+                                      slotId: slot.id, 
                                       isLegacy: parsedUser.isLegacy || false
                                   });
                               }
@@ -185,9 +189,9 @@ export default function RaceManager() {
   }
 
   const handleExportMasterSchedule = () => {
-      if (filteredRaces.length === 0) return alert("目前沒有賽事可以匯出！");
+      if (filteredAndSortedRaces.length === 0) return alert("目前沒有賽事可以匯出！");
 
-      const exportData = filteredRaces.map(race => {
+      const exportData = filteredAndSortedRaces.map(race => {
           const extraInfo = (race.slots_data && race.slots_data[0]) ? race.slots_data[0] : {};
           
           let allAssignees = [];
@@ -249,11 +253,11 @@ export default function RaceManager() {
           return alert('⚠️ 為防止大範圍誤刪，請先點選上方「特定的年份 (例如 2025)」，再執行清空操作。');
       }
 
-      if (filteredRaces.length === 0) {
+      if (filteredAndSortedRaces.length === 0) {
           return alert(`目前畫面上沒有 ${selectedYear} 年的賽事可以清空。`);
       }
 
-      const confirm1 = window.confirm(`☢️ 【危險操作警告】\n\n您即將刪除目前畫面上這 ${filteredRaces.length} 筆「${selectedYear} 年度」的賽事資料！\n\n⚠️ 刪除後該年度所有報名資料將永遠消失，確定要繼續嗎？`);
+      const confirm1 = window.confirm(`☢️ 【危險操作警告】\n\n您即將刪除目前畫面上這 ${filteredAndSortedRaces.length} 筆「${selectedYear} 年度」的賽事資料！\n\n⚠️ 刪除後該年度所有報名資料將永遠消失，確定要繼續嗎？`);
       if (!confirm1) return;
 
       const confirm2 = window.prompt(`🔒 安全鎖：為了防止誤觸，請在下方輸入大寫的「DELETE-${selectedYear}」以確認執行清空：`);
@@ -263,7 +267,7 @@ export default function RaceManager() {
 
       setLoading(true);
       try {
-          const idsToDelete = filteredRaces.map(r => r.id);
+          const idsToDelete = filteredAndSortedRaces.map(r => r.id);
           const BATCH_SIZE = 100;
           for (let i = 0; i < idsToDelete.length; i += BATCH_SIZE) {
               const chunk = idsToDelete.slice(i, i + BATCH_SIZE);
@@ -279,14 +283,11 @@ export default function RaceManager() {
       }
   }
 
-  // 🌟 新增：在總覽名單 Modal 中直接變更人員角色
   const handleSetRoleFromModal = async (raceId, slotId, participantId, newRole) => {
       try {
-          // 1. 取得當下最新的賽事資料
           const { data: currentRace, error: fetchError } = await supabase.from('races').select('slots_data').eq('id', raceId).single();
           if (fetchError) throw fetchError;
 
-          // 2. 更新特定的 slot 裡面的 assignee
           const updatedSlots = currentRace.slots_data.map(slot => {
               if (slot.id === slotId && slot.assignee) {
                   const assignees = slot.assignee.split('|').map(item => {
@@ -297,7 +298,6 @@ export default function RaceManager() {
                           }
                           return item;
                       } catch(e) { 
-                          // 處理舊格式：將純文字轉換為 JSON 物件並賦予角色
                           if (item.trim().split(' #')[0] === participantId) {
                               return JSON.stringify({
                                   id: participantId,
@@ -315,14 +315,11 @@ export default function RaceManager() {
               return slot;
           });
 
-          // 3. 寫回資料庫
           const { error: updateError } = await supabase.from('races').update({ slots_data: updatedSlots }).eq('id', raceId);
           if (updateError) throw updateError;
 
-          // 4. 同步更新前端狀態
           setRaces(races.map(r => r.id === raceId ? { ...r, slots_data: updatedSlots } : r));
           
-          // 5. 即時更新打開著的 Modal 畫面
           setPreviewRace(prev => {
               if (prev.id !== raceId) return prev;
               const newParticipants = prev.participants.map(p => {
@@ -339,23 +336,54 @@ export default function RaceManager() {
       }
   }
 
-  const filteredRaces = races.filter(race => {
-    if(!race.date) return false;
-    const raceYear = new Date(race.date).getFullYear()
-    const matchSearch = race.name.toLowerCase().includes(searchTerm.toLowerCase()) || race.location.toLowerCase().includes(searchTerm.toLowerCase())
-    
-    let matchYear = false
-    if (selectedYear === 'ALL') matchYear = true
-    else if (selectedYear === 'HISTORY_ALL') matchYear = raceYear < CURRENT_YEAR 
-    else if (selectedYear === 'FUTURE_ALL') matchYear = raceYear > CURRENT_YEAR 
-    else matchYear = raceYear.toString() === selectedYear.toString() 
+  // 🌟 核心升級：加入智慧過濾與排序邏輯
+  const filteredAndSortedRaces = useMemo(() => {
+      // 1. 基本條件過濾 (年份、搜尋字串)
+      let filtered = races.filter(race => {
+          if(!race.date) return false;
+          const raceYear = new Date(race.date).getFullYear()
+          const matchSearch = race.name.toLowerCase().includes(searchTerm.toLowerCase()) || race.location.toLowerCase().includes(searchTerm.toLowerCase())
+          
+          let matchYear = false
+          if (selectedYear === 'ALL') matchYear = true
+          else if (selectedYear === 'HISTORY_ALL') matchYear = raceYear < CURRENT_YEAR 
+          else if (selectedYear === 'FUTURE_ALL') matchYear = raceYear > CURRENT_YEAR 
+          else matchYear = raceYear.toString() === selectedYear.toString() 
 
-    return matchSearch && matchYear
-  })
+          // 2. 加入下拉狀態過濾
+          let matchStatus = true;
+          if (statusFilter !== 'ALL') {
+             matchStatus = (race.status === statusFilter);
+          }
 
-  const statusCounts = filteredRaces.reduce((acc, race) => {
-      const status = race.status || 'OPEN';
-      acc[status] = (acc[status] || 0) + 1;
+          return matchSearch && matchYear && matchStatus;
+      });
+
+      // 3. 日期排序 (小到大 or 大到小)
+      filtered.sort((a, b) => {
+          const dateA = new Date(a.date).getTime();
+          const dateB = new Date(b.date).getTime();
+          if (dateSortOrder === 'asc') return dateA - dateB;
+          return dateB - dateA;
+      });
+
+      return filtered;
+  }, [races, searchTerm, selectedYear, statusFilter, dateSortOrder, CURRENT_YEAR]);
+
+  const statusCounts = races.reduce((acc, race) => {
+      // 在統計上方方塊數字時，我們只看「目前選定年份」的數量，不受下拉過濾影響
+      if (!race.date) return acc;
+      const raceYear = new Date(race.date).getFullYear();
+      let matchYear = false;
+      if (selectedYear === 'ALL') matchYear = true;
+      else if (selectedYear === 'HISTORY_ALL') matchYear = raceYear < CURRENT_YEAR;
+      else if (selectedYear === 'FUTURE_ALL') matchYear = raceYear > CURRENT_YEAR;
+      else matchYear = raceYear.toString() === selectedYear.toString();
+      
+      if (matchYear) {
+          const status = race.status || 'OPEN';
+          acc[status] = (acc[status] || 0) + 1;
+      }
       return acc;
   }, { 'OPEN': 0, 'NEGOTIATING': 0, 'SUBMITTED': 0, 'FULL': 0, 'CANCELLED': 0, 'SHORTAGE': 0 });
 
@@ -456,10 +484,35 @@ export default function RaceManager() {
               <table className="w-full text-left border-collapse min-w-[800px] relative">
                   <thead className="bg-slate-50 text-slate-500 text-[10px] md:text-xs uppercase tracking-wider sticky top-0 z-10 shadow-sm">
                       <tr>
-                          <th className="p-3 md:p-4 font-bold bg-slate-50">賽事名稱</th>
-                          <th className="p-3 md:p-4 font-bold bg-slate-50">日期</th>
+                          <th className="p-3 md:p-4 font-bold bg-slate-50 w-1/3">賽事名稱</th>
+                          
+                          {/* 🌟 智慧排序標題：日期 */}
+                          <th className="p-3 md:p-4 font-bold bg-slate-50 hover:bg-slate-100 cursor-pointer select-none transition-colors group" onClick={() => setDateSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}>
+                              <div className="flex items-center gap-1.5">
+                                  日期
+                                  <ArrowUpDown size={14} className={`text-slate-300 group-hover:text-blue-500 transition-colors ${dateSortOrder === 'asc' ? 'text-blue-500' : ''}`} />
+                              </div>
+                          </th>
+                          
                           <th className="p-3 md:p-4 font-bold bg-slate-50">地點</th>
-                          <th className="p-3 md:p-4 font-bold bg-slate-50">狀態</th>
+                          
+                          {/* 🌟 智慧過濾標題：狀態下拉選單 */}
+                          <th className="p-3 md:p-4 font-bold bg-slate-50">
+                              <select 
+                                  className="bg-transparent border-none text-[10px] md:text-xs font-bold text-slate-500 uppercase cursor-pointer outline-none hover:text-blue-600 focus:text-blue-600 transition-colors -ml-1"
+                                  value={statusFilter}
+                                  onChange={(e) => setStatusFilter(e.target.value)}
+                              >
+                                  <option value="ALL">狀態 (全部)</option>
+                                  <option value="OPEN">招募中</option>
+                                  <option value="NEGOTIATING">洽談中</option>
+                                  <option value="SUBMITTED">已送名單</option>
+                                  <option value="FULL">滿編</option>
+                                  <option value="CANCELLED">無合作/停辦</option>
+                                  <option value="SHORTAGE">招不到人</option>
+                              </select>
+                          </th>
+                          
                           <th className="p-3 md:p-4 font-bold bg-slate-50">報名進度</th>
                           <th className="p-3 md:p-4 font-bold text-right bg-slate-50">操作</th>
                       </tr>
@@ -467,10 +520,10 @@ export default function RaceManager() {
                   <tbody className="divide-y divide-slate-100">
                       {loading ? (
                           <tr><td colSpan="6" className="text-center py-10 text-slate-500"><Loader2 className="animate-spin mx-auto mb-2"/> 載入資料中...</td></tr>
-                      ) : filteredRaces.length === 0 ? (
+                      ) : filteredAndSortedRaces.length === 0 ? (
                           <tr><td colSpan="6" className="text-center py-12 text-slate-500 font-medium bg-slate-50/50 text-sm">此區間無符合條件的賽事紀錄</td></tr>
                       ) : (
-                          filteredRaces.map((race) => {
+                          filteredAndSortedRaces.map((race) => {
                               const { totalRegistered, participantDetails } = extractParticipantsData(race);
                               const isFull = totalRegistered >= race.medic_required && race.medic_required > 0;
                               
@@ -539,7 +592,6 @@ export default function RaceManager() {
           </div>
       </div>
 
-      {/* 🌟 預覽 Modal 升級：支援直接下拉指定教官身分 */}
       {previewRace && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-fade-in" onClick={() => setPreviewRace(null)}>
               <div className="bg-white rounded-[2rem] shadow-2xl max-w-lg w-full p-6 md:p-8 animate-bounce-in flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
@@ -573,7 +625,6 @@ export default function RaceManager() {
                                   </div>
                               </div>
 
-                              {/* 🌟 Modal 內建教官指派選單 */}
                               <div className="flex items-center gap-2 sm:ml-auto">
                                   <select 
                                       className={`text-xs font-bold p-1.5 rounded-lg border outline-none cursor-pointer transition-colors ${p.roleTag ? 'bg-amber-50 text-amber-700 border-amber-300 shadow-sm' : 'bg-white text-slate-500 border-slate-200 hover:border-blue-400'}`}

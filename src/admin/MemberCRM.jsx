@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 import DigitalIdCard from '../components/DigitalIdCard' 
 import * as XLSX from 'xlsx' 
-import { Search, Trash2, Edit, User, X, Shield, CheckSquare, Square, FileSpreadsheet, Upload, Download, Save, AlertCircle, Settings, ExternalLink, Zap, Crown, Flame, Cloud, Loader2, Ban, ShieldAlert, ShoppingCart, PlusCircle, ArrowUpDown, ChevronUp, ChevronDown, Users, Award } from 'lucide-react'
+import { Search, Trash2, Edit, User, X, Shield, CheckSquare, Square, FileSpreadsheet, Upload, Download, Save, AlertCircle, Settings, ExternalLink, Zap, Crown, Flame, Cloud, Loader2, Ban, ShieldAlert, ShoppingCart, PlusCircle, ArrowUpDown, ChevronUp, ChevronDown, Users, Award, CheckCircle, XCircle } from 'lucide-react'
 
 export default function MemberCRM() {
   const [members, setMembers] = useState([])
@@ -70,7 +70,7 @@ export default function MemberCRM() {
       navigate(`/admin/members?view=${targetView}`)
   }
 
-  // --- 📊 V10.7 終極精準統計 (直接調用資料庫原生 Count) ---
+  // 🌟 精準統計：取消 ACTIVE 必須是「當屆會員」的嚴格限制，把非當屆醫護鐵人救回來
   const fetchGlobalStats = async () => {
       try {
           const [
@@ -81,8 +81,8 @@ export default function MemberCRM() {
           ] = await Promise.all([
               supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'SUPER_ADMIN'),
               supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'TOURNAMENT_DIRECTOR'),
-              supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'VERIFIED_MEDIC'),
-              supabase.from('profiles').select('*', { count: 'exact', head: true }).or('role.eq.USER,role.is.null') // 確保空白也會被算進 USER
+              supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'VERIFIED_MEDIC'), // 🌟 移除了 .eq('is_current_member', 'Y')
+              supabase.from('profiles').select('*', { count: 'exact', head: true }).or('role.eq.USER,role.is.null') 
           ])
 
           setRoleStats({
@@ -99,14 +99,13 @@ export default function MemberCRM() {
   const fetchMembers = async () => {
     try {
       setLoading(true)
-      // 🌟 加入 .limit(5000) 突破 1000 筆預設上限
-      let query = supabase.from('profiles').select('*', { count: 'exact' }).order('created_at', { ascending: false }).limit(5000)
+      let query = supabase.from('profiles').select('*', { count: 'exact' }).order('created_at', { ascending: false })
       
       if (currentView === 'COMMAND') query = query.or('role.eq.SUPER_ADMIN,role.eq.TOURNAMENT_DIRECTOR,is_vip.eq.Y')
-      else if (currentView === 'ACTIVE') query = query.eq('role', 'VERIFIED_MEDIC').eq('is_current_member', 'Y')
-      else if (currentView === 'RESERVE') query = query.or('is_new_member.eq.Y,training_status.eq.N').neq('role', 'SUPER_ADMIN')
+      else if (currentView === 'ACTIVE') query = query.eq('role', 'VERIFIED_MEDIC') // 🌟 核心修正：只要是醫護鐵人就撈出來，不再強迫必須繳費
+      else if (currentView === 'RESERVE') query = query.or('role.eq.USER,role.is.null')
       else if (currentView === 'RISK') query = query.lt('license_expiry', new Date().toISOString().slice(0,10))
-      else if (currentView === 'BLACKLIST') query = query.or('is_blacklisted.eq.Y,role.eq.USER')
+      else if (currentView === 'BLACKLIST') query = query.eq('is_blacklisted', 'Y')
 
       if (searchTerm) {
           query = query.or(`email.ilike.%${searchTerm}%,full_name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%`)
@@ -114,7 +113,6 @@ export default function MemberCRM() {
       
       const from = (page - 1) * ITEMS_PER_PAGE
       const to = from + ITEMS_PER_PAGE - 1
-      // 將 range 改放在最後面
       const { data, count, error } = await query.range(from, to)
       
       if (error) throw error
@@ -145,16 +143,12 @@ export default function MemberCRM() {
   const handleSaveMember = async () => {
       if (!editingMember) return
       try {
-          // 清除可能干擾資料庫寫入的附加欄位
           const { count, _exact, ...cleanData } = editingMember;
 
           const { error } = await supabase.from('profiles').update(cleanData).eq('id', editingMember.id)
           if (error) throw error
           
-          // 先關閉視窗，讓使用者不用等
           setIsEditModalOpen(false)
-          
-          // 立刻同步更新表格與上方數字卡片
           await fetchGlobalStats() 
           await fetchMembers()
           
@@ -281,7 +275,7 @@ export default function MemberCRM() {
                     全部人員總表 
                     <span className="text-xs px-2 py-1 rounded text-white bg-blue-600">{currentView}</span>
                 </h1>
-                <p className="text-sm text-slate-500">MemberCRM V10.7 即時連動版</p>
+                <p className="text-sm text-slate-500">MemberCRM V10.8 智慧解鎖版</p>
             </div>
             <div className="flex gap-2">
                  <button onClick={() => navigate('/admin/import')} className="px-4 py-2 bg-slate-100 text-slate-600 rounded-lg font-bold hover:bg-slate-200 shadow-sm flex items-center gap-1"><FileSpreadsheet size={16}/> 前往匯入中心</button>
@@ -397,8 +391,15 @@ export default function MemberCRM() {
 
                          {columnGroups.group2_event && <td className="p-4">
                              {renderPriorityIcon(member)}
-                             <div className="text-xs mt-1 text-slate-400 flex gap-1">
-                                 {member.role} | 積分:{getPriorityScore(member)}
+                             <div className="flex gap-2 items-center mt-1">
+                                 {member.is_current_member === 'Y' ? (
+                                     <span className="text-[10px] text-green-600 bg-green-100 px-1.5 rounded flex items-center gap-0.5 font-bold"><CheckCircle size={10}/>當屆</span>
+                                 ) : (
+                                     <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 rounded flex items-center gap-0.5 font-medium"><XCircle size={10}/>非當屆</span>
+                                 )}
+                                 <div className="text-xs text-slate-400 flex gap-1">
+                                     {member.role} | 積分:{getPriorityScore(member)}
+                                 </div>
                              </div>
                          </td>}
 
@@ -417,6 +418,13 @@ export default function MemberCRM() {
                 )})}
             </tbody>
          </table>
+      </div>
+
+      {/* 分頁控制 */}
+      <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-200 mt-4">
+          <button disabled={page === 1} onClick={() => setPage(p => p - 1)} className="px-4 py-2 bg-slate-100 rounded hover:bg-slate-200 disabled:opacity-50 font-bold text-slate-600">上一頁</button>
+          <span className="font-bold text-slate-600">第 {page} / {totalPages || 1} 頁</span>
+          <button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)} className="px-4 py-2 bg-slate-100 rounded hover:bg-slate-200 disabled:opacity-50 font-bold text-slate-600">下一頁</button>
       </div>
 
       {/* ✏️ 整合數位 ID 卡的編輯視窗 */}

@@ -4,7 +4,7 @@ import {
     Activity, Crown, Sprout, Loader2, CreditCard, LogOut, QrCode, CheckCircle, 
     XCircle, ShieldAlert, Bell, X, Flag, User, Phone, HeartPulse, Shirt, Car, 
     Award, Fingerprint, Target, MousePointerClick, Edit3, Send, Check, Save, 
-    ListOrdered, Trash2
+    ListOrdered, Trash2, Zap
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
@@ -229,11 +229,22 @@ export default function DigitalID() {
       </div>
   )
 
+  // 🌟 智慧判斷生理性別
+  const getGenderFromID = (nationalId) => {
+      if (!nationalId || nationalId.length < 2) return null;
+      const secondChar = nationalId.charAt(1);
+      if (secondChar === '1') return { text: '♂ 男', color: 'bg-blue-500/20 text-blue-300 border-blue-500/50' };
+      if (secondChar === '2') return { text: '♀ 女', color: 'bg-pink-500/20 text-pink-300 border-pink-500/50' };
+      return null;
+  }
+
   const displayUser = profile;
 
   if (loadingProfile || !displayUser) {
       return <div className="min-h-screen flex items-center justify-center bg-slate-50"><Loader2 className="animate-spin text-blue-500" size={48}/></div>
   }
+
+  const genderTag = getGenderFromID(displayUser.national_id);
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans pb-24 animate-fade-in flex flex-col relative overflow-x-hidden">
@@ -273,7 +284,15 @@ export default function DigitalID() {
                           {displayUser.full_name?.charAt(0) || '?'}
                       </div>
                       <div>
-                          <h2 className="text-2xl md:text-3xl font-black text-white mb-1">{displayUser.full_name}</h2>
+                          {/* 🌟 姓名與生理性別標籤 */}
+                          <div className="flex items-center gap-2 mb-1">
+                              <h2 className="text-2xl md:text-3xl font-black text-white">{displayUser.full_name}</h2>
+                              {genderTag && (
+                                  <span className={`border text-[10px] font-black px-2 py-0.5 rounded-full ${genderTag.color}`}>
+                                      {genderTag.text}
+                                  </span>
+                              )}
+                          </div>
                           <div className="text-blue-300 font-mono text-sm tracking-widest">{displayUser.ironmedic_no || 'IM-XXXX-XXX'}</div>
                       </div>
                   </div>
@@ -282,12 +301,19 @@ export default function DigitalID() {
                   </button>
               </div>
 
+              {/* 🌟 5 大報名權限徽章區 */}
               <div className="flex flex-wrap gap-2 relative z-10">
-                  {displayUser.is_vip === 'Y' && <span className="bg-amber-400 text-amber-900 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><Crown size={12}/> VIP</span>}
-                  {displayUser.is_team_leader === 'Y' && <span className="bg-blue-500 text-white text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><ShieldAlert size={12}/> 帶隊官</span>}
+                  {displayUser.is_vip === 'Y' && <span className="bg-amber-400 text-amber-900 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1 shadow-lg shadow-amber-400/20"><Crown size={12}/> VIP</span>}
+                  
+                  {displayUser.is_team_leader === 'Y' && <span className="bg-blue-500 text-white text-xs font-black px-3 py-1 rounded-full flex items-center gap-1 shadow-lg shadow-blue-500/20"><ShieldAlert size={12}/> 帶隊教官</span>}
+                  
+                  {displayUser.is_new_member === 'Y' && <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/50 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><Sprout size={12}/> 新人</span>}
+                  
+                  {displayUser.training_status === 'Y' && <span className="bg-purple-500/20 text-purple-300 border border-purple-500/50 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><Zap size={12}/> 優先報名</span>}
+                  
                   {displayUser.is_current_member === 'Y' ? 
                       <span className="bg-green-500/20 text-green-400 border border-green-500/50 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><CheckCircle size={12}/> 有效會員</span> : 
-                      <span className="bg-red-500/20 text-red-400 border border-red-500/50 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><XCircle size={12}/> 非會員</span>
+                      <span className="bg-red-500/20 text-red-400 border border-red-500/50 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><XCircle size={12}/> 非當屆會員</span>
                   }
               </div>
           </div>
