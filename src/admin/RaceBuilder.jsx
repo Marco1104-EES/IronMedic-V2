@@ -188,7 +188,6 @@ export default function RaceBuilder() {
 
   if (isFetchingData) return <div className="h-64 flex items-center justify-center text-slate-500"><Loader2 className="animate-spin mr-2"/> 讀取賽事資料中...</div>
 
-  // 🌟 擴充六種狀態的圖示
   const renderStatusIcon = (status) => {
       switch(status) {
           case 'OPEN': return <Activity size={16} className="text-green-500"/>;
@@ -222,9 +221,11 @@ export default function RaceBuilder() {
           <div>
               <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
                   {editId ? <Edit3 className="text-amber-500"/> : <Flag className="text-blue-600"/>}
-                  {editId ? '編輯任務情報' : '建立新任務'} 
+                  {/* 🌟 修正3：編輯任務情報 => 編輯賽事資訊 */}
+                  {editId ? '編輯賽事資訊' : '建立新任務'} 
               </h2>
-              <p className="text-slate-500 text-sm mt-1">{editId ? '修改賽事屬性與排班名額，儲存後將即時生效。' : '請在此設定賽事的基本資訊、屬性，並規劃各組別的賽段與人力需求。'}</p>
+              {/* 🌟 修正3：說明文字更新 */}
+              <p className="text-slate-500 text-sm mt-1">{editId ? '修改賽事內容與組別名額，儲存後將即時生效。' : '請在此設定賽事的基本資訊、屬性，並規劃各組別的賽段與人力需求。'}</p>
           </div>
           <button onClick={handleSaveRace} disabled={isSubmitting} className={`px-8 py-3 rounded-xl font-black shadow-lg transition-all flex items-center gap-2 ${isSubmitting ? 'bg-slate-400 text-white cursor-not-allowed' : editId ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-amber-500/30' : 'bg-slate-900 hover:bg-blue-600 text-white'}`}>
               {isSubmitting ? <><Loader2 className="animate-spin" size={18}/> 儲存中...</> : <><Save size={18}/> {editId ? '確認並更新賽事' : '簽署並發佈賽事'}</>}
@@ -288,7 +289,6 @@ export default function RaceBuilder() {
                               <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
                                   {renderStatusIcon(raceData.status)}
                               </div>
-                              {/* 🌟 擴充至六種狀態選項 */}
                               <select className="w-full border border-slate-300 py-2.5 pl-9 pr-4 rounded-lg outline-none font-bold cursor-pointer hover:border-blue-400 transition-colors bg-white appearance-none" value={raceData.status} onChange={e => setRaceData({...raceData, status: e.target.value})}>
                                   <option value="OPEN">🟢 招募中 (開放報名)</option>
                                   <option value="NEGOTIATING">🤝 洽談中 (意願收集/預備)</option>
@@ -361,7 +361,6 @@ export default function RaceBuilder() {
                                                   </div>
                                                   
                                                   <div className="flex items-center gap-2">
-                                                      {/* 🌟 自由指定教官身份 */}
                                                       <select 
                                                           className={`text-xs font-bold p-1 rounded border outline-none ${p.roleTag ? 'bg-amber-50 text-amber-700 border-amber-300' : 'bg-white text-slate-500 border-slate-300'}`}
                                                           value={p.roleTag || ""}

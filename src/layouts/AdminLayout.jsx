@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Outlet, useNavigate, useLocation, Link } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
-// 🌟 引入 Home 圖示，用作返回大廳按鈕
 import { LayoutDashboard, Users, LogOut, Loader2, ShieldAlert, ShieldCheck, UserPlus, AlertTriangle, Ban, ServerCog, UploadCloud, Flag, History, CalendarClock, Menu, X, Crown, Home } from 'lucide-react'
 
 // 🌟 定義四大後台通行權限
@@ -73,7 +72,8 @@ export default function AdminLayout() {
       { 
           title: "系統總覽",
           items: [
-              { path: '/admin/dashboard', icon: <LayoutDashboard size={18}/>, label: '營運數據儀表板' }
+              // 🌟 修正1：營運數據儀表板 => 醫鐵數據儀表板
+              { path: '/admin/dashboard', icon: <LayoutDashboard size={18}/>, label: '醫鐵數據儀表板' }
           ]
       },
       {
@@ -90,7 +90,8 @@ export default function AdminLayout() {
           items: [
               { path: '/admin/members', view: null, icon: <Users size={18}/>, label: '全部人員總表' },
               { path: '/admin/members', view: 'COMMAND', icon: <ShieldAlert size={18}/>, label: '🅰️ 核心幹部 (VIP)' },
-              { path: '/admin/members', view: 'ACTIVE', icon: <ShieldCheck size={18}/>, label: '🅱️ 活躍醫護會員' },
+              // 🌟 修正1：活躍醫護會員 => 活躍醫鐵會員
+              { path: '/admin/members', view: 'ACTIVE', icon: <ShieldCheck size={18}/>, label: '🅱️ 活躍醫鐵會員' },
               { path: '/admin/members', view: 'RESERVE', icon: <UserPlus size={18}/>, label: '🆎 新人及未滿10場' },
               { path: '/admin/members', view: 'RISK', icon: <AlertTriangle size={18}/>, label: '⚠️ 異常觀察名單' },
               { path: '/admin/members', view: 'BLACKLIST', icon: <Ban size={18}/>, label: '⛔ 停權黑名單' },
@@ -137,7 +138,6 @@ export default function AdminLayout() {
               <span className="font-bold text-white tracking-wider">IRON MEDIC</span>
           </div>
 
-          {/* 🌟 修正：動態顯示真實身分名稱，取代寫死的 SUPER ADMIN MODE */}
           <div className="bg-blue-900/50 p-2 text-center text-xs text-blue-200 font-bold border-b border-blue-800 mt-16 lg:mt-0 shrink-0">
               🛡️ {userRole === 'SUPER_ADMIN' ? 'SUPER ADMIN MODE' : userRole.replace('_', ' ')}
           </div>
@@ -182,7 +182,6 @@ export default function AdminLayout() {
               )}
           </nav>
 
-          {/* 🌟 修正：補上返回賽事大廳按鈕，維持相同設計風格 */}
           <div className="p-4 border-t border-slate-800 sticky bottom-0 bg-slate-900 shrink-0 space-y-2">
               <button onClick={() => navigate('/races')} className="flex items-center gap-3 px-3 py-3 w-full rounded-xl hover:bg-slate-800 hover:text-white transition-colors text-sm font-bold text-slate-400">
                   <Home size={18}/> 返回賽事大廳

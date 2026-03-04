@@ -39,14 +39,15 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [errorMsg, setErrorMsg] = useState(null)
   
-  // 🌟 人員數據狀態
+  const [isMounted, setIsMounted] = useState(false)
+  
   const [memberStats, setMemberStats] = useState({
       total: 0,
+      currentYearTotal: 0, // 🌟 新增當屆會員統計
       genderData: [],
       cityData: []
   })
 
-  // 🌟 賽事數據狀態
   const [raceStats, setRaceStats] = useState({
       currentYearTotal: 0,
       pastTotal: 0,
@@ -55,6 +56,7 @@ export default function Dashboard() {
   })
 
   useEffect(() => {
+      setIsMounted(true)
       fetchDashboardData()
   }, [])
 
@@ -62,20 +64,33 @@ export default function Dashboard() {
       setLoading(true)
       setErrorMsg(null)
       try {
-          const { data: profiles, error: profileError } = await supabase
-              .from('profiles')
-              .select('national_id, address')
-              .limit(5000)
+          // 🚀 終極效能大升級：使用 Promise.all 讓「人員」與「賽事」同時抓取，省下一半的網路等待時間！
+          // 🛡️ 封印解除：上限拉高到 10000 筆，並嚴格只抓取我們需要的欄位，節省手機網路流量！
+          const [
+              { data: profiles, error: profileError },
+              { data: races, error: raceError }
+          ] = await Promise.all([
+              supabase.from('profiles').select('national_id, address, is_current_member').limit(10000),
+              supabase.from('races').select('date, type, medic_registered, status').limit(10000)
+          ]);
 
           if (profileError) throw profileError;
+          if (raceError) throw raceError;
 
           let maleCount = 0;
           let femaleCount = 0;
           let unknownGender = 0;
+          let currentYearCount = 0;
           const cityCounts = {};
 
           if (profiles) {
               profiles.forEach(p => {
+                  // 🌟 計算當屆會員
+                  if (p.is_current_member === 'Y') {
+                      currentYearCount++;
+                  }
+
+                  // 判斷性別
                   let gender = '未知';
                   if (p.national_id && typeof p.national_id === 'string' && p.national_id.length >= 2) {
                       const secondChar = p.national_id.charAt(1);
@@ -87,6 +102,7 @@ export default function Dashboard() {
                   else if (gender === '女') femaleCount++;
                   else unknownGender++;
 
+                  // 判斷城市
                   if (p.address && typeof p.address === 'string' && p.address.length >= 2) {
                       const city = p.address.substring(0, 2);
                       if (cityCoordinates[city]) {
@@ -98,6 +114,7 @@ export default function Dashboard() {
 
           setMemberStats({
               total: profiles?.length || 0,
+              currentYearTotal: currentYearCount, // 🌟 寫入當屆會員數
               genderData: [
                   { name: '男性', value: maleCount, color: '#3b82f6' },
                   { name: '女性', value: femaleCount, color: '#ec4899' },
@@ -111,13 +128,6 @@ export default function Dashboard() {
           });
 
           const currentYear = new Date().getFullYear();
-          const { data: races, error: raceError } = await supabase
-              .from('races')
-              .select('date, type, medic_registered, status')
-              .limit(5000)
-
-          if (raceError) throw raceError;
-
           let cyTotal = 0;
           let pTotal = 0;
           const cyTypes = {};
@@ -171,7 +181,7 @@ export default function Dashboard() {
       <div className="p-8 text-center text-slate-500 font-bold animate-pulse flex flex-col items-center justify-center min-h-[50vh]">
           <Loader2 className="animate-spin mb-4 text-blue-500" size={40}/> 
           <div className="text-lg">智慧戰情室數據演算中...</div>
-          <div className="text-sm font-normal mt-2 opacity-70">正在分析 1000+ 筆跨年度資料，請稍候</div>
+          <div className="text-sm font-normal mt-2 opacity-70">啟動非同步極速引擎分析資料，請稍候</div>
       </div>
   )
 
@@ -187,13 +197,18 @@ export default function Dashboard() {
   return (
     <div className="space-y-6 md:space-y-8 animate-fade-in-up pb-20 w-full overflow-x-hidden">
       
-      {/* 🚀 區塊一：核心指標 */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+        
+        {/* 🌟 修改點：當屆(2026)會員數 / 全醫鐵會員數 */}
         <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-6 md:p-8 rounded-[2rem] shadow-xl text-white relative overflow-hidden group hover:scale-[1.02] transition-transform">
             <div className="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform"><Users size={120} /></div>
             <div className="relative z-10">
-                <h3 className="text-slate-300 font-bold mb-2 flex items-center gap-2"><Users size={20}/> 實際會員狀態</h3>
-                <div className="text-5xl md:text-6xl font-black tracking-tight">{memberStats.total} <span className="text-xl text-slate-400 font-medium">人</span></div>
+                <h3 className="text-slate-300 font-bold mb-2 flex items-center gap-2 text-sm"><Users size={20}/> 當屆({new Date().getFullYear()}) / 全醫鐵會員數</h3>
+                <div className="flex items-baseline gap-2">
+                    <span className="text-5xl md:text-6xl font-black tracking-tight">{memberStats.currentYearTotal}</span>
+                    <span className="text-xl md:text-2xl font-bold text-slate-400">/ {memberStats.total}</span>
+                    <span className="text-sm text-slate-500 font-medium ml-1 hidden sm:inline">人</span>
+                </div>
             </div>
         </div>
 
@@ -216,43 +231,42 @@ export default function Dashboard() {
         <div className="bg-gradient-to-br from-emerald-500 to-green-600 p-6 md:p-8 rounded-[2rem] shadow-xl text-white relative overflow-hidden group hover:scale-[1.02] transition-transform">
             <div className="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform"><Award size={120} /></div>
             <div className="relative z-10">
-                <h3 className="text-green-100 font-bold mb-2 flex items-center gap-2"><Award size={20}/> 歷史累積動員</h3>
+                <h3 className="text-green-100 font-bold mb-2 flex items-center gap-2"><Award size={20}/> 累積參賽人次</h3>
                 <div className="text-5xl md:text-6xl font-black tracking-tight">{raceStats.historicalTotalRegistered} <span className="text-xl text-green-200 font-medium">人次</span></div>
             </div>
         </div>
       </div>
 
-      {/* 🚀 區塊二：人員輪廓深度解析 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
           
           <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-100 flex flex-col overflow-hidden">
-              <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-slate-800"><MapIcon className="text-blue-600"/> 戰力分佈 (台灣戰區)</h3>
+              <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-slate-800"><MapIcon className="text-blue-600"/> 醫鐵人員分佈</h3>
               <div className="w-full h-[400px] rounded-xl overflow-hidden z-0 relative border border-slate-200 bg-slate-50">
-                  <MapContainer 
-                    center={[23.7, 120.95]} 
-                    zoom={7.5} 
-                    minZoom={7} 
-                    maxBounds={taiwanBounds} 
-                    maxBoundsViscosity={1.0} 
-                    style={{ height: '100%', width: '100%' }}
-                  >
-                      <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                      {memberStats.cityData.map((city, idx) => (
-                          <Marker key={idx} position={city.pos}>
-                              <Popup><div className="font-bold text-center">{city.name}</div><div className="text-center text-blue-600 font-black">{city.count} 人</div></Popup>
-                          </Marker>
-                      ))}
-                  </MapContainer>
+                  {isMounted && (
+                      <MapContainer 
+                        center={[23.7, 120.95]} 
+                        zoom={7.5} 
+                        minZoom={7} 
+                        maxBounds={taiwanBounds} 
+                        maxBoundsViscosity={1.0} 
+                        style={{ height: '100%', width: '100%' }}
+                      >
+                          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                          {memberStats.cityData.map((city, idx) => (
+                              <Marker key={idx} position={city.pos}>
+                                  <Popup><div className="font-bold text-center">{city.name}</div><div className="text-center text-blue-600 font-black">{city.count} 人</div></Popup>
+                              </Marker>
+                          ))}
+                      </MapContainer>
+                  )}
               </div>
           </div>
 
           <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-100 flex flex-col overflow-hidden">
               <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-slate-800"><UserCircle className="text-pink-500"/> 會員生理性別比例</h3>
-              {/* 🌟 終極防護：加入 style={{ height: 400 }} 絕對高度 */}
-              <div className="w-full flex items-center justify-center bg-slate-50 rounded-xl border border-slate-100" style={{ height: 400, minHeight: 400 }}>
-                  {memberStats.genderData.length > 0 ? (
-                      // 🌟 終極防護：加入 minWidth={1} minHeight={1}
-                      <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+              <div className="w-full flex items-center justify-center bg-slate-50 rounded-xl border border-slate-100 relative" style={{ height: 400, minHeight: 400 }}>
+                  {isMounted && memberStats.genderData.length > 0 ? (
+                      <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
                               <Pie
                                   data={memberStats.genderData}
@@ -277,20 +291,27 @@ export default function Dashboard() {
           </div>
       </div>
 
-      {/* 🚀 區塊三：今年度賽事動向 */}
       <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-100 flex flex-col overflow-hidden">
-          <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-slate-800"><Activity className="text-purple-600"/> 今年度賽事類型分佈 ({new Date().getFullYear()})</h3>
-          {/* 🌟 終極防護：加入 style={{ height: 320 }} 絕對高度 */}
-          <div className="w-full bg-slate-50 rounded-xl border border-slate-100 p-2" style={{ height: 320, minHeight: 320 }}>
-              {raceStats.currentYearTypes.length > 0 ? (
-                  // 🌟 終極防護：加入 minWidth={1} minHeight={1}
-                  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-                      <BarChart data={raceStats.currentYearTypes} margin={{ top: 20, right: 30, left: 0, bottom: 5 }}>
+          <h3 className="font-bold text-lg mb-6 flex items-center gap-2 text-slate-800"><Activity className="text-purple-600"/> {new Date().getFullYear()}年度賽事類型分布</h3>
+          
+          <div className="w-full bg-slate-50 rounded-xl border border-slate-100 p-2 md:p-4 relative" style={{ height: 380, minHeight: 380 }}>
+              {isMounted && raceStats.currentYearTypes.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={raceStats.currentYearTypes} margin={{ top: 20, right: 30, left: 0, bottom: 60 }}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0"/>
-                          <XAxis dataKey="name" tick={{fontWeight: 'bold', fill: '#64748b'}} axisLine={false} tickLine={false} />
-                          <YAxis tick={{fill: '#64748b'}} axisLine={false} tickLine={false}/>
+                          <XAxis 
+                              dataKey="name" 
+                              tick={{ fontWeight: 'bold', fill: '#64748b', fontSize: 12 }} 
+                              axisLine={false} 
+                              tickLine={false} 
+                              interval={0} 
+                              angle={-45} 
+                              textAnchor="end"
+                              dy={10}
+                          />
+                          <YAxis tick={{fill: '#64748b', fontSize: 12}} axisLine={false} tickLine={false}/>
                           <Tooltip cursor={{fill: '#f1f5f9'}} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                          <Bar dataKey="count" name="場次" radius={[6, 6, 0, 0]} barSize={60}>
+                          <Bar dataKey="count" name="場次" radius={[6, 6, 0, 0]} barSize={50} maxBarSize={60}>
                               {raceStats.currentYearTypes.map((entry, index) => (
                                   <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                               ))}
