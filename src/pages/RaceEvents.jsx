@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Calendar, MapPin, Users, Clock, ChevronRight, Activity, Flame, ShieldAlert, Timer, CheckCircle, X, Loader2, UsersRound, Crown, Sprout, Handshake, Send, CreditCard, Flag, Settings, Bell } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
@@ -23,12 +23,15 @@ export default function RaceEvents() {
   const [userRole, setUserRole] = useState(() => localStorage.getItem('iron_medic_user_role') || 'USER') 
   
   const [onlineCount, setOnlineCount] = useState(1) 
+  // 🌟 新人廣播聚光燈狀態
+  const [newcomersOnline, setNewcomersOnline] = useState([])
 
   // 🌟 加入通知狀態
   const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS)
 
   const navigate = useNavigate()
   const CURRENT_YEAR = new Date().getFullYear()
+  const channelRef = useRef(null)
 
   useEffect(() => {
     // 🌟 8個月自動刪除機制 (與 DigitalID.jsx 同步)
@@ -71,22 +74,37 @@ export default function RaceEvents() {
         window.removeEventListener('scroll', resetIdleTimer);
         window.removeEventListener('click', resetIdleTimer);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const setupRealtimePresence = () => {
       const channel = supabase.channel('room_1', {
           config: { presence: { key: 'user_' + Math.random().toString(36).substr(2, 9) } }
       });
+      channelRef.current = channel;
 
       channel
         .on('presence', { event: 'sync' }, () => {
           const state = channel.presenceState();
-          const count = Object.keys(state).length;
+          let count = 0;
+          const newcomers = [];
+
+          for (const id in state) {
+              count += state[id].length;
+              // 🌟 掃描在線名單中是否有新人
+              state[id].forEach(u => {
+                  if (u.is_new_member && u.name) {
+                      // 避免多開分頁重複顯示
+                      if (!newcomers.some(n => n.name === u.name)) newcomers.push(u);
+                  }
+              });
+          }
           setOnlineCount(count > 0 ? count : 1);
+          setNewcomersOnline(newcomers);
         })
         .subscribe(async (status) => {
           if (status === 'SUBSCRIBED') {
-            await channel.track({ online_at: new Date().toISOString() })
+              await channel.track({ online_at: new Date().toISOString() })
           }
         });
   }
@@ -97,12 +115,22 @@ export default function RaceEvents() {
       
       if (user && user.email) {
           try {
-              supabase.from('profiles').select('role').eq('email', user.email).maybeSingle()
+              supabase.from('profiles').select('role, full_name, is_new_member').eq('email', user.email).maybeSingle()
                 .then(({ data: profile }) => {
                     if (profile) {
                         const role = profile.role ? profile.role.toUpperCase() : 'USER';
                         setUserRole(role);
                         localStorage.setItem('iron_medic_user_role', role); 
+
+                        // 🌟 把自己的資訊推播給所有人知道，包含是否為新人
+                        if (channelRef.current) {
+                            channelRef.current.track({
+                                online_at: new Date().toISOString(),
+                                is_new_member: profile.is_new_member === 'Y',
+                                name: profile.full_name,
+                                avatar: profile.full_name ? profile.full_name.charAt(0) : '?'
+                            });
+                        }
                     }
                 });
           } catch (e) { console.log("獲取身分失敗，略過", e) }
@@ -271,9 +299,27 @@ export default function RaceEvents() {
     <div className="min-h-screen bg-slate-50 pb-24 font-sans flex flex-col relative">
       <div className="bg-slate-900 pt-20 md:pt-24 pb-32 px-4 md:px-8 text-center relative overflow-hidden shrink-0">
           
-          <div className="absolute top-4 left-4 md:top-6 md:left-8 z-30 flex items-center gap-2 bg-slate-800/80 backdrop-blur-md px-3 py-1.5 md:px-4 md:py-2 rounded-full border border-slate-700 shadow-lg">
-              <div className="w-2.5 h-2.5 md:w-3 md:h-3 rounded-full bg-green-500 animate-pulse shadow-[0_0_10px_rgba(34,197,94,0.9)]"></div>
-              <span className="text-xs md:text-sm font-black text-slate-200 tracking-wider">目前在線：{onlineCount} 人</span>
+          {/* 🌟 包含在線人數與新人 Spotlight 的左上角區塊 */}
+          <div className="absolute top-4 left-4 md:top-6 md:left-8 z-30 flex flex-col items-start gap-2">
+              <div className="flex items-center gap-2 bg-slate-800/80 backdrop-blur-md px-3 py-1.5 md:px-4 md:py-2 rounded-full border border-slate-700 shadow-lg">
+                  <div className="w-2.5 h-2.5 md:w-3 md:h-3 rounded-full bg-green-500 animate-pulse shadow-[0_0_10px_rgba(34,197,94,0.9)]"></div>
+                  <span className="text-xs md:text-sm font-black text-slate-200 tracking-wider">目前在線：{onlineCount} 人</span>
+              </div>
+              
+              {/* ✨ 新人上線 Spotlight (只在有新人時顯示) */}
+              {newcomersOnline.length > 0 && (
+                  <div className="flex items-center gap-2 animate-fade-in-up bg-amber-500/20 backdrop-blur-sm border border-amber-500/50 px-3 py-1.5 rounded-full shadow-[0_0_15px_rgba(245,158,11,0.2)]">
+                      <span className="text-[10px] md:text-xs font-black text-amber-300 flex items-center gap-1"><Sprout size={12}/> 新人上線</span>
+                      <div className="flex -space-x-1.5">
+                          {newcomersOnline.slice(0, 4).map((nc, idx) => (
+                              <div key={idx} className="w-5 h-5 md:w-6 md:h-6 rounded-full bg-amber-400 text-amber-900 flex items-center justify-center text-[9px] md:text-[10px] font-black border border-slate-900 shadow-sm" title={`歡迎 ${nc.name}！`}>
+                                  {nc.avatar}
+                              </div>
+                          ))}
+                          {newcomersOnline.length > 4 && <div className="w-5 h-5 md:w-6 md:h-6 rounded-full bg-slate-800 text-slate-300 flex items-center justify-center text-[8px] font-bold border border-slate-900">+{newcomersOnline.length - 4}</div>}
+                      </div>
+                  </div>
+              )}
           </div>
 
           <div className="absolute top-4 right-4 md:top-6 md:right-8 z-30 flex items-center gap-3">
@@ -288,7 +334,6 @@ export default function RaceEvents() {
                   </button>
               )}
 
-              {/* 🌟 核心修復：路徑改回 /my-id */}
               <button 
                   onClick={() => navigate('/my-id')} 
                   className="relative flex items-center gap-2 bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 px-3 py-2 md:px-4 md:py-2.5 rounded-full text-white text-xs md:text-sm font-bold transition-all shadow-lg shadow-black/20 active:scale-95 group"

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
-import { Database, Cpu, HardDrive, CheckCircle, AlertTriangle, Activity, ExternalLink, Loader2, RefreshCw, Cloud, Globe, Flag, UserCheck, FileSignature, Clock, ChevronRight, Calendar } from 'lucide-react'
+import { Database, Cpu, HardDrive, CheckCircle, AlertTriangle, Activity, ExternalLink, Loader2, RefreshCw, Cloud, Globe, FileSignature, ChevronRight } from 'lucide-react'
 
 export default function SystemStatus() {
   const [metrics, setMetrics] = useState({
@@ -11,9 +11,7 @@ export default function SystemStatus() {
   })
   const [loading, setLoading] = useState(true)
   
-  // 戰情室資料狀態
-  const [recentRaces, setRecentRaces] = useState([])
-  const [profileUpdates, setProfileUpdates] = useState([])
+  // 戰情室資料狀態 (已將近期賽事與變更紀錄移至 Dashboard，保留變更申請單)
   const [modRequests, setModRequests] = useState([])
 
   useEffect(() => { 
@@ -50,15 +48,7 @@ export default function SystemStatus() {
 
   const fetchWarRoomData = async () => {
       try {
-          // 1. 抓取最新新增或即將到來的賽事
-          const { data: races } = await supabase
-              .from('races')
-              .select('id, name, date, status, medic_required, medic_registered')
-              .order('created_at', { ascending: false })
-              .limit(5)
-          if (races) setRecentRaces(races)
-
-          // 2. 抓取系統通知 (變更紀錄與申請單)
+          // 只保留抓取系統通知 (申請單) 的邏輯
           const { data: notifs } = await supabase
               .from('admin_notifications')
               .select('*')
@@ -66,7 +56,6 @@ export default function SystemStatus() {
               .limit(20)
           
           if (notifs) {
-              setProfileUpdates(notifs.filter(n => n.type === 'PROFILE_UPDATE').slice(0, 5))
               setModRequests(notifs.filter(n => n.type === 'MODIFICATION_REQUEST').slice(0, 5))
           }
       } catch (e) {
@@ -151,64 +140,10 @@ export default function SystemStatus() {
           </div>
       </div>
 
-      {/* 🌟 三大智慧直觀看板區 */}
+      {/* 🌟 看板區：保留 3 欄網格設定，確保變更申請單尺寸不變形 */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
-          {/* 1. 預定新增賽事動態 */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
-              <div className="bg-blue-50/50 p-4 border-b border-blue-100 flex items-center gap-2">
-                  <div className="p-1.5 bg-blue-100 text-blue-600 rounded-lg"><Flag size={18}/></div>
-                  <h3 className="font-black text-blue-900">預定新增賽事動態</h3>
-              </div>
-              <div className="p-4 flex-1 overflow-y-auto max-h-[350px] custom-scrollbar space-y-3">
-                  {recentRaces.length > 0 ? recentRaces.map((race, i) => (
-                      <div key={i} className="flex flex-col p-3 rounded-xl border border-slate-100 hover:bg-slate-50 transition-colors gap-1.5">
-                          <div className="flex justify-between items-start">
-                              <span className="text-sm font-black text-slate-800 line-clamp-1">{race.name}</span>
-                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${race.status === 'OPEN' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>{race.status === 'OPEN' ? '報名中' : race.status}</span>
-                          </div>
-                          <div className="flex items-center justify-between text-xs text-slate-500 font-medium">
-                              <span className="flex items-center gap-1"><Calendar size={12}/> {race.date}</span>
-                              <span>{race.medic_registered || 0} / {race.medic_required || 0} 人</span>
-                          </div>
-                      </div>
-                  )) : (
-                      <div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-70 py-10">
-                          <Flag size={32} className="mb-2"/>
-                          <span className="text-sm font-bold">近期無新增賽事</span>
-                      </div>
-                  )}
-              </div>
-          </div>
-
-          {/* 2. 會員資料變更紀錄 */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
-              <div className="bg-indigo-50/50 p-4 border-b border-indigo-100 flex items-center gap-2">
-                  <div className="p-1.5 bg-indigo-100 text-indigo-600 rounded-lg"><UserCheck size={18}/></div>
-                  <h3 className="font-black text-indigo-900">會員資料變更紀錄</h3>
-              </div>
-              <div className="p-4 flex-1 overflow-y-auto max-h-[350px] custom-scrollbar space-y-3">
-                  {profileUpdates.length > 0 ? profileUpdates.map((log, i) => (
-                      <div key={i} className="flex gap-3 p-3 rounded-xl border border-slate-100 hover:bg-slate-50 transition-colors">
-                          <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 font-black flex items-center justify-center shrink-0 text-xs">
-                              {log.user_name?.charAt(0) || '?'}
-                          </div>
-                          <div>
-                              <div className="text-sm font-black text-slate-800">{log.user_name}</div>
-                              <div className="text-xs text-slate-500 font-medium mt-0.5 leading-snug">{log.message}</div>
-                              <div className="text-[10px] text-slate-400 font-mono mt-1.5 flex items-center gap-1"><Clock size={10}/> {new Date(log.created_at).toLocaleString()}</div>
-                          </div>
-                      </div>
-                  )) : (
-                      <div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-70 py-10">
-                          <UserCheck size={32} className="mb-2"/>
-                          <span className="text-sm font-bold">近期無變更紀錄</span>
-                      </div>
-                  )}
-              </div>
-          </div>
-
-          {/* 3. 資料變更申請單 */}
+          {/* 資料變更申請單 */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
               <div className="bg-amber-50/50 p-4 border-b border-amber-100 flex items-center gap-2">
                   <div className="p-1.5 bg-amber-100 text-amber-600 rounded-lg"><FileSignature size={18}/></div>

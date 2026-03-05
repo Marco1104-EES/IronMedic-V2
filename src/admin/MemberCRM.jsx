@@ -555,7 +555,8 @@ export default function MemberCRM() {
                                   <h4 className="font-black text-slate-800 border-b pb-2 flex items-center gap-2"><HeartPulse size={16} className="text-rose-500"/> 醫護與後勤資訊</h4>
                                   
                                   <div className="grid grid-cols-2 gap-4">
-                                      <EditInput label="醫護證照種類" name="medical_license" />
+                                      {/* 🌟 核心修改點：醫護證照種類下拉選單 */}
+                                      <EditInput label="醫護證照種類" name="medical_license" type="select" options={['EMT-1', 'EMT-2', 'EMTP', '醫師', '醫療線上護理師']} />
                                       <EditInput label="證照有效期限" name="license_expiry" type="date" />
                                   </div>
                                   

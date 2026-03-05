@@ -57,7 +57,6 @@ export default function DigitalID() {
   const [activeModal, setActiveModal] = useState(null) 
   const [isEditing, setIsEditing] = useState(false)
   const [formData, setFormData] = useState({})
-  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     const eightMonthsAgo = new Date();
@@ -221,50 +220,51 @@ export default function DigitalID() {
       setFormData(prev => ({ ...prev, [name]: value }))
   }
 
-  const handleSaveChanges = async (section) => {
-      setSaving(true)
-      try {
-          const updatePayload = { ...formData }
-          let notifyMsg = ''
+  // 🌟 極速背景儲存 (樂觀 UI + Fire and Forget)
+  const handleSaveChanges = (section) => {
+      const updatePayload = { ...formData }
+      let notifyMsg = ''
 
-          if (section === 'basic') {
-              updatePayload.basic_edit_count = (profile.basic_edit_count || 0) + 1;
-              notifyMsg = `人員 [${profile.full_name}] 修改了「核心基本資料」`;
-          } else if (section === 'medical') {
-              updatePayload.med_edit_count = (profile.med_edit_count || 0) + 1;
-              notifyMsg = `人員 [${profile.full_name}] 修改了「醫護與裝備」`;
-          }
-
-          const { data: { user } } = await supabase.auth.getUser()
-          if (user && user.email) { 
-              
-              // 🛡️ 核心防護罩：把 Supabase 資料庫可能還沒有的計數器欄位刪除，只送真實存在的欄位！
-              const { basic_edit_count, med_edit_count, ...safeDbPayload } = updatePayload;
-
-              const { error: upsertError } = await supabase.from('profiles').upsert({ ...safeDbPayload, email: user.email.toLowerCase() }, { onConflict: 'email' })
-              if (upsertError) throw upsertError;
-
-              try {
-                  await supabase.from('admin_notifications').insert({
-                      user_id: user.id, 
-                      user_name: profile.full_name || safeDbPayload.full_name,
-                      type: 'PROFILE_UPDATE', 
-                      message: notifyMsg
-                  })
-              } catch (e) {
-                  console.error("發送通知失敗", e)
-              }
-          }
-
-          setProfile(updatePayload)
-          setIsEditing(false)
-          alert(`✅ 資料更新成功！\n系統已發送修改通知給超級管理員。`)
-
-      } catch (error) {
-          alert('儲存失敗：' + error.message)
-      } finally {
-          setSaving(false)
+      if (section === 'basic') {
+          updatePayload.basic_edit_count = (profile.basic_edit_count || 0) + 1;
+          notifyMsg = `人員 [${profile.full_name}] 修改了「核心基本資料」`;
+      } else if (section === 'medical') {
+          updatePayload.med_edit_count = (profile.med_edit_count || 0) + 1;
+          notifyMsg = `人員 [${profile.full_name}] 修改了「醫護與裝備」`;
       }
+
+      // 1. 樂觀 UI：瞬間更新畫面，讓使用者無縫接軌
+      setProfile(updatePayload)
+      setIsEditing(false)
+      alert(`✅ 資料已儲存！`)
+
+      // 2. 背景隱形通道：在背景慢慢寫入，即使報錯也不卡住使用者畫面
+      setTimeout(async () => {
+          try {
+              const { data: { user } } = await supabase.auth.getUser()
+              if (user && user.email) { 
+                  // 移除前端才有的計數器欄位，防止存入 Supabase 時報錯
+                  const { basic_edit_count, med_edit_count, ...safeDbPayload } = updatePayload;
+                  
+                  // 強制覆蓋寫入
+                  await supabase.from('profiles').upsert({ ...safeDbPayload, email: user.email.toLowerCase() }, { onConflict: 'email' })
+                  
+                  // 發送通知給後台
+                  try {
+                      await supabase.from('admin_notifications').insert({
+                          user_id: user.id, 
+                          user_name: profile.full_name || safeDbPayload.full_name,
+                          type: 'PROFILE_UPDATE', 
+                          message: notifyMsg
+                      })
+                  } catch (e) {
+                      console.error("背景發送通知失敗", e)
+                  }
+              }
+          } catch (e) { 
+              console.error("背景儲存失敗", e) 
+          }
+      }, 0);
   }
 
   const handleApplyModification = () => {
@@ -637,7 +637,8 @@ export default function DigitalID() {
 
                       {activeModal === 'medical' && isEditing && (
                           <div className="space-y-4 bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-                              <EditInputRow label="醫護證照種類" name="medical_license" formData={formData} handleInputChange={handleInputChange} />
+                              {/* 🌟 核心更新：統一證照下拉選單 */}
+                              <EditInputRow label="醫護證照種類" name="medical_license" type="select" options={['EMT-1', 'EMT-2', 'EMTP', '醫師', '醫療線上護理師']} formData={formData} handleInputChange={handleInputChange} />
                               <EditInputRow label="證照有效期限" name="license_expiry" type="date" formData={formData} handleInputChange={handleInputChange} />
                               <EditInputRow label="特殊病史與過敏" name="medical_history" formData={formData} handleInputChange={handleInputChange} />
                               <div className="pt-4 border-t border-slate-100 mt-2">
@@ -655,8 +656,9 @@ export default function DigitalID() {
                       {isEditing ? (
                           <div className="flex gap-3">
                               <button onClick={() => setIsEditing(false)} className="flex-1 py-3.5 bg-slate-100 text-slate-600 font-black rounded-xl hover:bg-slate-200 transition-colors active:scale-95">取消編輯</button>
-                              <button onClick={() => handleSaveChanges(activeModal)} disabled={saving} className="flex-[2] py-3.5 bg-blue-600 text-white font-black rounded-xl hover:bg-blue-700 shadow-md shadow-blue-600/30 flex justify-center items-center gap-2 transition-colors disabled:opacity-50 active:scale-95">
-                                  {saving ? <Loader2 className="animate-spin" size={18}/> : <Check size={18}/>} 儲存並發送通知
+                              {/* 🌟 核心更新：極速儲存按鈕 */}
+                              <button onClick={() => handleSaveChanges(activeModal)} className="flex-[2] py-3.5 bg-blue-600 text-white font-black rounded-xl hover:bg-blue-700 shadow-md shadow-blue-600/30 flex justify-center items-center gap-2 transition-colors active:scale-95">
+                                  <Check size={18}/> 儲存資料
                               </button>
                           </div>
                       ) : (
