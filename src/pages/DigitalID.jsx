@@ -16,27 +16,50 @@ const INITIAL_NOTIFICATIONS = [
     { id: 4, tab: 'personal', category: 'old', message: '這是一則一年前的舊通知，即將被系統自動清除。', date: '2024-01-01T00:00:00.000Z', isRead: true }
 ]
 
+const InfoRow = ({ label, value, icon: Icon, alert = false }) => (
+    <div className="flex flex-col py-3 border-b border-slate-100 last:border-0">
+        <span className="text-xs font-bold text-slate-400 flex items-center gap-1.5 mb-1">
+            {Icon && <Icon size={12} />} {label}
+        </span>
+        <span className={`text-[15px] md:text-base font-black ${alert ? 'text-red-600' : 'text-slate-800'}`}>
+            {value || <span className="text-slate-300 font-medium">未提供</span>}
+        </span>
+    </div>
+)
+
+const EditInputRow = ({ label, name, type = "text", options = [], formData, handleInputChange }) => (
+    <div className="flex flex-col py-2 border-b border-slate-100 last:border-0">
+        <label className="text-xs font-bold text-blue-600 mb-1">{label}</label>
+        {type === 'select' ? (
+            <select name={name} value={formData[name] || ''} onChange={handleInputChange} className="w-full p-3 rounded-xl border border-slate-300 bg-white font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 text-[16px]">
+                <option value="">請選擇</option>
+                {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+            </select>
+        ) : (
+            <input type={type} name={name} value={formData[name] || ''} onChange={handleInputChange} className="w-full p-3 rounded-xl border border-slate-300 bg-white font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 text-[16px]" placeholder={`請輸入${label}`} />
+        )}
+    </div>
+)
+
 export default function DigitalID() {
   const navigate = useNavigate()
   const [showQR, setShowQR] = useState(false)
   
-  // 🌟 通知中心狀態
   const [showNotifPanel, setShowNotifPanel] = useState(false)
-  const [notifTab, setNotifTab] = useState('system') // 'system' 或 'personal'
+  const [notifTab, setNotifTab] = useState('system') 
   const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS)
   
   const [profile, setProfile] = useState(null)
   const [myRaces, setMyRaces] = useState([]) 
   const [loadingProfile, setLoadingProfile] = useState(true)
+  const [isCanceling, setIsCanceling] = useState(false)
 
-  // Modal 控制
   const [activeModal, setActiveModal] = useState(null) 
   const [isEditing, setIsEditing] = useState(false)
   const [formData, setFormData] = useState({})
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    // 🌟 8個月自動刪除機制
     const eightMonthsAgo = new Date();
     eightMonthsAgo.setMonth(eightMonthsAgo.getMonth() - 8);
     setNotifications(prev => prev.filter(n => new Date(n.date) >= eightMonthsAgo));
@@ -50,7 +73,6 @@ export default function DigitalID() {
     try {
       const { data: { user } } = await supabase.auth.getUser()
       
-      // 🌟 移除寫死的測試者，若查無資料，用 Email 作為姓名預設值
       let currentUserProfile = {
           id: user?.id || 'unknown',
           email: user?.email || '',
@@ -62,7 +84,6 @@ export default function DigitalID() {
       };
 
       if (user && user.email) { 
-        // 🌟 關鍵修復：使用 maybeSingle，防止查無資料崩潰
         const { data, error } = await supabase.from('profiles').select('*').eq('email', user.email.toLowerCase()).maybeSingle()
         if (data) {
             currentUserProfile = { ...currentUserProfile, ...data }
@@ -71,16 +92,16 @@ export default function DigitalID() {
       
       setProfile(currentUserProfile)
 
-      // 2. 🌟 智慧撈取「我報名的賽事」與「歷史參賽明細」
-      const { data: allRaces, error: raceError } = await supabase.from('races').select('*').order('date', { ascending: false })
+      const { data: allRaces, error: raceError } = await supabase.from('races').select('*').neq('status', 'CANCELLED').order('date', { ascending: false })
       if (raceError) throw raceError;
 
       const myEnrolledRaces = [];
       
       if (allRaces) {
           allRaces.forEach(race => {
+              let isEnrolled = false;
               let foundMySlot = null;
-              let myRole = '醫護跑者'; 
+              let myRole = '一般報名'; 
 
               if (race.slots_data && Array.isArray(race.slots_data)) {
                   for (const slot of race.slots_data) {
@@ -90,26 +111,36 @@ export default function DigitalID() {
                               if (!item) continue;
                               try {
                                   const p = JSON.parse(item);
-                                  // 同步修正：判斷名字或 Email 是否吻合
-                                  if (p.name === currentUserProfile.full_name || (user && p.email === user.email)) {
-                                      foundMySlot = slot.name;
+                                  if (p.id === currentUserProfile.id || p.name === currentUserProfile.full_name) {
+                                      foundMySlot = `${slot.group} - ${slot.name}`;
                                       if (p.roleTag) myRole = p.roleTag;
+                                      isEnrolled = true;
                                       break;
                                   }
                               } catch (e) {
                                   const legacyName = item.split(' #')[0].trim();
                                   if (legacyName === currentUserProfile.full_name) {
-                                      foundMySlot = slot.name;
+                                      foundMySlot = `${slot.group} - ${slot.name}`;
+                                      isEnrolled = true;
                                       break;
                                   }
                               }
                           }
                       }
-                      if (foundMySlot) break;
+                      if (isEnrolled) break;
                   }
               }
 
-              if (foundMySlot) {
+              if (!isEnrolled && race.waitlist_data && Array.isArray(race.waitlist_data)) {
+                  const waitMatch = race.waitlist_data.find(w => w.id === currentUserProfile.id || w.name === currentUserProfile.full_name);
+                  if (waitMatch) {
+                      isEnrolled = true;
+                      foundMySlot = "候補名單";
+                      myRole = "候補中";
+                  }
+              }
+
+              if (isEnrolled) {
                   myEnrolledRaces.push({
                       id: race.id, name: race.name, date: race.date,
                       location: race.location, status: race.status,
@@ -128,13 +159,56 @@ export default function DigitalID() {
     }
   }
 
-  // 🌟 動態計算：真實完賽與達成率
-  const pastRaces = myRaces.filter(r => new Date(r.date) < new Date());
-  const finishedCount = pastRaces.length;
-  const totalEnrolledCount = myRaces.length;
-  const attendanceRate = pastRaces.length > 0 ? '100%' : 'N/A';
+  const handleCancelRace = async (e, raceId, raceName) => {
+      e.stopPropagation(); 
+      
+      if(!window.confirm(`確定要取消報名【${raceName}】並釋出名額嗎？\n(此操作無法復原)`)) return;
 
-  const unreadCountReal = notifications.filter(n => !n.isRead).length;
+      setIsCanceling(true)
+      try {
+          const { data: currentRace, error: fetchError } = await supabase.from('races').select('slots_data, waitlist_data, status').eq('id', raceId).single()
+          if (fetchError) throw fetchError
+
+          if (currentRace.status === 'SUBMITTED') {
+              alert("❌ 該賽事名單已送出，無法自行取消，請聯繫賽事總監。")
+              setIsCanceling(false)
+              return;
+          }
+
+          let updatedSlots = currentRace.slots_data || [];
+          let updatedWaitlist = currentRace.waitlist_data || [];
+
+          updatedWaitlist = updatedWaitlist.filter(w => w.id !== profile.id && w.name !== profile.full_name);
+
+          updatedSlots = updatedSlots.map(s => {
+              if (s.assignee) {
+                  const assigneesArray = s.assignee.split('|').map(str => {
+                      try { return JSON.parse(str); } catch(e) { return { id: str, name: str, isLegacy: true }; }
+                  });
+                  
+                  const initialLength = assigneesArray.length;
+                  const newAssigneesArray = assigneesArray.filter(p => p.id !== profile.id && p.name !== profile.full_name);
+                  
+                  if (newAssigneesArray.length < initialLength) {
+                      const newAssigneeString = newAssigneesArray.map(p => p.isLegacy ? p.name : JSON.stringify(p)).join('|');
+                      return { ...s, filled: Math.max(0, s.filled - 1), assignee: newAssigneeString };
+                  }
+              }
+              return s;
+          });
+
+          const { error: updateError } = await supabase.from('races').update({ slots_data: updatedSlots, waitlist_data: updatedWaitlist }).eq('id', raceId)
+          if (updateError) throw updateError
+
+          setMyRaces(myRaces.filter(r => r.id !== raceId))
+          alert("✅ 退賽成功，名額已釋出！")
+
+      } catch (error) {
+          alert("退賽失敗：" + error.message)
+      } finally {
+          setIsCanceling(false)
+      }
+  }
 
   const handleOpenModal = (modalName) => {
       setActiveModal(modalName)
@@ -162,14 +236,24 @@ export default function DigitalID() {
           }
 
           const { data: { user } } = await supabase.auth.getUser()
-          if (user && user.email) { // 🌟 儲存時也是鎖定 Email 寫入
-              await supabase.from('profiles').update(updatePayload).eq('email', user.email.toLowerCase())
+          if (user && user.email) { 
+              
+              // 🛡️ 核心防護罩：把 Supabase 資料庫可能還沒有的計數器欄位刪除，只送真實存在的欄位！
+              const { basic_edit_count, med_edit_count, ...safeDbPayload } = updatePayload;
+
+              const { error: upsertError } = await supabase.from('profiles').upsert({ ...safeDbPayload, email: user.email.toLowerCase() }, { onConflict: 'email' })
+              if (upsertError) throw upsertError;
+
               try {
                   await supabase.from('admin_notifications').insert({
-                      user_id: user.id, user_name: profile.full_name,
-                      type: 'PROFILE_UPDATE', message: notifyMsg
+                      user_id: user.id, 
+                      user_name: profile.full_name || safeDbPayload.full_name,
+                      type: 'PROFILE_UPDATE', 
+                      message: notifyMsg
                   })
-              } catch (e) {}
+              } catch (e) {
+                  console.error("發送通知失敗", e)
+              }
           }
 
           setProfile(updatePayload)
@@ -187,13 +271,8 @@ export default function DigitalID() {
       alert("📝 已為您開啟「修改申請單」。\n請填寫您欲變更的欄位與原因，我們將由專人為您處理。")
   }
 
-  const deleteNotification = (id) => {
-      setNotifications(prev => prev.filter(n => n.id !== id));
-  }
-
-  const markAllAsRead = () => {
-      setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
-  }
+  const deleteNotification = (id) => { setNotifications(prev => prev.filter(n => n.id !== id)); }
+  const markAllAsRead = () => { setNotifications(prev => prev.map(n => ({ ...n, isRead: true }))); }
 
   const getNotifIcon = (category) => {
       switch(category) {
@@ -204,32 +283,6 @@ export default function DigitalID() {
       }
   }
 
-  const InfoRow = ({ label, value, icon: Icon, alert = false }) => (
-      <div className="flex flex-col py-3 border-b border-slate-100 last:border-0">
-          <span className="text-xs font-bold text-slate-400 flex items-center gap-1.5 mb-1">
-              {Icon && <Icon size={12} />} {label}
-          </span>
-          <span className={`text-[15px] md:text-base font-black ${alert ? 'text-red-600' : 'text-slate-800'}`}>
-              {value || <span className="text-slate-300 font-medium">未提供</span>}
-          </span>
-      </div>
-  )
-
-  const EditInputRow = ({ label, name, type = "text", options = [] }) => (
-      <div className="flex flex-col py-2 border-b border-slate-100 last:border-0">
-          <label className="text-xs font-bold text-blue-600 mb-1">{label}</label>
-          {type === 'select' ? (
-              <select name={name} value={formData[name] || ''} onChange={handleInputChange} className="w-full p-3 rounded-xl border border-slate-300 bg-white font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 text-[16px]">
-                  <option value="">請選擇</option>
-                  {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-              </select>
-          ) : (
-              <input type={type} name={name} value={formData[name] || ''} onChange={handleInputChange} className="w-full p-3 rounded-xl border border-slate-300 bg-white font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 text-[16px]" placeholder={`請輸入${label}`} />
-          )}
-      </div>
-  )
-
-  // 🌟 智慧判斷生理性別
   const getGenderFromID = (nationalId) => {
       if (!nationalId || nationalId.length < 2) return null;
       const secondChar = nationalId.charAt(1);
@@ -245,11 +298,15 @@ export default function DigitalID() {
   }
 
   const genderTag = getGenderFromID(displayUser.national_id);
+  const pastRaces = myRaces.filter(r => new Date(r.date) < new Date());
+  const finishedCount = pastRaces.length;
+  const totalEnrolledCount = myRaces.length;
+  const attendanceRate = pastRaces.length > 0 ? '100%' : 'N/A';
+  const unreadCountReal = notifications.filter(n => !n.isRead).length;
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans pb-24 animate-fade-in flex flex-col relative overflow-x-hidden">
       
-      {/* 🌟 頂部背景與鈴鐺 */}
       <div className="bg-slate-900 pt-16 md:pt-20 pb-36 px-4 relative overflow-hidden shrink-0">
           <div className="absolute inset-0 opacity-10 bg-[url('https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&q=80&w=1920')] bg-cover bg-center"></div>
           <div className="relative z-10 max-w-2xl mx-auto flex items-center justify-between">
@@ -258,7 +315,6 @@ export default function DigitalID() {
               </button>
               <h1 className="text-xl md:text-2xl font-black text-white tracking-widest">個人數位 ID 卡</h1>
               
-              {/* 🌟 點擊觸發右側通知面板 */}
               <button onClick={() => setShowNotifPanel(true)} className="p-2.5 bg-white/10 hover:bg-white/20 rounded-full text-white backdrop-blur-sm transition-colors cursor-pointer group active:scale-95 relative">
                   <Bell size={22} className="group-hover:animate-wiggle"/>
                   {unreadCountReal > 0 && (
@@ -272,7 +328,6 @@ export default function DigitalID() {
 
       <div className="max-w-2xl mx-auto px-4 w-full -mt-24 relative z-20 space-y-6 flex-1">
           
-          {/* 🌟 數位識別證 */}
           <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-[2rem] p-6 md:p-8 shadow-2xl border border-slate-700 relative overflow-hidden group">
               <div className="absolute -top-10 -right-10 opacity-5 pointer-events-none">
                   <Fingerprint size={180} className="text-white"/>
@@ -284,7 +339,6 @@ export default function DigitalID() {
                           {displayUser.full_name?.charAt(0) || '?'}
                       </div>
                       <div>
-                          {/* 🌟 姓名與生理性別標籤 */}
                           <div className="flex items-center gap-2 mb-1">
                               <h2 className="text-2xl md:text-3xl font-black text-white">{displayUser.full_name}</h2>
                               {genderTag && (
@@ -301,16 +355,11 @@ export default function DigitalID() {
                   </button>
               </div>
 
-              {/* 🌟 5 大報名權限徽章區 */}
               <div className="flex flex-wrap gap-2 relative z-10">
                   {displayUser.is_vip === 'Y' && <span className="bg-amber-400 text-amber-900 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1 shadow-lg shadow-amber-400/20"><Crown size={12}/> VIP</span>}
-                  
                   {displayUser.is_team_leader === 'Y' && <span className="bg-blue-500 text-white text-xs font-black px-3 py-1 rounded-full flex items-center gap-1 shadow-lg shadow-blue-500/20"><ShieldAlert size={12}/> 帶隊教官</span>}
-                  
                   {displayUser.is_new_member === 'Y' && <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/50 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><Sprout size={12}/> 新人</span>}
-                  
                   {displayUser.training_status === 'Y' && <span className="bg-purple-500/20 text-purple-300 border border-purple-500/50 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><Zap size={12}/> 優先報名</span>}
-                  
                   {displayUser.is_current_member === 'Y' ? 
                       <span className="bg-green-500/20 text-green-400 border border-green-500/50 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><CheckCircle size={12}/> 有效會員</span> : 
                       <span className="bg-red-500/20 text-red-400 border border-red-500/50 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><XCircle size={12}/> 非當屆會員</span>
@@ -318,7 +367,6 @@ export default function DigitalID() {
               </div>
           </div>
 
-          {/* 🌟 我報名的賽事 (自動撈取真實資料) */}
           <div>
               <div className="flex items-center justify-between mb-3 px-1">
                   <h3 className="font-black text-slate-800 flex items-center gap-1.5"><Flag className="text-blue-600" size={18}/> 我報名的賽事</h3>
@@ -326,20 +374,32 @@ export default function DigitalID() {
               <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar snap-x">
                   {myRaces.filter(r => new Date(r.date) >= new Date()).length > 0 ? (
                       myRaces.filter(r => new Date(r.date) >= new Date()).map(race => (
-                          <div key={race.id} onClick={() => navigate(`/race-detail/${race.id}`)} className="bg-white min-w-[260px] md:min-w-[300px] p-4 rounded-[1.5rem] shadow-sm border border-slate-200 cursor-pointer hover:shadow-md transition-all snap-start active:scale-95">
-                              <div className="flex justify-between items-start mb-2">
-                                  <span className={`text-[10px] font-black px-2 py-0.5 rounded-md ${race.status === 'FULL' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>
-                                      {race.status === 'OPEN' ? '招募中' : race.status === 'FULL' ? '滿編' : '處理中'}
-                                  </span>
-                                  <span className="text-xs font-bold text-slate-500 flex items-center gap-1"><Calendar size={12}/>{race.date}</span>
-                              </div>
-                              <h4 className="font-black text-slate-800 text-[15px] mb-1 line-clamp-1">{race.name}</h4>
-                              <div className="text-xs text-slate-500 font-medium mb-3 truncate flex items-center gap-1"><MapPin size={12} className="text-red-400"/> {race.location}</div>
-                              <div className="pt-3 border-t border-slate-100 flex justify-between items-center">
-                                  <div className="text-xs font-bold text-slate-700">{race.slotName}</div>
-                                  <div className="text-[10px] font-black bg-slate-800 text-amber-400 px-2 py-1 rounded-lg flex items-center gap-1">
-                                      <ShieldAlert size={10}/> {race.role}
+                          <div key={race.id} onClick={() => navigate(`/race-detail/${race.id}`)} className="bg-white min-w-[260px] md:min-w-[300px] p-4 rounded-[1.5rem] shadow-sm border border-slate-200 cursor-pointer hover:shadow-md transition-all snap-start active:scale-95 flex flex-col justify-between">
+                              <div>
+                                  <div className="flex justify-between items-start mb-2">
+                                      <span className={`text-[10px] font-black px-2 py-0.5 rounded-md ${race.status === 'FULL' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>
+                                          {race.status === 'OPEN' ? '招募中' : race.status === 'FULL' ? '滿編' : '處理中'}
+                                      </span>
+                                      <span className="text-xs font-bold text-slate-500 flex items-center gap-1"><Calendar size={12}/>{race.date}</span>
                                   </div>
+                                  <h4 className="font-black text-slate-800 text-[15px] mb-1 line-clamp-1">{race.name}</h4>
+                                  <div className="text-xs text-slate-500 font-medium mb-3 truncate flex items-center gap-1"><MapPin size={12} className="text-red-400"/> {race.location}</div>
+                              </div>
+                              
+                              <div className="pt-3 border-t border-slate-100 flex justify-between items-center mt-2">
+                                  <div className="text-xs font-bold text-slate-700 flex flex-col">
+                                      <span>{race.slotName}</span>
+                                      <span className="text-[10px] text-amber-600 mt-0.5">{race.role}</span>
+                                  </div>
+                                  
+                                  <button 
+                                      onClick={(e) => handleCancelRace(e, race.id, race.name)}
+                                      disabled={isCanceling}
+                                      className="text-[10px] font-black bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors border border-red-200 disabled:opacity-50 active:scale-95"
+                                  >
+                                      {isCanceling ? <Loader2 size={12} className="animate-spin"/> : <XCircle size={12}/>} 
+                                      取消報名
+                                  </button>
                               </div>
                           </div>
                       ))
@@ -351,30 +411,26 @@ export default function DigitalID() {
               </div>
           </div>
 
-          {/* 🌟 四大方格區 (位置重排，名稱內外統一) */}
           <div className="grid grid-cols-2 gap-3 md:gap-4">
               
-              {/* 左上：核心基本資料 */}
               <div onClick={() => handleOpenModal('basic')} className="bg-white p-4 md:p-5 rounded-[1.5rem] shadow-sm border border-slate-200 cursor-pointer active:scale-95 hover:border-blue-400 transition-all flex flex-col items-center justify-center text-center gap-2 relative">
                   <div className="absolute top-3 right-3 text-slate-300"><MousePointerClick size={16} className="animate-bounce" /></div>
                   <div className="w-12 h-12 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center mb-1"><User size={24}/></div>
                   <div>
                       <h4 className="font-black text-slate-800 text-[13px] sm:text-sm">核心基本資料</h4>
-                      <div className="text-[10px] font-bold text-slate-500 mt-0.5">可修正 {2 - displayUser.basic_edit_count} 次</div>
+                      <div className="text-[10px] font-bold text-slate-500 mt-0.5">可點擊查看與修改</div>
                   </div>
               </div>
 
-              {/* 右上：醫護與裝備 */}
               <div onClick={() => handleOpenModal('medical')} className="bg-white p-4 md:p-5 rounded-[1.5rem] shadow-sm border border-slate-200 cursor-pointer active:scale-95 hover:border-blue-400 transition-all flex flex-col items-center justify-center text-center gap-2 relative">
                   <div className="absolute top-3 right-3 text-slate-300"><MousePointerClick size={16} className="animate-bounce" /></div>
                   <div className="w-12 h-12 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center mb-1"><HeartPulse size={24}/></div>
                   <div>
                       <h4 className="font-black text-slate-800 text-[13px] sm:text-sm">醫護與裝備</h4>
-                      <div className="text-[10px] font-bold text-slate-500 mt-0.5">可修正 {2 - displayUser.med_edit_count} 次</div>
+                      <div className="text-[10px] font-bold text-slate-500 mt-0.5">可點擊查看與修改</div>
                   </div>
               </div>
 
-              {/* 左下：賽事參與統計 */}
               <div onClick={() => handleOpenModal('stats')} className="bg-white p-4 md:p-5 rounded-[1.5rem] shadow-sm border border-slate-200 cursor-pointer active:scale-95 hover:border-blue-400 transition-all flex flex-col items-center justify-center text-center gap-2 relative">
                   <div className="absolute top-3 right-3 text-slate-300"><MousePointerClick size={16} className="animate-bounce" /></div>
                   <div className="w-12 h-12 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mb-1"><Activity size={24}/></div>
@@ -384,7 +440,6 @@ export default function DigitalID() {
                   </div>
               </div>
 
-              {/* 右下：參賽明細 */}
               <div onClick={() => handleOpenModal('system')} className="bg-white p-4 md:p-5 rounded-[1.5rem] shadow-sm border border-slate-200 cursor-pointer active:scale-95 hover:border-blue-400 transition-all flex flex-col items-center justify-center text-center gap-2 relative">
                   <div className="absolute top-3 right-3 text-slate-300"><MousePointerClick size={16} className="animate-bounce" /></div>
                   <div className="w-12 h-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mb-1"><ListOrdered size={24}/></div>
@@ -401,9 +456,6 @@ export default function DigitalID() {
           </button>
       </div>
 
-      {/* ========================================= */}
-      {/* 🌟 系統通知中心 (點擊鈴鐺滑出的抽屜/Modal) */}
-      {/* ========================================= */}
       {showNotifPanel && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex justify-end animate-fade-in" onClick={() => setShowNotifPanel(false)}>
               <div className="bg-slate-50 w-full sm:w-[400px] h-full flex flex-col shadow-2xl animate-slide-left" onClick={e => e.stopPropagation()}>
@@ -467,14 +519,10 @@ export default function DigitalID() {
           </div>
       )}
 
-      {/* ========================================= */}
-      {/* 🌟 點開格子的彈出視窗 (Modal) */}
-      {/* ========================================= */}
       {activeModal && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center sm:p-4 animate-fade-in" onClick={() => !isEditing && setActiveModal(null)}>
               <div className="bg-white rounded-t-[2rem] sm:rounded-[2rem] shadow-2xl w-full max-w-xl flex flex-col max-h-[85vh] sm:max-h-[90vh] overflow-hidden animate-slide-up sm:animate-bounce-in" onClick={e => e.stopPropagation()}>
                   
-                  {/* Modal 頂部拖曳條 (手機用) */}
                   <div className="w-full flex justify-center pt-3 pb-1 sm:hidden">
                       <div className="w-12 h-1.5 bg-slate-200 rounded-full"></div>
                   </div>
@@ -491,7 +539,6 @@ export default function DigitalID() {
 
                   <div className="p-6 overflow-y-auto custom-scrollbar flex-1 bg-slate-50 sm:bg-white">
                       
-                      {/* --- 賽事統計 Modal --- */}
                       {activeModal === 'stats' && (
                           <div className="space-y-4 bg-white p-5 rounded-2xl border border-slate-100">
                               <InfoRow label="真實完賽場次" value={`${finishedCount} 場`} icon={CheckCircle} />
@@ -500,7 +547,6 @@ export default function DigitalID() {
                           </div>
                       )}
 
-                      {/* --- 參賽明細 Modal --- */}
                       {activeModal === 'system' && (
                           <div className="space-y-3">
                               {myRaces.length > 0 ? myRaces.map(race => (
@@ -524,11 +570,9 @@ export default function DigitalID() {
                           </div>
                       )}
 
-                      {/* --- 基本資料 Modal --- */}
                       {activeModal === 'basic' && !isEditing && (
                           <div className="space-y-3">
                               <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
-                                  {/* 加入年月 / 醫護鐵人編號 可以讓測試者確認是否寫入成功 */}
                                   <InfoRow label="醫護鐵人編號" value={displayUser.ironmedic_no} />
                                   <InfoRow label="加入年月" value={displayUser.join_date} />
                                   <div className="h-px bg-slate-100 my-2"></div>
@@ -555,25 +599,24 @@ export default function DigitalID() {
                               <div className="bg-blue-50 text-blue-800 text-xs font-bold p-3 rounded-xl flex items-center gap-2">
                                   <AlertTriangle size={16}/> 儲存後將發送通知給管理員審核
                               </div>
-                              <EditInputRow label="醫護鐵人編號 (測試驗證用)" name="ironmedic_no" />
-                              <EditInputRow label="加入年月 (測試驗證用)" name="join_date" />
-                              <EditInputRow label="中文姓名" name="full_name" />
-                              <EditInputRow label="身分證字號" name="national_id" />
-                              <EditInputRow label="生理性別" name="gender" type="select" options={['男', '女']} />
-                              <EditInputRow label="出生年月日" name="birthday" type="date" />
-                              <EditInputRow label="手機號碼" name="phone" />
-                              <EditInputRow label="聯絡信箱" name="contact_email" type="email" />
-                              <EditInputRow label="通訊地址" name="address" />
+                              <EditInputRow label="醫護鐵人編號 (測試驗證用)" name="ironmedic_no" formData={formData} handleInputChange={handleInputChange} />
+                              <EditInputRow label="加入年月 (測試驗證用)" name="join_date" formData={formData} handleInputChange={handleInputChange} />
+                              <EditInputRow label="中文姓名" name="full_name" formData={formData} handleInputChange={handleInputChange} />
+                              <EditInputRow label="身分證字號" name="national_id" formData={formData} handleInputChange={handleInputChange} />
+                              <EditInputRow label="生理性別" name="gender" type="select" options={['男', '女']} formData={formData} handleInputChange={handleInputChange} />
+                              <EditInputRow label="出生年月日" name="birthday" type="date" formData={formData} handleInputChange={handleInputChange} />
+                              <EditInputRow label="手機號碼" name="phone" formData={formData} handleInputChange={handleInputChange} />
+                              <EditInputRow label="聯絡信箱" name="contact_email" type="email" formData={formData} handleInputChange={handleInputChange} />
+                              <EditInputRow label="通訊地址" name="address" formData={formData} handleInputChange={handleInputChange} />
                               <div className="pt-4 border-t border-slate-100 mt-2">
                                   <h4 className="text-sm font-black text-rose-600 mb-2">緊急聯絡資訊</h4>
-                                  <EditInputRow label="緊急聯絡人" name="emergency_name" />
-                                  <EditInputRow label="關係" name="emergency_relation" />
-                                  <EditInputRow label="緊急電話" name="emergency_phone" />
+                                  <EditInputRow label="緊急聯絡人" name="emergency_name" formData={formData} handleInputChange={handleInputChange} />
+                                  <EditInputRow label="關係" name="emergency_relation" formData={formData} handleInputChange={handleInputChange} />
+                                  <EditInputRow label="緊急電話" name="emergency_phone" formData={formData} handleInputChange={handleInputChange} />
                               </div>
                           </div>
                       )}
 
-                      {/* --- 裝備後勤 Modal --- */}
                       {activeModal === 'medical' && !isEditing && (
                           <div className="space-y-3">
                               <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
@@ -594,21 +637,20 @@ export default function DigitalID() {
 
                       {activeModal === 'medical' && isEditing && (
                           <div className="space-y-4 bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-                              <EditInputRow label="醫護證照種類" name="medical_license" />
-                              <EditInputRow label="證照有效期限" name="license_expiry" type="date" />
-                              <EditInputRow label="特殊病史與過敏" name="medical_history" />
+                              <EditInputRow label="醫護證照種類" name="medical_license" formData={formData} handleInputChange={handleInputChange} />
+                              <EditInputRow label="證照有效期限" name="license_expiry" type="date" formData={formData} handleInputChange={handleInputChange} />
+                              <EditInputRow label="特殊病史與過敏" name="medical_history" formData={formData} handleInputChange={handleInputChange} />
                               <div className="pt-4 border-t border-slate-100 mt-2">
                                   <h4 className="text-sm font-black text-blue-600 mb-2">後勤需求調查</h4>
-                                  <EditInputRow label="賽事衣服尺寸" name="shirt_size" type="select" options={['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL']} />
-                                  <EditInputRow label="飲食習慣" name="dietary_habit" />
-                                  <EditInputRow label="偏好交通方式" name="transport_pref" type="select" options={['自行前往', '需要共乘', '搭乘大眾運輸']} />
-                                  <EditInputRow label="偏好住宿方式" name="stay_pref" type="select" options={['自行處理', '需要代訂']} />
+                                  <EditInputRow label="賽事衣服尺寸" name="shirt_size" type="select" options={['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL']} formData={formData} handleInputChange={handleInputChange} />
+                                  <EditInputRow label="飲食習慣" name="dietary_habit" formData={formData} handleInputChange={handleInputChange} />
+                                  <EditInputRow label="偏好交通方式" name="transport_pref" type="select" options={['自行前往', '需要共乘', '搭乘大眾運輸']} formData={formData} handleInputChange={handleInputChange} />
+                                  <EditInputRow label="偏好住宿方式" name="stay_pref" type="select" options={['自行處理', '需要代訂']} formData={formData} handleInputChange={handleInputChange} />
                               </div>
                           </div>
                       )}
                   </div>
 
-                  {/* 🌟 底部按鈕區 */}
                   <div className="p-4 sm:p-6 border-t border-slate-100 bg-white shrink-0 shadow-[0_-10px_20px_rgba(0,0,0,0.03)]">
                       {isEditing ? (
                           <div className="flex gap-3">
@@ -619,29 +661,9 @@ export default function DigitalID() {
                           </div>
                       ) : (
                           <div className="flex flex-col gap-3">
-                              {activeModal === 'basic' && (
-                                  displayUser.basic_edit_count < 2 ? (
-                                      <button onClick={() => setIsEditing(true)} className="w-full py-4 bg-slate-900 text-white font-black rounded-xl hover:bg-slate-800 shadow-lg shadow-slate-900/20 flex justify-center items-center gap-2 transition-transform active:scale-95">
-                                          <Edit3 size={18}/> 開放修改 <span className="text-xs font-normal opacity-80">(剩餘 {2 - displayUser.basic_edit_count} 次)</span>
-                                      </button>
-                                  ) : (
-                                      <button onClick={handleApplyModification} className="w-full py-4 bg-amber-100 text-amber-800 border border-amber-300 font-black rounded-xl active:bg-amber-200 flex justify-center items-center gap-2 transition-transform active:scale-95">
-                                          <Send size={18}/> 提出變更申請 (已達次數上限)
-                                      </button>
-                                  )
-                              )}
-                              {activeModal === 'medical' && (
-                                  displayUser.med_edit_count < 2 ? (
-                                      <button onClick={() => setIsEditing(true)} className="w-full py-4 bg-slate-900 text-white font-black rounded-xl hover:bg-slate-800 shadow-lg shadow-slate-900/20 flex justify-center items-center gap-2 transition-transform active:scale-95">
-                                          <Edit3 size={18}/> 開放修改 <span className="text-xs font-normal opacity-80">(剩餘 {2 - displayUser.med_edit_count} 次)</span>
-                                      </button>
-                                  ) : (
-                                      <button onClick={handleApplyModification} className="w-full py-4 bg-amber-100 text-amber-800 border border-amber-300 font-black rounded-xl active:bg-amber-200 flex justify-center items-center gap-2 transition-transform active:scale-95">
-                                          <Send size={18}/> 提出變更申請 (已達次數上限)
-                                      </button>
-                                  )
-                              )}
-                              
+                              <button onClick={() => setIsEditing(true)} className="w-full py-4 bg-slate-900 text-white font-black rounded-xl hover:bg-slate-800 shadow-lg shadow-slate-900/20 flex justify-center items-center gap-2 transition-transform active:scale-95">
+                                  <Edit3 size={18}/> 開放修改
+                              </button>
                               <button onClick={() => setActiveModal(null)} className="w-full py-3.5 bg-slate-100 text-slate-500 font-black rounded-xl hover:bg-slate-200 transition-colors active:scale-95 flex justify-center items-center gap-1">
                                   關閉視窗
                               </button>
@@ -652,7 +674,6 @@ export default function DigitalID() {
           </div>
       )}
 
-      {/* QR Code 彈窗 */}
       {showQR && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[110] flex items-center justify-center p-4 animate-fade-in" onClick={() => setShowQR(false)}>
               <div className="bg-white rounded-[2rem] p-8 md:p-10 w-full max-w-sm flex flex-col items-center animate-bounce-in shadow-2xl" onClick={e => e.stopPropagation()}>

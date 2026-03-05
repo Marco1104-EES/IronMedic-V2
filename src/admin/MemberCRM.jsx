@@ -1,9 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
-import DigitalIdCard from '../components/DigitalIDCard' 
 import * as XLSX from 'xlsx' 
-import { Search, Trash2, Edit, User, X, Shield, CheckSquare, Square, FileSpreadsheet, Upload, Download, Save, AlertCircle, Settings, ExternalLink, Zap, Crown, Flame, Cloud, Loader2, Ban, ShieldAlert, ShoppingCart, PlusCircle, ArrowUpDown, ChevronUp, ChevronDown, Users, Award, CheckCircle, XCircle } from 'lucide-react'
+import { Search, Trash2, Edit, User, X, Shield, CheckSquare, Square, FileSpreadsheet, Upload, Download, Save, AlertCircle, Settings, ExternalLink, Zap, Crown, Flame, Cloud, Loader2, Ban, ShieldAlert, ShoppingCart, PlusCircle, ArrowUpDown, ChevronUp, ChevronDown, Users, Award, CheckCircle, XCircle, HeartPulse, Activity, UserCheck } from 'lucide-react'
 
 export default function MemberCRM() {
   const [members, setMembers] = useState([])
@@ -25,6 +24,7 @@ export default function MemberCRM() {
   // ✏️ 編輯模式
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [editingMember, setEditingMember] = useState(null)
+  const [savingMember, setSavingMember] = useState(false)
 
   // 🔽 排序系統
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'desc' })
@@ -70,7 +70,6 @@ export default function MemberCRM() {
       navigate(`/admin/members?view=${targetView}`)
   }
 
-  // 🌟 精準統計：取消 ACTIVE 必須是「當屆會員」的嚴格限制，把非當屆醫護鐵人救回來
   const fetchGlobalStats = async () => {
       try {
           const [
@@ -81,7 +80,7 @@ export default function MemberCRM() {
           ] = await Promise.all([
               supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'SUPER_ADMIN'),
               supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'TOURNAMENT_DIRECTOR'),
-              supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'VERIFIED_MEDIC'), // 🌟 移除了 .eq('is_current_member', 'Y')
+              supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'VERIFIED_MEDIC'), 
               supabase.from('profiles').select('*', { count: 'exact', head: true }).or('role.eq.USER,role.is.null') 
           ])
 
@@ -102,7 +101,7 @@ export default function MemberCRM() {
       let query = supabase.from('profiles').select('*', { count: 'exact' }).order('created_at', { ascending: false })
       
       if (currentView === 'COMMAND') query = query.or('role.eq.SUPER_ADMIN,role.eq.TOURNAMENT_DIRECTOR,is_vip.eq.Y')
-      else if (currentView === 'ACTIVE') query = query.eq('role', 'VERIFIED_MEDIC') // 🌟 核心修正：只要是醫護鐵人就撈出來，不再強迫必須繳費
+      else if (currentView === 'ACTIVE') query = query.eq('role', 'VERIFIED_MEDIC') 
       else if (currentView === 'RESERVE') query = query.or('role.eq.USER,role.is.null')
       else if (currentView === 'RISK') query = query.lt('license_expiry', new Date().toISOString().slice(0,10))
       else if (currentView === 'BLACKLIST') query = query.eq('is_blacklisted', 'Y')
@@ -142,6 +141,7 @@ export default function MemberCRM() {
   
   const handleSaveMember = async () => {
       if (!editingMember) return
+      setSavingMember(true)
       try {
           const { count, _exact, ...cleanData } = editingMember;
 
@@ -151,8 +151,12 @@ export default function MemberCRM() {
           setIsEditModalOpen(false)
           await fetchGlobalStats() 
           await fetchMembers()
-          
-      } catch (err) { alert("更新失敗: " + err.message) }
+          alert("✅ 會員資料更新成功！")
+      } catch (err) { 
+          alert("更新失敗: " + err.message) 
+      } finally {
+          setSavingMember(false)
+      }
   }
 
   function getPriorityScore(m) {
@@ -178,7 +182,7 @@ export default function MemberCRM() {
   }
   const toggleSelection = (id) => { const newSet = new Set(selectedIds); if (newSet.has(id)) newSet.delete(id); else newSet.add(id); setSelectedIds(newSet) }
   const toggleSelectAll = () => { if (selectedIds.size === members.length) setSelectedIds(new Set()); else setSelectedIds(new Set(members.map(m => m.id))) }
-  const handleDelete = async (id) => { if(window.confirm('確定刪除?')) { await supabase.from('profiles').delete().eq('id', id); setMembers(prev => prev.filter(m => m.id !== id)); fetchGlobalStats() } }
+  const handleDelete = async (id) => { if(window.confirm('確定刪除此會員? (此操作無法復原)')) { await supabase.from('profiles').delete().eq('id', id); setMembers(prev => prev.filter(m => m.id !== id)); fetchGlobalStats() } }
   
   const handleFileUpload = async(e) => { /* 匯入邏輯隱藏以節省篇幅 */ }
   
@@ -263,6 +267,25 @@ export default function MemberCRM() {
     } catch (err) { alert('匯出失敗: ' + err.message) } finally { setExporting(false) }
   }
 
+  // 共用的 Input 元件，保持程式碼整潔
+  const EditInput = ({ label, name, type = "text", options = [] }) => (
+      <div>
+          <label className="block text-xs font-bold text-slate-500 mb-1">{label}</label>
+          {type === 'select' ? (
+              <select className="w-full border border-slate-300 p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 bg-white" 
+                  value={editingMember[name] || ''} 
+                  onChange={e => setEditingMember({...editingMember, [name]: e.target.value})}>
+                  <option value="">請選擇</option>
+                  {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+              </select>
+          ) : (
+              <input type={type} className="w-full border border-slate-300 p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" 
+                  value={editingMember[name] || ''} 
+                  onChange={e => setEditingMember({...editingMember, [name]: e.target.value})}/>
+          )}
+      </div>
+  )
+
   return (
     <div className="space-y-6 pb-20 relative animate-fade-in">
       <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".csv" className="hidden" />
@@ -275,7 +298,6 @@ export default function MemberCRM() {
                     全部人員總表 
                     <span className="text-xs px-2 py-1 rounded text-white bg-blue-600">{currentView}</span>
                 </h1>
-                {/* 🌟 再次修正：副標題改為 自動配對版 V10.8 */}
                 <p className="text-sm text-slate-500">自動配對版 V10.8</p>
             </div>
             <div className="flex gap-2">
@@ -331,7 +353,7 @@ export default function MemberCRM() {
 
       {/* 搜尋列 */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-          <input type="text" placeholder="搜尋姓名、Email、電話..." className="w-full pl-4 pr-4 py-2 bg-slate-50 border rounded-lg outline-none" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}/>
+          <input type="text" placeholder="搜尋姓名、Email、電話..." className="w-full pl-4 pr-4 py-2 bg-slate-50 border rounded-lg outline-none focus:bg-white focus:ring-2 focus:ring-blue-100 transition-all" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}/>
       </div>
 
       {/* 購物車操作列 */}
@@ -355,17 +377,17 @@ export default function MemberCRM() {
                     </th>
                     
                     {columnGroups.group1_general && <th className="p-4 bg-blue-50 text-blue-700 hover:bg-blue-100" onClick={() => handleSort('medical_license')}>
-                        <div className="flex items-center gap-1">大會資料 (L) {sortConfig.key==='medical_license' && <ArrowUpDown size={14}/>}</div>
+                        <div className="flex items-center gap-1">大會資料 (證照/血型) {sortConfig.key==='medical_license' && <ArrowUpDown size={14}/>}</div>
                     </th>}
                     
                     {columnGroups.group2_event && <th className="p-4 bg-red-50 text-red-700 hover:bg-red-100" onClick={() => handleSort('priority')}>
-                        <div className="flex items-center gap-1">優先權分數 {sortConfig.key==='priority' && <ArrowUpDown size={14}/>}</div>
+                        <div className="flex items-center gap-1">狀態與優先權 {sortConfig.key==='priority' && <ArrowUpDown size={14}/>}</div>
                     </th>}
                     
-                    {columnGroups.group3_logistics && <th className="p-4 bg-amber-50 text-amber-700 hover:bg-amber-100">後勤</th>}
-                    {columnGroups.group4_ext && <th className="p-4 bg-purple-50 text-purple-700">擴充</th>}
+                    {columnGroups.group3_logistics && <th className="p-4 bg-amber-50 text-amber-700 hover:bg-amber-100">後勤資訊 (尺寸/交通/住宿/緊急聯絡人)</th>}
+                    {columnGroups.group4_ext && <th className="p-4 bg-purple-50 text-purple-700">擴充註記 (Admin Note)</th>}
                     
-                    <th className="p-4 text-right">操作</th>
+                    <th className="p-4 text-right bg-slate-50">操作</th>
                 </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -374,46 +396,62 @@ export default function MemberCRM() {
                     const isInCart = exportCart.has(member.id)
                     return (
                     <tr key={member.id} className={`group transition-colors ${isSelected ? 'bg-blue-50' : isInCart ? 'bg-green-50/50' : 'hover:bg-slate-50'}`}>
-                         <td className="p-4 text-center"><button onClick={() => toggleSelection(member.id)}><CheckSquare size={20} className={isSelected ? 'text-blue-600' : 'text-slate-300'}/></button></td>
+                         <td className="p-4 text-center"><button onClick={() => toggleSelection(member.id)}><CheckSquare size={20} className={isSelected ? 'text-blue-600' : 'text-slate-300 hover:text-blue-400'}/></button></td>
                          
                          <td className="p-4">
                              <div className="font-bold text-slate-800 flex items-center gap-2">
                                  {member.full_name}
-                                 {member.is_vip === 'Y' && <Crown size={14} className="text-amber-500"/>}
-                                 {isInCart && <ShoppingCart size={14} className="text-green-600"/>}
+                                 {member.is_vip === 'Y' && <Crown size={14} className="text-amber-500" title="VIP"/>}
+                                 {isInCart && <ShoppingCart size={14} className="text-green-600" title="已在購物車"/>}
                              </div>
                              <div className="text-xs text-slate-400 font-mono">{member.email}</div>
+                             <div className="text-[10px] text-slate-500 mt-1">{member.phone || '無電話'}</div>
                          </td>
 
                          {columnGroups.group1_general && <td className="p-4 text-sm text-slate-600">
-                             <div>{member.english_name}</div>
-                             <div className="flex gap-1 mt-1"><span className="text-xs bg-slate-100 px-1 rounded">{member.medical_license}</span></div>
+                             <div className="flex items-center gap-2 mb-1">
+                                 <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-bold">{member.medical_license || '無證照資料'}</span>
+                                 {member.blood_type && <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold">{member.blood_type}</span>}
+                             </div>
+                             <div className="text-xs text-slate-500">ID: {member.national_id || '-'}</div>
                          </td>}
 
                          {columnGroups.group2_event && <td className="p-4">
-                             {renderPriorityIcon(member)}
-                             <div className="flex gap-2 items-center mt-1">
+                             <div className="mb-1">{renderPriorityIcon(member)}</div>
+                             <div className="flex gap-2 items-center mt-1 flex-wrap">
                                  {member.is_current_member === 'Y' ? (
-                                     <span className="text-[10px] text-green-600 bg-green-100 px-1.5 rounded flex items-center gap-0.5 font-bold"><CheckCircle size={10}/>當屆</span>
+                                     <span className="text-[10px] text-green-700 bg-green-100 px-1.5 py-0.5 rounded flex items-center gap-0.5 font-bold"><CheckCircle size={10}/>當屆</span>
                                  ) : (
-                                     <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 rounded flex items-center gap-0.5 font-medium"><XCircle size={10}/>非當屆</span>
+                                     <span className="text-[10px] text-slate-500 bg-slate-200 px-1.5 py-0.5 rounded flex items-center gap-0.5 font-medium"><XCircle size={10}/>非當屆</span>
                                  )}
-                                 <div className="text-xs text-slate-400 flex gap-1">
-                                     {member.role} | 積分:{getPriorityScore(member)}
-                                 </div>
+                                 <span className="text-[10px] font-bold text-slate-500 bg-white border border-slate-200 px-1.5 py-0.5 rounded">
+                                     {member.role === 'VERIFIED_MEDIC' ? '醫護鐵人' : member.role === 'USER' ? '一般會員' : member.role}
+                                 </span>
                              </div>
                          </td>}
 
                          {columnGroups.group3_logistics && <td className="p-4 text-sm">
-                             <div>尺: <span className="font-bold">{member.shirt_size}</span> | 住: {member.stay_pref}</div>
-                             <div className="text-xs text-slate-400 truncate w-32">{member.address}</div>
+                             <div className="flex items-center gap-2 mb-1">
+                                 <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-bold" title="衣服尺寸">👕 {member.shirt_size || '?'}</span>
+                                 <span className="text-xs text-slate-500" title="交通/住宿">{member.transport_pref || '-'} / {member.stay_pref || '-'}</span>
+                             </div>
+                             {member.emergency_name && (
+                                 <div className="text-[10px] text-red-500 flex items-center gap-1 mt-1">
+                                     <ShieldAlert size={10}/> {member.emergency_name} ({member.emergency_phone})
+                                 </div>
+                             )}
+                             <div className="text-[10px] text-slate-400 truncate w-40 mt-1" title={member.address}>{member.address || '無地址'}</div>
                          </td>}
 
-                         {columnGroups.group4_ext && <td className="p-4 text-xs text-purple-600 font-mono">{member.admin_note || '-'}</td>}
+                         {columnGroups.group4_ext && <td className="p-4 text-xs text-purple-600 font-medium">
+                             <div className="bg-purple-50 p-2 rounded-lg line-clamp-2" title={member.admin_note}>{member.admin_note || '無註記'}</div>
+                         </td>}
 
-                         <td className="p-4 text-right flex justify-end gap-2">
-                             <button onClick={() => handleEditClick(member)} className="p-2 text-blue-500 hover:bg-blue-50 rounded" title="編輯人員"><Edit size={16}/></button>
-                             <button onClick={() => handleDelete(member.id)} className="p-2 text-red-400 hover:bg-red-50 rounded"><Trash2 size={16}/></button>
+                         <td className="p-4 text-right">
+                             <div className="flex justify-end gap-2">
+                                 <button onClick={() => handleEditClick(member)} className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors border border-transparent hover:border-blue-200 shadow-sm bg-white" title="編輯會員完整資料"><Edit size={16}/></button>
+                                 <button onClick={() => handleDelete(member.id)} className="p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-lg transition-colors border border-transparent hover:border-red-200 shadow-sm bg-white" title="刪除此會員"><Trash2 size={16}/></button>
+                             </div>
                          </td>
                     </tr>
                 )})}
@@ -423,65 +461,146 @@ export default function MemberCRM() {
 
       {/* 分頁控制 */}
       <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-200 mt-4">
-          <button disabled={page === 1} onClick={() => setPage(p => p - 1)} className="px-4 py-2 bg-slate-100 rounded hover:bg-slate-200 disabled:opacity-50 font-bold text-slate-600">上一頁</button>
-          <span className="font-bold text-slate-600">第 {page} / {totalPages || 1} 頁</span>
-          <button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)} className="px-4 py-2 bg-slate-100 rounded hover:bg-slate-200 disabled:opacity-50 font-bold text-slate-600">下一頁</button>
+          <button disabled={page === 1} onClick={() => setPage(p => p - 1)} className="px-4 py-2 bg-slate-100 rounded-lg hover:bg-slate-200 disabled:opacity-50 font-bold text-slate-600 transition-colors">上一頁</button>
+          <span className="font-bold text-slate-600 bg-slate-50 px-4 py-1.5 rounded-lg border border-slate-200">第 {page} / {totalPages || 1} 頁</span>
+          <button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)} className="px-4 py-2 bg-slate-100 rounded-lg hover:bg-slate-200 disabled:opacity-50 font-bold text-slate-600 transition-colors">下一頁</button>
       </div>
 
-      {/* ✏️ 整合數位 ID 卡的編輯視窗 */}
+      {/* 🌟 全新 CRM 專業編輯面板 (去軍事化、全欄位) */}
       {isEditModalOpen && editingMember && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 animate-fade-in backdrop-blur-md">
-              <div className="bg-white/10 backdrop-blur-xl p-8 rounded-3xl shadow-2xl w-full max-w-5xl border border-white/20 flex flex-col md:flex-row gap-8 overflow-y-auto max-h-[90vh]">
+          <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[100] p-4 animate-fade-in backdrop-blur-sm" onClick={() => setIsEditModalOpen(false)}>
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col max-h-[90vh] overflow-hidden" onClick={e => e.stopPropagation()}>
                   
-                  {/* 左邊：數位 ID 卡預覽 */}
-                  <div className="w-full md:w-1/3 flex flex-col items-center justify-start pt-4">
-                      <h4 className="text-white font-bold mb-4 flex items-center gap-2"><Award/> 數位戰術識別證</h4>
-                      <DigitalIdCard member={editingMember} />
+                  {/* Header */}
+                  <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
+                      <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
+                          <UserCheck className="text-blue-600"/> 會員資料管理 (CRM)
+                          <span className="text-xs font-bold text-slate-500 bg-white px-2 py-1 rounded border shadow-sm ml-2">ID: {editingMember.id.substring(0,8)}</span>
+                      </h3>
+                      <button onClick={() => setIsEditModalOpen(false)} className="p-2 text-slate-400 hover:bg-slate-200 rounded-full transition-colors"><X size={20}/></button>
                   </div>
 
-                  {/* 右邊：編輯表單 */}
-                  <div className="w-full md:w-2/3 bg-white rounded-2xl p-6 shadow-xl">
-                      <h3 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2">
-                          <Edit className="text-blue-600"/> 編輯人員資料
-                      </h3>
-                      
+                  {/* Body (雙欄設計) */}
+                  <div className="p-6 overflow-y-auto custom-scrollbar bg-slate-50 flex-1">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                          <div className="space-y-4">
-                              <h4 className="font-bold text-slate-400 uppercase text-xs border-b pb-1">基本識別</h4>
-                              <div><label className="block text-sm font-bold text-slate-700">姓名</label>
-                              <input className="w-full border p-2 rounded" value={editingMember.full_name || ''} onChange={e => setEditingMember({...editingMember, full_name: e.target.value})}/></div>
-                              <div><label className="block text-sm font-bold text-slate-700">Email (帳號)</label>
-                              <input className="w-full border p-2 rounded bg-slate-100 text-slate-500" disabled value={editingMember.email || ''}/></div>
-                              <div><label className="block text-sm font-bold text-slate-700">手機</label>
-                              <input className="w-full border p-2 rounded" value={editingMember.phone || ''} onChange={e => setEditingMember({...editingMember, phone: e.target.value})}/></div>
+                          
+                          {/* 左欄：核心基本資料 */}
+                          <div className="space-y-6">
+                              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                                  <h4 className="font-black text-slate-800 border-b pb-2 flex items-center gap-2"><User size={16} className="text-indigo-500"/> 核心基本資料</h4>
+                                  
+                                  <div className="grid grid-cols-2 gap-4">
+                                      <EditInput label="中文姓名" name="full_name" />
+                                      <EditInput label="英文姓名" name="english_name" />
+                                  </div>
+                                  
+                                  <div>
+                                      <label className="block text-xs font-bold text-slate-500 mb-1">系統登入 Email (唯讀)</label>
+                                      <input className="w-full border border-slate-200 p-2.5 rounded-lg bg-slate-100 text-slate-500 font-mono text-sm cursor-not-allowed" disabled value={editingMember.email || ''}/>
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-4">
+                                      <EditInput label="身分證字號" name="national_id" />
+                                      <EditInput label="生理性別" name="gender" type="select" options={['男', '女']} />
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-4">
+                                      <EditInput label="出生年月日" name="birthday" type="date" />
+                                      <EditInput label="手機號碼" name="phone" />
+                                  </div>
+                                  <EditInput label="聯絡信箱 (可收信)" name="contact_email" type="email" />
+                                  <EditInput label="通訊地址" name="address" />
+                              </div>
+
+                              {/* 權限與狀態 */}
+                              <div className="bg-blue-50/50 p-5 rounded-xl border border-blue-100 shadow-sm space-y-4">
+                                  <h4 className="font-black text-blue-900 border-b border-blue-200 pb-2 flex items-center gap-2"><Shield size={16} className="text-blue-500"/> 系統權限與狀態</h4>
+                                  
+                                  <div>
+                                      <label className="block text-xs font-bold text-slate-500 mb-1">系統角色 (Role)</label>
+                                      <select className="w-full border border-slate-300 p-2.5 rounded-lg outline-none font-bold bg-white focus:ring-2 focus:ring-blue-500" 
+                                          value={editingMember.role || 'USER'} 
+                                          onChange={e => setEditingMember({...editingMember, role: e.target.value})}>
+                                          <option value="USER">⚪ 一般會員 (USER)</option>
+                                          <option value="VERIFIED_MEDIC">🟢 醫護鐵人 (VERIFIED_MEDIC)</option>
+                                          <option value="TOURNAMENT_DIRECTOR">🔵 賽事總監 (DIRECTOR)</option>
+                                          <option value="SUPER_ADMIN">🔴 超級管理員 (ADMIN)</option>
+                                      </select>
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-3 bg-white p-3 rounded-lg border border-slate-200">
+                                      <label className="flex items-center gap-2 cursor-pointer p-1 hover:bg-slate-50 rounded">
+                                          <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={editingMember.is_current_member === 'Y'} onChange={e => setEditingMember({...editingMember, is_current_member: e.target.checked ? 'Y' : 'N'})}/>
+                                          <span className="font-bold text-sm text-slate-700">當屆會員</span>
+                                      </label>
+                                      <label className="flex items-center gap-2 cursor-pointer p-1 hover:bg-amber-50 rounded">
+                                          <input type="checkbox" className="w-4 h-4 accent-amber-500" checked={editingMember.is_vip === 'Y'} onChange={e => setEditingMember({...editingMember, is_vip: e.target.checked ? 'Y' : 'N'})}/>
+                                          <span className="font-bold text-sm text-amber-700 flex items-center gap-1"><Crown size={14}/> VIP 身分</span>
+                                      </label>
+                                      <label className="flex items-center gap-2 cursor-pointer p-1 hover:bg-indigo-50 rounded">
+                                          <input type="checkbox" className="w-4 h-4 accent-indigo-500" checked={editingMember.is_team_leader === 'Y'} onChange={e => setEditingMember({...editingMember, is_team_leader: e.target.checked ? 'Y' : 'N'})}/>
+                                          <span className="font-bold text-sm text-indigo-700">帶隊教官</span>
+                                      </label>
+                                      <label className="flex items-center gap-2 cursor-pointer p-1 hover:bg-green-50 rounded">
+                                          <input type="checkbox" className="w-4 h-4 accent-green-500" checked={editingMember.is_new_member === 'Y'} onChange={e => setEditingMember({...editingMember, is_new_member: e.target.checked ? 'Y' : 'N'})}/>
+                                          <span className="font-bold text-sm text-green-700">新人標記</span>
+                                      </label>
+                                  </div>
+                              </div>
                           </div>
 
-                          <div className="space-y-4">
-                              <h4 className="font-bold text-slate-400 uppercase text-xs border-b pb-1">戰略狀態</h4>
-                              <div><label className="block text-sm font-bold text-slate-700">權限 Role</label>
-                              <select className="w-full border p-2 rounded" value={editingMember.role || 'USER'} onChange={e => setEditingMember({...editingMember, role: e.target.value})}>
-                                  <option value="USER">⚪ 一般會員</option>
-                                  <option value="VERIFIED_MEDIC">🟢 醫護鐵人</option>
-                                  <option value="TOURNAMENT_DIRECTOR">🔵 賽事總監</option>
-                                  <option value="SUPER_ADMIN">🔴 超級管理員</option>
-                              </select></div>
-                              <div className="flex gap-4">
-                                  <label className="flex items-center gap-2 cursor-pointer">
-                                      <input type="checkbox" checked={editingMember.is_vip === 'Y'} onChange={e => setEditingMember({...editingMember, is_vip: e.target.checked ? 'Y' : 'N'})}/>
-                                      <span className="font-bold text-amber-600">VIP 皇冠</span>
-                                  </label>
-                                  <label className="flex items-center gap-2 cursor-pointer">
-                                      <input type="checkbox" checked={editingMember.is_current_member === 'Y'} onChange={e => setEditingMember({...editingMember, is_current_member: e.target.checked ? 'Y' : 'N'})}/>
-                                      <span className="font-bold text-blue-600">當屆會員</span>
-                                  </label>
+                          {/* 右欄：後勤與備註 */}
+                          <div className="space-y-6">
+                              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                                  <h4 className="font-black text-slate-800 border-b pb-2 flex items-center gap-2"><HeartPulse size={16} className="text-rose-500"/> 醫護與後勤資訊</h4>
+                                  
+                                  <div className="grid grid-cols-2 gap-4">
+                                      <EditInput label="醫護證照種類" name="medical_license" />
+                                      <EditInput label="證照有效期限" name="license_expiry" type="date" />
+                                  </div>
+                                  
+                                  <div className="grid grid-cols-2 gap-4">
+                                      <EditInput label="血型" name="blood_type" type="select" options={['A', 'B', 'O', 'AB', '未知']} />
+                                      <EditInput label="衣服尺寸" name="shirt_size" type="select" options={['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL']} />
+                                  </div>
+
+                                  <EditInput label="特殊病史與過敏" name="medical_history" />
+
+                                  <div className="grid grid-cols-2 gap-4">
+                                      <EditInput label="交通偏好" name="transport_pref" type="select" options={['自行前往', '需要共乘', '搭乘大眾運輸']} />
+                                      <EditInput label="住宿偏好" name="stay_pref" type="select" options={['自行處理', '需要代訂']} />
+                                  </div>
+                              </div>
+
+                              <div className="bg-rose-50/50 p-5 rounded-xl border border-rose-100 shadow-sm space-y-4">
+                                  <h4 className="font-black text-rose-900 border-b border-rose-200 pb-2 flex items-center gap-2"><AlertCircle size={16} className="text-rose-500"/> 緊急聯絡人</h4>
+                                  <EditInput label="聯絡人姓名" name="emergency_name" />
+                                  <div className="grid grid-cols-2 gap-4">
+                                      <EditInput label="關係" name="emergency_relation" />
+                                      <EditInput label="緊急電話" name="emergency_phone" />
+                                  </div>
+                              </div>
+
+                              <div className="bg-amber-50/50 p-5 rounded-xl border border-amber-100 shadow-sm space-y-2">
+                                  <h4 className="font-black text-amber-900 border-b border-amber-200 pb-2 flex items-center gap-2"><Settings size={16} className="text-amber-600"/> 管理員內部註記 (Admin Note)</h4>
+                                  <textarea 
+                                      className="w-full border border-amber-200 p-3 rounded-lg outline-none focus:ring-2 focus:ring-amber-400 bg-white resize-none text-sm font-medium" 
+                                      rows="3" 
+                                      placeholder="僅管理員可見的內部備註..."
+                                      value={editingMember.admin_note || ''}
+                                      onChange={e => setEditingMember({...editingMember, admin_note: e.target.value})}
+                                  ></textarea>
                               </div>
                           </div>
                       </div>
+                  </div>
 
-                      <div className="mt-8 flex gap-4">
-                          <button onClick={handleSaveMember} className="flex-1 bg-blue-600 text-white font-bold py-3 rounded-xl hover:bg-blue-700 shadow-lg">💾 儲存變更</button>
-                          <button onClick={() => setIsEditModalOpen(false)} className="flex-1 bg-slate-100 text-slate-600 font-bold py-3 rounded-xl hover:bg-slate-200">取消</button>
-                      </div>
+                  {/* Footer Actions */}
+                  <div className="p-5 border-t border-slate-200 bg-white flex gap-4 shrink-0 shadow-[0_-10px_15px_rgba(0,0,0,0.03)]">
+                      <button onClick={handleSaveMember} disabled={savingMember} className="flex-1 bg-blue-600 text-white font-black py-3.5 rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-600/30 transition-all active:scale-95 flex justify-center items-center gap-2 disabled:opacity-70">
+                          {savingMember ? <Loader2 className="animate-spin" size={18}/> : <Save size={18}/>} 儲存會員資料
+                      </button>
+                      <button onClick={() => setIsEditModalOpen(false)} disabled={savingMember} className="w-1/3 bg-slate-100 text-slate-600 font-bold py-3.5 rounded-xl hover:bg-slate-200 transition-colors active:scale-95 disabled:opacity-50">取消</button>
                   </div>
               </div>
           </div>
@@ -489,15 +608,15 @@ export default function MemberCRM() {
 
       {/* 購物車 Modal (升級為 Excel 匯出提示) */}
       {isCartModalOpen && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-             <div className="bg-white p-6 rounded-2xl shadow-xl max-w-sm w-full animate-fade-in-up">
-                 <div className="w-12 h-12 bg-green-100 text-green-600 rounded-full flex items-center justify-center mb-4 mx-auto"><Download size={24}/></div>
-                 <h3 className="font-black text-xl mb-2 text-center text-slate-800">匯出完整資料</h3>
-                 <p className="mb-6 text-slate-500 text-sm text-center">將匯出 {exportCart.size} 人的 A~AO 全部欄位（Excel 格式），方便您修改後丟入匯入中心。</p>
-                 <button disabled={exporting} className="w-full font-bold bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl mb-3 flex items-center justify-center gap-2 transition-colors disabled:opacity-50" onClick={handleExportCart}>
-                     {exporting ? <Loader2 className="animate-spin" size={18}/> : <><FileSpreadsheet size={18}/> 產生並下載 XLSX</>}
+          <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[110] backdrop-blur-sm animate-fade-in" onClick={() => setIsCartModalOpen(false)}>
+             <div className="bg-white p-8 rounded-[2rem] shadow-2xl max-w-sm w-full animate-bounce-in" onClick={e => e.stopPropagation()}>
+                 <div className="w-16 h-16 bg-green-50 text-green-600 rounded-2xl flex items-center justify-center mb-6 mx-auto"><Download size={32}/></div>
+                 <h3 className="font-black text-2xl mb-3 text-center text-slate-800">匯出完整資料</h3>
+                 <p className="mb-8 text-slate-500 text-sm text-center leading-relaxed">即將匯出 {exportCart.size} 位人員的 A~AO 全部欄位（Excel 格式），方便您進行離線處理或匯入中心。</p>
+                 <button disabled={exporting} className="w-full font-black bg-green-600 hover:bg-green-700 text-white py-4 rounded-xl mb-3 flex items-center justify-center gap-2 transition-all shadow-lg shadow-green-600/30 disabled:opacity-50 active:scale-95" onClick={handleExportCart}>
+                     {exporting ? <Loader2 className="animate-spin" size={20}/> : <><FileSpreadsheet size={20}/> 產生並下載 XLSX</>}
                  </button>
-                 <button className="w-full font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 py-3 rounded-xl transition-colors" onClick={()=>setIsCartModalOpen(false)}>返回</button>
+                 <button className="w-full font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 py-4 rounded-xl transition-colors active:scale-95" onClick={()=>setIsCartModalOpen(false)}>返回</button>
              </div>
           </div>
       )}

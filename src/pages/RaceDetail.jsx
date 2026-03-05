@@ -1,21 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Calendar, MapPin, Clock, CheckCircle, XCircle, Crown, Sprout, Timer, AlertTriangle, Activity, Users, ChevronLeft, Flag, Edit3, Zap, UserCheck, Loader2, ChevronRight, X, ShieldAlert } from 'lucide-react'
+import { Calendar, MapPin, Clock, CheckCircle, XCircle, Crown, Sprout, Timer, AlertTriangle, Activity, Users, ChevronLeft, Flag, Edit3, Zap, UserCheck, Loader2, ChevronRight, X, ShieldAlert, Trash2, Plus } from 'lucide-react'
 import { supabase } from '../supabaseClient'
-
-const CURRENT_USER = {
-    id: 'admin001', 
-    email: 'marco1104@gmail.com', 
-    full_name: '測試者',          
-    role: 'SUPER_ADMIN', 
-    is_current_member: 'Y', 
-    license_expiry: '2028-01-01', 
-    shirt_expiry_25: '2025-12-31', 
-    is_vip: 'Y', 
-    total_races: 52, 
-    is_team_leader: 'Y', 
-    gender: 'M' 
-}
 
 export default function RaceDetail() {
   const { id } = useParams()
@@ -26,14 +12,41 @@ export default function RaceDetail() {
   const [selectedSlot, setSelectedSlot] = useState(null)
   const [previewSlot, setPreviewSlot] = useState(null) 
   const [waitlist, setWaitlist] = useState([]) 
-  const [testCounter, setTestCounter] = useState(1)
-  
-  useEffect(() => { fetchRaceDetail(id) }, [id])
+  const [currentUser, setCurrentUser] = useState(null) // 🌟 改用真實的登入者狀態
 
-  const fetchRaceDetail = async (raceId) => {
+  // 🌟 神之手專用狀態
+  const [isGodMode, setIsGodMode] = useState(false)
+  const [insertModalOpen, setInsertModalOpen] = useState(false)
+  const [insertData, setInsertData] = useState({ slotId: null, name: '', roleTag: '' })
+
+  useEffect(() => { 
+      fetchCurrentUserAndRace() 
+  }, [id])
+
+  const fetchCurrentUserAndRace = async () => {
       setLoading(true)
       try {
-          const { data, error } = await supabase.from('races').select('*').eq('id', raceId).single()
+          // 1. 抓取真實使用者
+          const { data: { user } } = await supabase.auth.getUser()
+          let fetchedUser = null;
+          let godModeCheck = false;
+
+          if (user && user.email) {
+              const { data: profile } = await supabase.from('profiles').select('*').eq('email', user.email).maybeSingle()
+              if (profile) {
+                  fetchedUser = profile;
+                  // 🌟 判定是否為超級管理員或總監
+                  const role = profile.role?.toUpperCase() || 'USER';
+                  if (role === 'SUPER_ADMIN' || role === 'TOURNAMENT_DIRECTOR') {
+                      godModeCheck = true;
+                  }
+              }
+          }
+          setCurrentUser(fetchedUser);
+          setIsGodMode(godModeCheck);
+
+          // 2. 抓取賽事詳情
+          const { data, error } = await supabase.from('races').select('*').eq('id', id).single()
           if (error) throw error
           if (data) {
               setActiveRace({
@@ -44,30 +57,45 @@ export default function RaceDetail() {
               })
               setWaitlist(data.waitlist_data || [])
           } else { navigate('/races') }
+
       } catch (error) {
-          alert("載入賽事詳情失敗。")
+          alert("載入資料失敗。")
       } finally { setLoading(false) }
   }
 
   const getUserTier = (user) => {
+      if (!user) return 5;
       if (user.is_vip === 'Y') return 1;
       if (user.total_races < 2) return 2; return user.is_team_leader === 'Y' ? 3 : user.is_current_member === 'Y' ? 4 : 5; 
   }
 
   const checkEligibility = () => {
-      if (!activeRace) return { allPassed: false, isGodMode: false, checks: {} }
-      const isGodMode = CURRENT_USER.role === 'SUPER_ADMIN';
-      const checks = { isCurrentMember: CURRENT_USER.is_current_member === 'Y', isLicenseValid: new Date(CURRENT_USER.license_expiry) >= new Date(activeRace.date), isTriShirtValid: true, genderMatch: true }
-      if (['鐵人三項', '二鐵', '游泳'].includes(activeRace.type)) checks.isTriShirtValid = !!CURRENT_USER.shirt_expiry_25;
+      if (!activeRace || !currentUser) return { allPassed: false, checks: {} }
+      
+      const checks = { 
+          isCurrentMember: currentUser.is_current_member === 'Y', 
+          isLicenseValid: currentUser.license_expiry && new Date(currentUser.license_expiry) >= new Date(activeRace.date), 
+          isTriShirtValid: true, 
+          genderMatch: true 
+      }
+      
+      if (['鐵人三項', '二鐵', '游泳'].includes(activeRace.type)) checks.isTriShirtValid = !!currentUser.shirt_expiry_25;
+      
       if (selectedSlot) {
           const slotInfo = activeRace.slots.find(s => s.id === selectedSlot)
-          if (slotInfo?.genderLimit === 'F' && CURRENT_USER.gender === 'M') checks.genderMatch = false;
+          let uGender = 'M';
+          if(currentUser.national_id && currentUser.national_id.charAt(1) === '2') uGender = 'F';
+          if (slotInfo?.genderLimit === 'F' && uGender === 'M') checks.genderMatch = false;
       }
-      if (isGodMode) return { checks: { isCurrentMember: true, isLicenseValid: true, isTriShirtValid: true, genderMatch: true }, allPassed: true, isGodMode: true };
-      return { checks, allPassed: Object.values(checks).every(v => v === true), isGodMode: false };
+      
+      if (isGodMode) return { checks: { isCurrentMember: true, isLicenseValid: true, isTriShirtValid: true, genderMatch: true }, allPassed: true };
+      
+      return { checks, allPassed: Object.values(checks).every(v => v === true) };
   }
 
-  const { checks, allPassed, isGodMode } = checkEligibility();
+  const eligibility = checkEligibility();
+  const allPassed = eligibility.allPassed;
+  const checks = eligibility.checks;
 
   const getInitial = (name) => name ? name.replace(/[^a-zA-Z\u4e00-\u9fa5]/g, '').charAt(0) || '?' : '?'
 
@@ -78,26 +106,27 @@ export default function RaceDetail() {
   const isSelectedSlotFull = targetSlotData ? (targetSlotData.filled || 0) >= (targetSlotData.capacity || 1) : false;
 
   const handleRegister = async () => {
+      if (!currentUser) return alert("請先登入！");
       if (!selectedSlot) return alert("請先選擇您要報名的賽段！")
       if (!allPassed && !isGodMode) return alert("報名資格審查未通過，無法報名！")
 
       const now = new Date();
-      const timestamp = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}:${now.getMilliseconds().toString().padStart(3,'0')}`;
-      const entryName = `${CURRENT_USER.full_name} #${testCounter}`;
+      const timestamp = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
       
       const participantInfo = {
-          id: `${CURRENT_USER.id}-${testCounter}`,
-          name: entryName,
-          email: CURRENT_USER.email,
-          tier: getUserTier(CURRENT_USER),
-          isVip: CURRENT_USER.is_vip === 'Y',
-          isNew: CURRENT_USER.total_races < 2,
+          id: currentUser.id,
+          name: currentUser.full_name || currentUser.email.split('@')[0],
+          email: currentUser.email,
+          tier: getUserTier(currentUser),
+          isVip: currentUser.is_vip === 'Y',
+          isNew: currentUser.total_races < 2,
           timestamp: timestamp,
           slot: selectedSlot,
           isMe: true 
       };
 
       if (!isSelectedSlotFull) {
+          // 🌟 樂觀 UI：瞬間打勾更新畫面
           const updatedSlots = activeRace.slots.map(s => {
               if (s.id === selectedSlot) {
                   const currentFilled = s.filled || 0;
@@ -107,26 +136,101 @@ export default function RaceDetail() {
               return s;
           });
 
+          setActiveRace({ ...activeRace, slots: updatedSlots });
+          alert(`✅ 報名成功！您已正式加入【${targetSlotData.name}】`);
+
+          // 隱形通道寫入資料庫
           try {
               const { error } = await supabase.from('races').update({ slots_data: updatedSlots }).eq('id', activeRace.id);
               if (error) throw error;
-              setActiveRace({ ...activeRace, slots: updatedSlots });
-              alert(`✅ 報名成功！您已正式加入【${targetSlotData.name}】`);
-          } catch(e) { alert("報名寫入失敗：" + e.message) }
+          } catch(e) { alert("報名寫入資料庫異常：" + e.message) }
 
       } else {
           const newWaitlist = [...waitlist, participantInfo].sort((a, b) => a.tier !== b.tier ? a.tier - b.tier : a.timestamp.localeCompare(b.timestamp));
+          
+          setActiveRace({ ...activeRace, waitlist_data: newWaitlist });
           setWaitlist(newWaitlist);
+          alert(`⚠️ 該名額已滿，您已自動進入「候補池」。`);
 
           try {
               const { error } = await supabase.from('races').update({ waitlist_data: newWaitlist }).eq('id', activeRace.id);
               if (error) throw error;
-              setActiveRace({ ...activeRace, waitlist_data: newWaitlist });
-              alert(`⚠️ 該名額已滿，您已自動進入「候補池」。`);
-          } catch(e) { alert("候補寫入失敗：" + e.message) }
+          } catch(e) { alert("候補寫入資料庫異常：" + e.message) }
       }
-      setTestCounter(prev => prev + 1);
   }
+
+  // ================= 神之手功能 =================
+  const handleKickUser = async (slotId, userIdToKick, userName) => {
+      if(!isGodMode) return;
+      if(!window.confirm(`⚠️ 神之手警告 ⚠️\n確定要強制將【${userName}】從此賽段踢除嗎？`)) return;
+
+      const updatedSlots = activeRace.slots.map(s => {
+          if (s.id === slotId && s.assignee) {
+              const assigneesArray = s.assignee.split('|').map(str => {
+                  try { return JSON.parse(str); } catch(e) { return { id: str, name: str, isLegacy: true }; }
+              });
+              
+              const newAssigneesArray = assigneesArray.filter(p => p.id !== userIdToKick && p.name !== userIdToKick);
+              
+              const newAssigneeString = newAssigneesArray.map(p => p.isLegacy ? p.name : JSON.stringify(p)).join('|');
+              
+              return { ...s, filled: Math.max(0, s.filled - 1), assignee: newAssigneeString };
+          }
+          return s;
+      });
+
+      // 更新畫面與預覽視窗
+      setActiveRace({ ...activeRace, slots: updatedSlots });
+      const updatedPreviewSlot = updatedSlots.find(s => s.id === slotId);
+      if(updatedPreviewSlot) {
+          setPreviewSlot({...updatedPreviewSlot, assignees: parseAssignees(updatedPreviewSlot.assignee)});
+      }
+
+      try {
+          const { error } = await supabase.from('races').update({ slots_data: updatedSlots }).eq('id', activeRace.id);
+          if (error) throw error;
+      } catch(e) { alert("踢除寫入失敗：" + e.message) }
+  }
+
+  const openInsertModal = (e, slotId) => {
+      e.stopPropagation(); // 避免點擊到外層選取賽段
+      setInsertData({ slotId, name: '', roleTag: '' });
+      setInsertModalOpen(true);
+  }
+
+  const handleForceInsert = async () => {
+      if(!insertData.name.trim()) return alert("請輸入要安插的人員姓名！");
+      
+      const now = new Date();
+      const timestamp = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
+      
+      const newParticipant = {
+          id: `force_${Date.now()}`,
+          name: insertData.name,
+          timestamp: timestamp,
+          roleTag: insertData.roleTag || null,
+          isVip: false,
+          isNew: false
+      };
+
+      const updatedSlots = activeRace.slots.map(s => {
+          if (s.id === insertData.slotId) {
+              const newAssignee = s.assignee ? `${s.assignee}|${JSON.stringify(newParticipant)}` : JSON.stringify(newParticipant);
+              return { ...s, filled: (s.filled || 0) + 1, assignee: newAssignee };
+          }
+          return s;
+      });
+
+      setActiveRace({ ...activeRace, slots: updatedSlots });
+      setInsertModalOpen(false);
+
+      try {
+          const { error } = await supabase.from('races').update({ slots_data: updatedSlots }).eq('id', activeRace.id);
+          if (error) throw error;
+          alert(`✅ 已強制將【${insertData.name}】安插至名單內。`);
+      } catch(e) { alert("安插寫入失敗：" + e.message) }
+  }
+  // ==============================================
 
   const handleApproveFromWaitlist = async (user) => {
       if (!isGodMode) return;
@@ -141,12 +245,13 @@ export default function RaceDetail() {
       
       const newWaitlist = waitlist.filter(q => q.id !== user.id);
 
+      setActiveRace({ ...activeRace, slots: updatedSlots, waitlist_data: newWaitlist });
+      setWaitlist(newWaitlist);
+      alert(`✅ 已將 ${user.name} 遞補報名成功！`);
+
       try {
           const { error } = await supabase.from('races').update({ slots_data: updatedSlots, waitlist_data: newWaitlist }).eq('id', activeRace.id);
           if (error) throw error;
-          setActiveRace({ ...activeRace, slots: updatedSlots, waitlist_data: newWaitlist });
-          setWaitlist(newWaitlist);
-          alert(`✅ 已將 ${user.name} 遞補報名成功！系統已發送通知。`);
       } catch(e) { alert("核准寫入失敗：" + e.message) }
   }
 
@@ -157,7 +262,6 @@ export default function RaceDetail() {
       return acc;
   }, {});
 
-  // 🌟 讓內頁也讀得懂 roleTag (教官標記)
   const parseAssignees = (assigneeString) => {
       if (!assigneeString) return [];
       const rawAssignees = assigneeString.split('|');
@@ -165,12 +269,11 @@ export default function RaceDetail() {
           try {
               return JSON.parse(item); 
           } catch (e) {
-              return { name: item.trim(), timestamp: '舊資料匯入', isVip: false, isNew: false, isLegacy: true };
+              return { id: item.trim(), name: item.trim(), timestamp: '舊資料匯入', isLegacy: true };
           }
       });
   }
 
-  // 動態渲染徽章
   const renderRoleBadge = (roleTag) => {
       if (!roleTag) return null;
       if (roleTag === '帶隊教官') return <span className="flex items-center text-[10px] bg-indigo-100 text-indigo-700 border border-indigo-300 px-1.5 py-0.5 rounded font-black"><ShieldAlert size={10} className="mr-1"/> 帶隊官</span>;
@@ -254,8 +357,21 @@ export default function RaceDetail() {
                                                   : isFull ? 'bg-slate-50/80 border-slate-200 hover:border-slate-300' 
                                                   : 'bg-white border-slate-200 hover:border-blue-400 hover:shadow-md'}`}>
                                               
+                                              {/* 🌟 神之手：強制安插按鈕 */}
+                                              {isGodMode && (
+                                                  <div className="absolute top-4 right-4 xl:static xl:ml-auto z-10">
+                                                      <button 
+                                                          onClick={(e) => openInsertModal(e, slot.id)}
+                                                          className="bg-amber-100 hover:bg-amber-200 text-amber-700 p-1.5 rounded-lg border border-amber-300 shadow-sm transition-colors flex items-center gap-1 text-xs font-bold"
+                                                          title="神之手：強制安插人員"
+                                                      >
+                                                          <Plus size={14}/> 安插
+                                                      </button>
+                                                  </div>
+                                              )}
+
                                               <div className="flex-1 min-w-0">
-                                                  <div className="flex items-center gap-3 flex-wrap mb-1">
+                                                  <div className="flex items-center gap-3 flex-wrap mb-1 pr-16 xl:pr-0">
                                                       <h3 className={`font-black text-lg ${isFull && !isSelected ? 'text-slate-500' : 'text-slate-800'}`}>
                                                           {slot.name}
                                                       </h3>
@@ -301,7 +417,7 @@ export default function RaceDetail() {
                                                   )}
                                               </div>
                                               
-                                              <div className="flex items-center gap-4 shrink-0 xl:pt-1">
+                                              <div className="flex items-center gap-4 shrink-0 xl:pt-1 mt-4 xl:mt-0">
                                                   <div className={`text-sm font-black px-4 py-2.5 rounded-xl border flex flex-col items-center justify-center min-w-[5.5rem]
                                                       ${isFull ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-slate-100 text-slate-700 border-slate-200 shadow-inner'}`}>
                                                       <span className="text-[10px] uppercase tracking-wider text-slate-400 mb-0.5 font-bold">名額</span>
@@ -392,8 +508,8 @@ export default function RaceDetail() {
                               <div className="bg-amber-500/10 border border-amber-500/30 text-amber-400 p-4 rounded-xl text-sm font-bold flex items-start gap-3 mb-8 shadow-inner">
                                   <Zap size={20} className="shrink-0 text-amber-400 mt-0.5"/> 
                                   <div>
-                                      <div className="mb-1 text-amber-300">系統管理員模式啟用</div>
-                                      <div className="text-xs font-normal opacity-80 leading-relaxed">無限模擬報名已開啟，系統將忽略所有防呆限制。</div>
+                                      <div className="mb-1 text-amber-300">神之手模式啟用</div>
+                                      <div className="text-xs font-normal opacity-80 leading-relaxed">無視所有防呆限制，可任意強制安插或踢除人員。</div>
                                   </div>
                               </div>
                           )}
@@ -448,7 +564,7 @@ export default function RaceDetail() {
           </div>
       </div>
 
-      {/* 🌟 內頁預覽 Modal：完整顯示教官徽章 */}
+      {/* 🌟 內頁預覽 Modal：包含「神之手踢除按鈕」 */}
       {previewSlot && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-fade-in" onClick={() => setPreviewSlot(null)}>
               <div className="bg-white rounded-[2rem] shadow-2xl max-w-sm md:max-w-md w-full p-6 animate-bounce-in flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
@@ -464,7 +580,7 @@ export default function RaceDetail() {
                           const cleanName = participant.name.split('#')[0].trim();
                           
                           return (
-                          <div key={i} className="flex flex-col sm:flex-row sm:items-center gap-3 p-4 rounded-xl border border-slate-100 hover:bg-slate-50 hover:border-slate-200 transition-all cursor-default">
+                          <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl border border-slate-100 hover:bg-slate-50 hover:border-slate-200 transition-all cursor-default gap-3">
                               <div className="flex items-center gap-3">
                                   <div className="w-10 h-10 shrink-0 rounded-full flex items-center justify-center text-sm font-black text-white shadow-sm" style={{ backgroundColor: `hsl(${i * 60 + 200}, 70%, 50%)` }}>
                                       {getInitial(cleanName)}
@@ -472,7 +588,6 @@ export default function RaceDetail() {
                                   <div>
                                       <div className="font-bold text-slate-800 flex items-center gap-2 flex-wrap">
                                           {cleanName}
-                                          {/* 🌟 在這裡將後台指定的教官徽章渲染出來！ */}
                                           {renderRoleBadge(participant.roleTag)}
                                           {!participant.roleTag && participant.isVip && <span className="flex items-center text-[10px] bg-amber-100 text-amber-700 border border-amber-300 px-1.5 py-0.5 rounded font-black"><Crown size={10} className="mr-1"/> VIP</span>}
                                           {participant.isNew && <span className="flex items-center text-[10px] bg-green-100 text-green-700 border border-green-300 px-1.5 py-0.5 rounded font-black"><Sprout size={10} className="mr-1"/> 新人</span>}
@@ -483,12 +598,49 @@ export default function RaceDetail() {
                                       </div>
                                   </div>
                               </div>
-                              <div className="mt-2 sm:mt-0 sm:ml-auto text-xs text-green-600 font-bold bg-green-50 px-2 py-1 rounded w-fit border border-green-100">已確認報名</div>
+                              
+                              {/* 🌟 神之手：踢除按鈕 */}
+                              {isGodMode ? (
+                                  <button onClick={() => handleKickUser(previewSlot.id, participant.id || participant.name, participant.name)} className="shrink-0 p-2 text-red-500 hover:bg-red-100 rounded-lg transition-colors border border-transparent hover:border-red-200" title="神之手踢除">
+                                      <Trash2 size={18}/>
+                                  </button>
+                              ) : (
+                                  <div className="text-xs text-green-600 font-bold bg-green-50 px-2 py-1 rounded w-fit border border-green-100 shrink-0">已確認</div>
+                              )}
                           </div>
                       )})}
                       {(!previewSlot.assignees || previewSlot.assignees.length === 0) && <div className="text-center text-slate-400 py-10 font-medium">目前尚無人員報名</div>}
                   </div>
                   <button onClick={() => setPreviewSlot(null)} className="w-full mt-6 py-3.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl transition-colors active:scale-95 shrink-0">關閉名單</button>
+              </div>
+          </div>
+      )}
+
+      {/* 🌟 強制安插人員 Modal */}
+      {insertModalOpen && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[110] p-4 animate-fade-in" onClick={() => setInsertModalOpen(false)}>
+              <div className="bg-white rounded-[2rem] shadow-2xl max-w-sm w-full p-6 animate-bounce-in" onClick={e => e.stopPropagation()}>
+                  <h3 className="font-black text-xl text-slate-800 mb-4 flex items-center gap-2"><Zap className="text-amber-500"/> 神之手：強制安插人員</h3>
+                  <div className="space-y-4">
+                      <div>
+                          <label className="block text-sm font-bold text-slate-700 mb-1">人員姓名</label>
+                          <input type="text" className="w-full border border-slate-300 p-3 rounded-xl outline-none font-bold" placeholder="輸入要安插的姓名" value={insertData.name} onChange={e => setInsertData({...insertData, name: e.target.value})} autoFocus/>
+                      </div>
+                      <div>
+                          <label className="block text-sm font-bold text-slate-700 mb-1">賦予特殊身分 (選填)</label>
+                          <select className="w-full border border-slate-300 p-3 rounded-xl outline-none font-bold bg-white" value={insertData.roleTag} onChange={e => setInsertData({...insertData, roleTag: e.target.value})}>
+                              <option value="">無特殊身分 (一般參賽者)</option>
+                              <option value="帶隊教官">🛡️ 帶隊教官</option>
+                              <option value="賽道教官">🚩 賽道教官</option>
+                              <option value="醫護教官">🏥 醫護教官</option>
+                              <option value="官方代表">👑 官方代表</option>
+                          </select>
+                      </div>
+                  </div>
+                  <div className="flex gap-3 mt-6">
+                      <button onClick={handleForceInsert} className="flex-1 py-3.5 bg-amber-500 hover:bg-amber-600 text-white font-black rounded-xl shadow-lg shadow-amber-500/30 transition-colors">確認安插</button>
+                      <button onClick={() => setInsertModalOpen(false)} className="flex-1 py-3.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl transition-colors">取消</button>
+                  </div>
               </div>
           </div>
       )}

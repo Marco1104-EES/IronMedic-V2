@@ -1,7 +1,15 @@
 import { useState, useEffect } from 'react'
-import { Calendar, MapPin, Users, Clock, ChevronRight, Activity, Flame, ShieldAlert, Timer, CheckCircle, X, Loader2, UsersRound, Crown, Sprout, Handshake, Send, CreditCard, Flag, Settings } from 'lucide-react'
+import { Calendar, MapPin, Users, Clock, ChevronRight, Activity, Flame, ShieldAlert, Timer, CheckCircle, X, Loader2, UsersRound, Crown, Sprout, Handshake, Send, CreditCard, Flag, Settings, Bell } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
+
+// 🌟 同步 DigitalID.jsx 的通知資料來源
+const INITIAL_NOTIFICATIONS = [
+    { id: 1, tab: 'system', category: 'race', message: '新賽事已開放報名！', date: new Date().toISOString(), isRead: false },
+    { id: 2, tab: 'personal', category: 'cert', message: '您的 EMT-1 證照即將於 30 天後到期，請盡速更新。', date: new Date(Date.now() - 86400000).toISOString(), isRead: false },
+    { id: 3, tab: 'system', category: 'shop', message: '專屬 VIP 優惠：鐵人裝備商城全館 8 折！', date: new Date(Date.now() - 86400000 * 3).toISOString(), isRead: true },
+    { id: 4, tab: 'personal', category: 'old', message: '這是一則一年前的舊通知，即將被系統自動清除。', date: '2024-01-01T00:00:00.000Z', isRead: true }
+]
 
 export default function RaceEvents() {
   const [races, setRaces] = useState([])
@@ -10,26 +18,93 @@ export default function RaceEvents() {
   const [timeFilter, setTimeFilter] = useState('CURRENT_YEAR') 
 
   const [previewRace, setPreviewRace] = useState(null)
-  const [userRole, setUserRole] = useState('USER') 
   
+  // 🌟 權限快取：瞬間讀取 LocalStorage
+  const [userRole, setUserRole] = useState(() => localStorage.getItem('iron_medic_user_role') || 'USER') 
+  
+  const [onlineCount, setOnlineCount] = useState(1) 
+
+  // 🌟 加入通知狀態
+  const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS)
+
   const navigate = useNavigate()
   const CURRENT_YEAR = new Date().getFullYear()
 
   useEffect(() => {
+    // 🌟 8個月自動刪除機制 (與 DigitalID.jsx 同步)
+    const eightMonthsAgo = new Date();
+    eightMonthsAgo.setMonth(eightMonthsAgo.getMonth() - 8);
+    setNotifications(prev => prev.filter(n => new Date(n.date) >= eightMonthsAgo));
+
+    const cachedRaces = localStorage.getItem('iron_medic_races_cache');
+    if (cachedRaces) {
+        try {
+            setRaces(JSON.parse(cachedRaces));
+            setLoading(false); 
+        } catch (e) { console.log('快取讀取失敗'); }
+    }
+    
     fetchUserDataAndRaces()
+    setupRealtimePresence()
+    
+    let idleTimer;
+    const resetIdleTimer = () => {
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+            alert('您已閒置超過 30 分鐘，為了保護資料安全，系統已自動登出。');
+            supabase.auth.signOut();
+            localStorage.removeItem('iron_medic_user_role'); 
+            navigate('/login');
+        }, 30 * 60 * 1000); 
+    };
+    
+    window.addEventListener('mousemove', resetIdleTimer);
+    window.addEventListener('keypress', resetIdleTimer);
+    window.addEventListener('scroll', resetIdleTimer);
+    window.addEventListener('click', resetIdleTimer);
+    resetIdleTimer();
+
+    return () => {
+        clearTimeout(idleTimer);
+        window.removeEventListener('mousemove', resetIdleTimer);
+        window.removeEventListener('keypress', resetIdleTimer);
+        window.removeEventListener('scroll', resetIdleTimer);
+        window.removeEventListener('click', resetIdleTimer);
+    }
   }, [])
 
+  const setupRealtimePresence = () => {
+      const channel = supabase.channel('room_1', {
+          config: { presence: { key: 'user_' + Math.random().toString(36).substr(2, 9) } }
+      });
+
+      channel
+        .on('presence', { event: 'sync' }, () => {
+          const state = channel.presenceState();
+          const count = Object.keys(state).length;
+          setOnlineCount(count > 0 ? count : 1);
+        })
+        .subscribe(async (status) => {
+          if (status === 'SUBSCRIBED') {
+            await channel.track({ online_at: new Date().toISOString() })
+          }
+        });
+  }
+
   const fetchUserDataAndRaces = async () => {
-    setLoading(true)
     try {
       const { data: { user } } = await supabase.auth.getUser()
       
       if (user && user.email) {
           try {
-              const { data: profile } = await supabase.from('profiles').select('role').eq('email', user.email).maybeSingle()
-              if (profile && profile.role) {
-                  setUserRole(profile.role.toUpperCase())
-              }
+              supabase.from('profiles').select('role').eq('email', user.email).maybeSingle()
+                .then(({ data: profile }) => {
+                    if (profile) {
+                        const role = profile.role ? profile.role.toUpperCase() : 'USER';
+                        setUserRole(role);
+                        localStorage.setItem('iron_medic_user_role', role); 
+                    }
+                });
           } catch (e) { console.log("獲取身分失敗，略過", e) }
       }
 
@@ -39,7 +114,11 @@ export default function RaceEvents() {
         .order('date', { ascending: true })
 
       if (error) throw error
-      setRaces(racesData || [])
+      
+      if (racesData) {
+          setRaces(racesData);
+          localStorage.setItem('iron_medic_races_cache', JSON.stringify(racesData));
+      }
     } catch (error) {
       console.error("無法載入資料:", error)
     } finally {
@@ -123,6 +202,9 @@ export default function RaceEvents() {
                           if(!item) return; 
                           try {
                               const parsedUser = JSON.parse(item);
+                              
+                              if (parsedUser.name === '測試者' || parsedUser.id === 'test') return;
+                              
                               if(parsedUser && parsedUser.name) {
                                   participantDetails.push({
                                       name: parsedUser.name,
@@ -136,6 +218,8 @@ export default function RaceEvents() {
                               }
                           } catch (e) {
                               if (item.length > 0 && !item.startsWith('{')) { 
+                                  if (item.includes('測試者')) return;
+                                  
                                   participantDetails.push({
                                       name: item,
                                       timestamp: `10:00:00:000`, 
@@ -181,13 +265,19 @@ export default function RaceEvents() {
       return null;
   }
 
+  const unreadCountReal = notifications.filter(n => !n.isRead).length;
+
   return (
     <div className="min-h-screen bg-slate-50 pb-24 font-sans flex flex-col relative">
       <div className="bg-slate-900 pt-20 md:pt-24 pb-32 px-4 md:px-8 text-center relative overflow-hidden shrink-0">
           
+          <div className="absolute top-4 left-4 md:top-6 md:left-8 z-30 flex items-center gap-2 bg-slate-800/80 backdrop-blur-md px-3 py-1.5 md:px-4 md:py-2 rounded-full border border-slate-700 shadow-lg">
+              <div className="w-2.5 h-2.5 md:w-3 md:h-3 rounded-full bg-green-500 animate-pulse shadow-[0_0_10px_rgba(34,197,94,0.9)]"></div>
+              <span className="text-xs md:text-sm font-black text-slate-200 tracking-wider">目前在線：{onlineCount} 人</span>
+          </div>
+
           <div className="absolute top-4 right-4 md:top-6 md:right-8 z-30 flex items-center gap-3">
               
-              {/* 🌟 修正：把所有四個管理員權限都包含進來，讓賽事總監可以看到按鈕 */}
               {(['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN'].includes(userRole)) && (
                   <button 
                       onClick={() => navigate('/admin/dashboard')} 
@@ -198,11 +288,19 @@ export default function RaceEvents() {
                   </button>
               )}
 
+              {/* 🌟 核心修復：路徑改回 /my-id */}
               <button 
                   onClick={() => navigate('/my-id')} 
                   className="relative flex items-center gap-2 bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 px-3 py-2 md:px-4 md:py-2.5 rounded-full text-white text-xs md:text-sm font-bold transition-all shadow-lg shadow-black/20 active:scale-95 group"
               >
-                  <CreditCard size={16} className="group-hover:text-amber-400 transition-colors"/> 
+                  <div className="relative">
+                      <Bell size={22} className="text-white group-hover:text-amber-400 transition-colors group-hover:animate-wiggle"/> 
+                      {unreadCountReal > 0 && (
+                          <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-black text-white border-2 border-slate-900 shadow-sm animate-pulse">
+                              {unreadCountReal}
+                          </span>
+                      )}
+                  </div>
                   <span className="hidden sm:inline">我的數位 ID 卡</span>
                   <span className="sm:hidden">數位 ID</span>
               </button>
@@ -358,7 +456,6 @@ export default function RaceEvents() {
                                   <div>
                                       <div className="font-bold text-slate-800 flex items-center gap-2 flex-wrap">
                                           {cleanName}
-                                          {/* 🌟 渲染教官徽章 */}
                                           {renderRoleBadge(p.roleTag)}
                                           {!p.roleTag && p.isVip && <span className="flex items-center text-[10px] bg-amber-100 text-amber-700 border border-amber-300 px-1.5 py-0.5 rounded font-black"><Crown size={10} className="mr-1"/> VIP</span>}
                                           {p.isNew && <span className="flex items-center text-[10px] bg-green-100 text-green-700 border border-green-300 px-1.5 py-0.5 rounded font-black"><Sprout size={10} className="mr-1"/> 新人</span>}

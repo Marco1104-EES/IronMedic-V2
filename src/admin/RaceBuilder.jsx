@@ -146,6 +146,7 @@ export default function RaceBuilder() {
       }, 1000)
   }
 
+  // 🌟 核心防護：存檔時，強制用「真實名單人數」覆寫可能錯亂的 `filled`
   const handleSaveRace = async () => {
       if(!raceData.title || !raceData.date || !raceData.location) return alert("請填寫完整的賽事資訊！")
       if (slots.length === 0) return alert("請至少建立一個賽段！")
@@ -154,17 +155,24 @@ export default function RaceBuilder() {
       setIsSubmitting(true);
       try {
           const totalRequired = slots.reduce((acc, curr) => acc + Number(curr.capacity), 0);
+          
+          // 🛡️ 自動超渡機制：重新點名
+          const healedSlots = slots.map(s => ({
+              ...s,
+              filled: parseAssignees(s.assignee).length // 強制使用陣列真實長度
+          }));
+
           const payload = {
               name: raceData.title, date: raceData.date, location: raceData.location,
               type: raceData.type, status: raceData.status, image_url: raceData.imageUrl,
               is_hot: raceData.isHot, gather_time: raceData.startTime, 
-              medic_required: totalRequired, slots_data: slots 
+              medic_required: totalRequired, slots_data: healedSlots 
           };
 
           if (editId) {
               const { error } = await supabase.from('races').update(payload).eq('id', editId)
               if (error) throw error;
-              alert(`🎉 賽事「${raceData.title}」更新成功！`);
+              alert(`🎉 賽事「${raceData.title}」更新成功！（幽靈資料已清除）`);
               navigate('/admin/races') 
           } else {
               payload.medic_registered = 0; 
@@ -221,10 +229,8 @@ export default function RaceBuilder() {
           <div>
               <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
                   {editId ? <Edit3 className="text-amber-500"/> : <Flag className="text-blue-600"/>}
-                  {/* 🌟 修正3：編輯任務情報 => 編輯賽事資訊 */}
                   {editId ? '編輯賽事資訊' : '建立新任務'} 
               </h2>
-              {/* 🌟 修正3：說明文字更新 */}
               <p className="text-slate-500 text-sm mt-1">{editId ? '修改賽事內容與組別名額，儲存後將即時生效。' : '請在此設定賽事的基本資訊、屬性，並規劃各組別的賽段與人力需求。'}</p>
           </div>
           <button onClick={handleSaveRace} disabled={isSubmitting} className={`px-8 py-3 rounded-xl font-black shadow-lg transition-all flex items-center gap-2 ${isSubmitting ? 'bg-slate-400 text-white cursor-not-allowed' : editId ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-amber-500/30' : 'bg-slate-900 hover:bg-blue-600 text-white'}`}>
@@ -320,7 +326,10 @@ export default function RaceBuilder() {
                   <div className="space-y-6">
                       {slots.map((slot, index) => {
                           const assignees = parseAssignees(slot.assignee);
-                          const isFull = slot.filled >= slot.capacity && slot.capacity > 0;
+                          
+                          // 🌟 真實防護：直接計算陣列長度，不再理會可能壞掉的 slot.filled
+                          const actualFilled = assignees.length; 
+                          const isFull = actualFilled >= slot.capacity && slot.capacity > 0;
 
                           return (
                           <div key={slot.id} className={`p-5 rounded-xl border-2 relative group transition-all ${isFull ? 'border-green-300 bg-green-50/20' : 'border-slate-100 bg-slate-50 hover:border-blue-300'}`}>
@@ -345,7 +354,8 @@ export default function RaceBuilder() {
                               <div className="bg-white rounded-lg p-4 border border-slate-200 shadow-inner">
                                   <div className="text-xs font-bold text-slate-500 mb-3 flex items-center justify-between border-b border-slate-100 pb-2">
                                       <span className="flex items-center gap-1"><UsersRound size={14}/> 報名名單與職務指派</span>
-                                      <span className={`${isFull ? 'text-green-600' : 'text-blue-600'}`}>已報名: {slot.filled || 0} / {slot.capacity}</span>
+                                      {/* 🌟 顯示真實的人數 */}
+                                      <span className={`${isFull ? 'text-green-600' : 'text-blue-600'}`}>已報名: {actualFilled} / {slot.capacity}</span>
                                   </div>
                                   
                                   {assignees.length > 0 ? (

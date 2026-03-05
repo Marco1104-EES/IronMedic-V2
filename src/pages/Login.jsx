@@ -10,7 +10,6 @@ export default function Login() {
   const [errorMsg, setErrorMsg] = useState('')
   const navigate = useNavigate()
 
-  // ================= 🌟 核心：Google 第三方登入 =================
   const handleGoogleLogin = async () => {
     setErrorMsg('')
     setLoading(true)
@@ -18,7 +17,6 @@ export default function Login() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          // 🌟 登入成功後統一導向「賽事大廳」
           redirectTo: `${window.location.origin}/races` 
         }
       })
@@ -29,7 +27,6 @@ export default function Login() {
     }
   }
 
-  // ================= 傳統：帳號密碼登入 (備用通道) =================
   const handleEmailLogin = async (e) => {
     e.preventDefault()
     if (!email || !password) {
@@ -49,7 +46,7 @@ export default function Login() {
       if (error) throw error
       
       if (data.user) {
-          // 🌟 登入成功後統一導向「賽事大廳」
+          // 🚀 極速通關：不再等待其他資料，拿到通行證瞬間跳轉！
           navigate('/races')
       }
     } catch (error) {
