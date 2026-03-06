@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Outlet, useNavigate, useLocation, Link } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
-import { LayoutDashboard, Users, LogOut, Loader2, ShieldAlert, ShieldCheck, UserPlus, AlertTriangle, Ban, ServerCog, UploadCloud, Flag, History, CalendarClock, Menu, X, Crown, Home } from 'lucide-react'
+import { LayoutDashboard, Users, LogOut, Loader2, ShieldAlert, ShieldCheck, UserPlus, AlertTriangle, Ban, ServerCog, UploadCloud, Flag, History, CalendarClock, Menu, X, Crown, Home, Bell } from 'lucide-react'
 
 // 🌟 定義四大後台通行權限
 const VALID_ADMIN_ROLES = ['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN'];
@@ -12,13 +12,20 @@ export default function AdminLayout() {
   const [userEmail, setUserEmail] = useState('')
   const [userRole, setUserRole] = useState('') 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+  
+  // 🌟 新增：未讀通知數量狀態
+  const [unreadCount, setUnreadCount] = useState(0)
+
   const navigate = useNavigate()
   const location = useLocation()
 
   const searchParams = new URLSearchParams(location.search)
   const currentView = searchParams.get('view') || 'ALL'
 
-  useEffect(() => { checkAdminPrivileges() }, [])
+  useEffect(() => { 
+      checkAdminPrivileges() 
+      fetchUnreadCount() // 載入時撈取通知數量
+  }, [])
 
   useEffect(() => {
     const handleResize = () => {
@@ -27,6 +34,25 @@ export default function AdminLayout() {
     window.addEventListener('resize', handleResize)
     return () => window.removeEventListener('resize', handleResize)
   }, [])
+
+  // 🌟 撈取近3天的變更紀錄作為未讀通知數
+  const fetchUnreadCount = async () => {
+      try {
+          const threeDaysAgo = new Date();
+          threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+          
+          const { count, error } = await supabase
+              .from('admin_notifications')
+              .select('*', { count: 'exact', head: true })
+              .gte('created_at', threeDaysAgo.toISOString())
+              
+          if (!error && count !== null) {
+              setUnreadCount(count)
+          }
+      } catch (error) {
+          console.error("無法撈取通知數量", error)
+      }
+  }
 
   const checkAdminPrivileges = async () => {
     try {
@@ -72,12 +98,15 @@ export default function AdminLayout() {
       { 
           title: "系統總覽",
           items: [
-              // 🌟 修正1：營運數據儀表板 => 醫鐵數據儀表板
-              { path: '/admin/dashboard', icon: <LayoutDashboard size={18}/>, label: '醫鐵數據儀表板' }
+              // 🌟 修正1：營運數據儀表板 => 醫鐵數據儀表板 (已於原檔修正)
+              { path: '/admin/dashboard', icon: <LayoutDashboard size={18}/>, label: '醫鐵數據儀表板' },
+              // 🌟 新增：醫鐵通知中心，指向 dashboard 並帶參數，防閃退
+              { path: '/admin/dashboard', view: 'NOTIFICATIONS', icon: <Bell size={18}/>, label: '醫鐵通知中心', badge: unreadCount }
           ]
       },
       {
-          title: "賽事與派班管理",
+          // 🌟 修正：賽事與派班管理 => 賽事任務管理
+          title: "賽事任務管理",
           items: [
               { path: '/admin/races', icon: <Flag size={18}/>, label: '🚩 賽事任務總覽' },
               { path: '/admin/races', view: 'HISTORY', icon: <History size={18}/>, label: '📜 歷史任務結算' },
@@ -90,7 +119,7 @@ export default function AdminLayout() {
           items: [
               { path: '/admin/members', view: null, icon: <Users size={18}/>, label: '全部人員總表' },
               { path: '/admin/members', view: 'COMMAND', icon: <ShieldAlert size={18}/>, label: '🅰️ 核心幹部 (VIP)' },
-              // 🌟 修正1：活躍醫護會員 => 活躍醫鐵會員
+              // 🌟 修正1：活躍醫護會員 => 活躍醫鐵會員 (已於原檔修正)
               { path: '/admin/members', view: 'ACTIVE', icon: <ShieldCheck size={18}/>, label: '🅱️ 活躍醫鐵會員' },
               { path: '/admin/members', view: 'RESERVE', icon: <UserPlus size={18}/>, label: '🆎 新人及未滿10場' },
               { path: '/admin/members', view: 'RISK', icon: <AlertTriangle size={18}/>, label: '⚠️ 異常觀察名單' },
@@ -105,6 +134,9 @@ export default function AdminLayout() {
     if (pathname === '/admin/system-status') return '系統伺服器監控';
     if (pathname === '/admin/import') return '資料整合匯入中心';
     if (pathname === '/admin/race-builder') return '建立新賽事';
+    
+    // 🌟 處理新通知中心的標題
+    if (pathname === '/admin/dashboard' && currentView === 'NOTIFICATIONS') return '醫鐵通知中心';
 
     const matchedItem = menuGroups.flatMap(g => g.items).find(i => 
       i.path === pathname && (i.view ? currentView === i.view : !searchParams.get('view'))
@@ -153,7 +185,7 @@ export default function AdminLayout() {
                               const isActive = (isPathMatch || (item.path === '/admin/races' && !item.view && location.pathname === '/admin/race-builder')) && (item.view ? isViewMatch : true)
                               
                               const isSubItem = ['HISTORY', 'FUTURE'].includes(item.view)
-                              const linkClasses = `flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all font-bold text-sm ${isActive ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/50' : 'hover:bg-slate-800 hover:text-white'} ${isSubItem ? 'ml-4 text-xs' : ''}`
+                              const linkClasses = `flex items-center justify-between px-3 py-2.5 rounded-lg transition-all font-bold text-sm ${isActive ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/50' : 'hover:bg-slate-800 hover:text-white'} ${isSubItem ? 'ml-4 text-xs' : ''}`
 
                               return (
                                 <Link 
@@ -162,8 +194,16 @@ export default function AdminLayout() {
                                     className={linkClasses}
                                     onClick={handleMenuClick} 
                                 >
-                                    {item.icon}
-                                    {item.label}
+                                    <div className="flex items-center gap-3">
+                                        {item.icon}
+                                        {item.label}
+                                    </div>
+                                    {/* 🌟 渲染紅圈圈徽章 (若 badge 大於 0) */}
+                                    {item.badge > 0 && (
+                                        <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm animate-pulse">
+                                            {item.badge > 99 ? '99+' : item.badge}
+                                        </span>
+                                    )}
                                 </Link>
                               )
                           })}

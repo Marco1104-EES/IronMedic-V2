@@ -1,331 +1,424 @@
 import { useState, useEffect } from 'react'
+import { useLocation } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from 'recharts'
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, CircleMarker } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
-import { Users, Activity, Award, ShieldAlert, History, Map as MapIcon, UserCircle, Loader2, AlertTriangle } from 'lucide-react'
+// 🌟 確保所有需要的圖示都有匯入
+import { Users, Activity, Award, ShieldAlert, Map as MapIcon, Loader2, Flag, Mountain, Bike, Footprints, User, MapPin, Bell, UserCheck, Calendar, Clock, History } from 'lucide-react'
 
-// 修正 Leaflet icon
+// 修正 Leaflet icon 消失問題
 import icon from 'leaflet/dist/images/marker-icon.png';
 import iconShadow from 'leaflet/dist/images/marker-shadow.png';
 let DefaultIcon = L.icon({
-    iconUrl: icon,
-    shadowUrl: iconShadow,
-    iconSize: [25, 41],
-    iconAnchor: [12, 41]
+    iconUrl: icon, shadowUrl: iconShadow, iconSize: [25, 41], iconAnchor: [12, 41]
 });
 L.Marker.prototype.options.icon = DefaultIcon;
 
-// 台灣縣市座標對應表
+// 台灣縣市賽事座標對應表
 const cityCoordinates = {
     "台北": [25.0330, 121.5654], "新北": [25.0172, 121.4625], "桃園": [24.9936, 121.3010],
     "台中": [24.1477, 120.6736], "台南": [22.9997, 120.2270], "高雄": [22.6273, 120.3014],
-    "基隆": [25.1276, 121.7392], "新竹": [24.8138, 120.9675], "嘉義": [23.4801, 120.4491],
-    "苗栗": [24.5606, 120.8214], "彰化": [24.0518, 120.5161], "南投": [23.9610, 120.6967],
-    "雲林": [23.7092, 120.4313], "屏東": [22.6745, 120.4880], "宜蘭": [24.7021, 121.7377],
-    "花蓮": [23.9872, 121.6016], "台東": [22.7663, 121.1448], "澎湖": [23.5712, 119.5793],
-    "金門": [24.3255, 118.3167], "連江": [26.1505, 119.9265]
+    "新竹": [24.8138, 120.9675], "苗栗": [24.5602, 120.8214], "彰化": [24.0518, 120.5393],
+    "南投": [23.9610, 120.9719], "雲林": [23.7092, 120.4313], "嘉義": [23.4801, 120.4491],
+    "屏東": [22.6687, 120.4862], "宜蘭": [24.7021, 121.7377], "花蓮": [23.9872, 121.6016],
+    "台東": [22.7583, 121.1444], "澎湖": [23.5711, 119.5793], "金門": [24.4492, 118.3186],
+    "連江": [26.1505, 119.9360]
 }
 
-const taiwanBounds = [
-    [21.5, 119.0], 
-    [25.5, 122.5]  
-];
-
-const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'];
+// 區域中心圓點座標 (用於會員分佈地圖)
+const regionCenters = {
+    north: [24.9, 121.3],
+    central: [24.0, 120.5],
+    south: [22.9, 120.3],
+    east: [23.8, 121.4],
+    islands: [23.5, 119.5]
+}
 
 export default function Dashboard() {
+  // 🌟 接收來自 AdminLayout.jsx 的 URL 參數
+  const location = useLocation()
+  const searchParams = new URLSearchParams(location.search)
+  const currentView = searchParams.get('view') 
+
   const [loading, setLoading] = useState(true)
-  const [errorMsg, setErrorMsg] = useState(null)
+  const CURRENT_YEAR = new Date().getFullYear();
+
+  // 頂部四大指標
+  const [stats, setStats] = useState({
+      totalMembers: 0,
+      currentMembers: 0,
+      newMembers: 0,
+      teamLeaders: 0,
+      vipMembers: 0
+  })
   
-  const [isMounted, setIsMounted] = useState(false)
-  
-  const [memberStats, setMemberStats] = useState({
-      total: 0,
-      currentYearTotal: 0, // 🌟 新增當屆會員統計
-      genderData: [],
-      cityData: []
+  // 賽事分析資料
+  const [raceStats, setRaceStats] = useState({
+      marathon: 0, trail: 0, bike: 0, tri: 0
+  })
+  const [raceLocations, setRaceLocations] = useState([])
+
+  // 會員分佈資料
+  const [demoStats, setDemostats] = useState({
+      male: 0, female: 0,
+      north: 0, central: 0, south: 0, east: 0, islands: 0
   })
 
-  const [raceStats, setRaceStats] = useState({
-      currentYearTotal: 0,
-      pastTotal: 0,
-      currentYearTypes: [],
-      historicalTotalRegistered: 0
-  })
+  // 🌟 從舊版 SystemStatus 搬移過來的通知狀態
+  const [recentRaces, setRecentRaces] = useState([])
+  const [profileUpdates, setProfileUpdates] = useState([])
 
   useEffect(() => {
-      setIsMounted(true)
       fetchDashboardData()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const fetchDashboardData = async () => {
-      setLoading(true)
-      setErrorMsg(null)
       try {
-          // 🚀 終極效能大升級：使用 Promise.all 讓「人員」與「賽事」同時抓取，省下一半的網路等待時間！
-          // 🛡️ 封印解除：上限拉高到 10000 筆，並嚴格只抓取我們需要的欄位，節省手機網路流量！
+          // 1. 頂部核心四大指標 (極速查詢)
           const [
-              { data: profiles, error: profileError },
-              { data: races, error: raceError }
+              { count: total },
+              { count: current },
+              { count: newM },
+              { count: leaders },
+              { count: vips }
           ] = await Promise.all([
-              supabase.from('profiles').select('national_id, address, is_current_member').limit(10000),
-              supabase.from('races').select('date, type, medic_registered, status').limit(10000)
+              supabase.from('profiles').select('*', { count: 'exact', head: true }),
+              supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_current_member', 'Y'),
+              supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_current_member', 'Y').eq('is_new_member', 'Y'),
+              supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_team_leader', 'Y'),
+              supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_vip', 'Y')
           ]);
+          
+          setStats({
+              totalMembers: total || 0, 
+              currentMembers: current || 0,
+              newMembers: newM || 0,
+              teamLeaders: leaders || 0,
+              vipMembers: vips || 0
+          })
 
-          if (profileError) throw profileError;
-          if (raceError) throw raceError;
-
-          let maleCount = 0;
-          let femaleCount = 0;
-          let unknownGender = 0;
-          let currentYearCount = 0;
-          const cityCounts = {};
-
-          if (profiles) {
-              profiles.forEach(p => {
-                  // 🌟 計算當屆會員
-                  if (p.is_current_member === 'Y') {
-                      currentYearCount++;
-                  }
-
-                  // 判斷性別
-                  let gender = '未知';
-                  if (p.national_id && typeof p.national_id === 'string' && p.national_id.length >= 2) {
-                      const secondChar = p.national_id.charAt(1);
-                      if (secondChar === '1') gender = '男';
-                      else if (secondChar === '2') gender = '女';
-                  }
-
-                  if (gender === '男') maleCount++;
-                  else if (gender === '女') femaleCount++;
-                  else unknownGender++;
-
-                  // 判斷城市
-                  if (p.address && typeof p.address === 'string' && p.address.length >= 2) {
-                      const city = p.address.substring(0, 2);
-                      if (cityCoordinates[city]) {
-                          cityCounts[city] = (cityCounts[city] || 0) + 1;
-                      }
-                  }
-              });
-          }
-
-          setMemberStats({
-              total: profiles?.length || 0,
-              currentYearTotal: currentYearCount, // 🌟 寫入當屆會員數
-              genderData: [
-                  { name: '男性', value: maleCount, color: '#3b82f6' },
-                  { name: '女性', value: femaleCount, color: '#ec4899' },
-                  { name: '未填寫/無效', value: unknownGender, color: '#cbd5e1' }
-              ].filter(g => g.value > 0), 
-              cityData: Object.keys(cityCounts).map(k => ({
-                  name: k,
-                  count: cityCounts[k],
-                  pos: cityCoordinates[k]
-              }))
-          });
-
-          const currentYear = new Date().getFullYear();
-          let cyTotal = 0;
-          let pTotal = 0;
-          const cyTypes = {};
-          let histTotalReg = 0;
+          // 2. 獲取所有賽事資料 (儀表板用 + 通知中心用)
+          const { data: races } = await supabase.from('races').select('id, name, date, type, location, status, medic_required, medic_registered').order('created_at', { ascending: false })
+          let rMarathon = 0, rTrail = 0, rBike = 0, rTri = 0;
+          let locations = []
 
           if (races) {
+              // 取前5筆作為通知中心顯示
+              setRecentRaces(races.slice(0, 5))
+
               races.forEach(r => {
-                  if (!r.date) return;
-                  const raceYear = new Date(r.date).getFullYear();
-                  
-                  if (raceYear === currentYear) {
-                      cyTotal++;
-                      const rType = r.type || '其他';
-                      cyTypes[rType] = (cyTypes[rType] || 0) + 1;
-                  } else if (raceYear < currentYear) {
-                      pTotal++;
-                      histTotalReg += (r.medic_registered || 0);
+                  const raceDate = new Date(r.date)
+                  if (raceDate.getFullYear() === CURRENT_YEAR) {
+                      const typeStr = r.type || '';
+                      if (/越野/.test(typeStr)) rTrail++;
+                      else if (/自行車|單車|公路車/.test(typeStr)) rBike++;
+                      else if (/鐵人/.test(typeStr)) rTri++;
+                      else rMarathon++; 
                   }
-              });
+
+                  if (r.location) {
+                      const matchedCity = Object.keys(cityCoordinates).find(city => r.location.includes(city))
+                      if (matchedCity) {
+                          locations.push({ id: r.id, name: r.name, coord: cityCoordinates[matchedCity], date: r.date })
+                      }
+                  }
+              })
+              setRaceStats({ marathon: rMarathon, trail: rTrail, bike: rBike, tri: rTri })
+              setRaceLocations(locations)
           }
 
-          setRaceStats({
-              currentYearTotal: cyTotal,
-              pastTotal: pTotal,
-              currentYearTypes: Object.keys(cyTypes).map(k => ({ name: k, count: cyTypes[k] })),
-              historicalTotalRegistered: histTotalReg
-          });
+          // 3. 獲取會員居住地與性別分類
+          const { data: memberData } = await supabase.from('profiles').select('gender, address')
+          if (memberData) {
+              let mMale = 0, mFemale = 0;
+              let regN = 0, regC = 0, regS = 0, regE = 0, regI = 0;
+
+              memberData.forEach(p => {
+                  if (p.gender === '男') mMale++;
+                  if (p.gender === '女') mFemale++;
+                  
+                  const addr = p.address || '';
+                  if (/基隆|臺北|台北|新北|桃園|新竹/.test(addr)) regN++;
+                  else if (/苗栗|臺中|台中|彰化|南投|雲林/.test(addr)) regC++;
+                  else if (/嘉義|臺南|台南|高雄|屏東/.test(addr)) regS++;
+                  else if (/宜蘭|花蓮|臺東|台東/.test(addr)) regE++;
+                  else if (/金門|馬祖|連江|澎湖|綠島|蘭嶼/.test(addr)) regI++;
+              })
+
+              setDemostats({
+                  male: mMale, female: mFemale,
+                  north: regN, central: regC, south: regS, east: regE, islands: regI
+              })
+          }
+
+          // 4. 抓取系統通知變更紀錄
+          try {
+              const { data: notifs } = await supabase.from('admin_notifications').select('*').eq('type', 'PROFILE_UPDATE').order('created_at', { ascending: false }).limit(10)
+              if (notifs) {
+                  // 在載入完畢後，順便把這些看過的通知標記為已讀 (消掉左側紅點)
+                  await supabase.from('admin_notifications').update({ is_read: true }).eq('is_read', false).eq('type', 'PROFILE_UPDATE')
+                  setProfileUpdates(notifs.slice(0, 5))
+              }
+          } catch(e) { console.log("admin_notifications 表格可能尚未建立或無資料") }
 
       } catch (error) {
-          console.error('戰情室資料載入失敗', error)
-          setErrorMsg(error.message)
+          console.error("載入儀表板資料失敗", error)
       } finally {
           setLoading(false)
       }
   }
 
-  const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, index, name }) => {
-    const RADIAN = Math.PI / 180;
-    const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
-    const x = cx + radius * Math.cos(-midAngle * RADIAN);
-    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+  const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444']
+  const TAIWAN_CENTER = [23.6978, 120.9605]
 
-    return (
-      <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" className="text-xs font-bold">
-        {`${(percent * 100).toFixed(0)}%`}
-      </text>
-    );
-  };
+  if (loading) return <div className="h-[60vh] flex items-center justify-center text-slate-400"><Loader2 className="animate-spin mr-2"/> 正在載入醫鐵總部戰情數據...</div>
 
-  if (loading) return (
-      <div className="p-8 text-center text-slate-500 font-bold animate-pulse flex flex-col items-center justify-center min-h-[50vh]">
-          <Loader2 className="animate-spin mb-4 text-blue-500" size={40}/> 
-          <div className="text-lg">智慧戰情室數據演算中...</div>
-          <div className="text-sm font-normal mt-2 opacity-70">啟動非同步極速引擎分析資料，請稍候</div>
-      </div>
-  )
+  // 🌟 核心切換邏輯：如果網址帶有 view=NOTIFICATIONS，就只顯示您從 SystemStatus 搬過來的通知中心！
+  if (currentView === 'NOTIFICATIONS') {
+      return (
+          <div className="space-y-6 md:space-y-8 animate-fade-in pb-20">
+              <div className="mb-6">
+                  <h2 className="text-3xl font-black text-slate-800 mb-2 flex items-center gap-2">
+                      <Bell className="text-amber-500"/> 醫鐵通知中心
+                  </h2>
+                  <p className="text-slate-500 font-medium">即時掌握最新建立的賽事與會員資料異動</p>
+              </div>
 
-  if (errorMsg) return (
-      <div className="p-8 text-center flex flex-col items-center justify-center min-h-[50vh]">
-          <AlertTriangle className="mb-4 text-red-500" size={48}/> 
-          <div className="text-xl font-black text-red-600 mb-2">資料庫連線或讀取失敗</div>
-          <div className="text-sm font-bold text-slate-500 bg-slate-100 p-4 rounded-xl">{errorMsg}</div>
-          <button onClick={fetchDashboardData} className="mt-6 px-6 py-2 bg-slate-800 text-white font-bold rounded-xl hover:bg-slate-700">重新嘗試</button>
-      </div>
-  )
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* 1. 預定新增賽事動態 (原汁原味搬移) */}
+                  <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                      <div className="bg-blue-50/50 p-4 border-b border-blue-100 flex items-center gap-2">
+                          <div className="p-1.5 bg-blue-100 text-blue-600 rounded-lg"><Flag size={18}/></div>
+                          <h3 className="font-black text-blue-900">預定新增賽事動態</h3>
+                      </div>
+                      <div className="p-4 flex-1 overflow-y-auto max-h-[500px] custom-scrollbar space-y-3">
+                          {recentRaces.length > 0 ? recentRaces.map((race, i) => (
+                              <div key={i} className="flex flex-col p-3 rounded-xl border border-slate-100 hover:bg-slate-50 transition-colors gap-1.5">
+                                  <div className="flex justify-between items-start">
+                                      <span className="text-sm font-black text-slate-800 line-clamp-1">{race.name}</span>
+                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${race.status === 'OPEN' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>{race.status === 'OPEN' ? '報名中' : race.status}</span>
+                                  </div>
+                                  <div className="flex items-center justify-between text-xs text-slate-500 font-medium">
+                                      <span className="flex items-center gap-1"><Calendar size={12}/> {race.date}</span>
+                                      <span>預計需求: {race.medic_required || 0} 人</span>
+                                  </div>
+                              </div>
+                          )) : (
+                              <div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-70 py-10">
+                                  <Flag size={32} className="mb-2"/>
+                                  <span className="text-sm font-bold">近期無新增賽事</span>
+                              </div>
+                          )}
+                      </div>
+                  </div>
 
+                  {/* 2. 會員資料變更紀錄 (原汁原味搬移) */}
+                  <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                      <div className="bg-indigo-50/50 p-4 border-b border-indigo-100 flex items-center gap-2">
+                          <div className="p-1.5 bg-indigo-100 text-indigo-600 rounded-lg"><UserCheck size={18}/></div>
+                          <h3 className="font-black text-indigo-900">會員資料變更紀錄</h3>
+                      </div>
+                      <div className="p-4 flex-1 overflow-y-auto max-h-[500px] custom-scrollbar space-y-3">
+                          {profileUpdates.length > 0 ? profileUpdates.map((log, i) => (
+                              <div key={i} className="flex gap-3 p-3 rounded-xl border border-slate-100 hover:bg-slate-50 transition-colors">
+                                  <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 font-black flex items-center justify-center shrink-0 text-xs">
+                                      {log.user_name?.charAt(0) || '?'}
+                                  </div>
+                                  <div>
+                                      <div className="text-sm font-black text-slate-800">{log.user_name}</div>
+                                      <div className="text-xs text-slate-500 font-medium mt-0.5 leading-snug">{log.message}</div>
+                                      <div className="text-[10px] text-slate-400 font-mono mt-1.5 flex items-center gap-1"><Clock size={10}/> {new Date(log.created_at).toLocaleString()}</div>
+                                  </div>
+                              </div>
+                          )) : (
+                              <div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-70 py-10">
+                                  <UserCheck size={32} className="mb-2"/>
+                                  <span className="text-sm font-bold">近期無變更紀錄</span>
+                              </div>
+                          )}
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )
+  }
+
+  // 🌟 原本的 醫鐵數據儀表板 (Dashboard 主畫面)
   return (
-    <div className="space-y-6 md:space-y-8 animate-fade-in-up pb-20 w-full overflow-x-hidden">
-      
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-        
-        {/* 🌟 修改點：當屆(2026)會員數 / 全醫鐵會員數 */}
-        <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-6 md:p-8 rounded-[2rem] shadow-xl text-white relative overflow-hidden group hover:scale-[1.02] transition-transform">
-            <div className="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform"><Users size={120} /></div>
-            <div className="relative z-10">
-                <h3 className="text-slate-300 font-bold mb-2 flex items-center gap-2 text-sm"><Users size={20}/> 當屆({new Date().getFullYear()}) / 全醫鐵會員數</h3>
-                <div className="flex items-baseline gap-2">
-                    <span className="text-5xl md:text-6xl font-black tracking-tight">{memberStats.currentYearTotal}</span>
-                    <span className="text-xl md:text-2xl font-bold text-slate-400">/ {memberStats.total}</span>
-                    <span className="text-sm text-slate-500 font-medium ml-1 hidden sm:inline">人</span>
-                </div>
-            </div>
-        </div>
+    <div className="space-y-6 md:space-y-8 animate-fade-in pb-20">
+      <div className="mb-8">
+          <h2 className="text-3xl font-black text-slate-800 mb-2">醫鐵數據儀表板</h2>
+          <p className="text-slate-500 font-medium">即時掌握全台醫護鐵人戰力與賽事分佈</p>
+      </div>
 
-        <div className="bg-gradient-to-br from-blue-600 to-indigo-700 p-6 md:p-8 rounded-[2rem] shadow-xl text-white relative overflow-hidden group hover:scale-[1.02] transition-transform">
-            <div className="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform"><History size={120} /></div>
-            <div className="relative z-10">
-                <h3 className="text-blue-200 font-bold mb-2 flex items-center gap-2"><History size={20}/> 歷年完賽場次</h3>
-                <div className="text-5xl md:text-6xl font-black tracking-tight">{raceStats.pastTotal} <span className="text-xl text-blue-300 font-medium">場</span></div>
-            </div>
-        </div>
-        
-        <div className="bg-gradient-to-br from-amber-500 to-orange-600 p-6 md:p-8 rounded-[2rem] shadow-xl text-white relative overflow-hidden group hover:scale-[1.02] transition-transform">
-            <div className="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform"><Activity size={120} /></div>
-            <div className="relative z-10">
-                <h3 className="text-amber-200 font-bold mb-2 flex items-center gap-2"><Activity size={20}/> 今年度賽事</h3>
-                <div className="text-5xl md:text-6xl font-black tracking-tight">{raceStats.currentYearTotal} <span className="text-xl text-amber-200 font-medium">場</span></div>
-            </div>
-        </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
+          <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow group">
+              <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform"><Users size={24}/></div>
+              <h3 className="text-slate-500 font-bold text-sm">註冊總人數</h3>
+              <div className="text-3xl font-black text-slate-800 mt-1">{stats.totalMembers}</div>
+          </div>
+          
+          <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow group relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-24 h-24 bg-green-50 rounded-bl-full -z-10 transition-transform group-hover:scale-125"></div>
+              <div className="w-12 h-12 rounded-xl bg-green-100 text-green-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform relative z-10"><Activity size={24}/></div>
+              <h3 className="text-slate-500 font-bold text-[13px] md:text-sm whitespace-nowrap">當屆({CURRENT_YEAR})總數 / 新人</h3>
+              <div className="text-2xl md:text-3xl font-black text-slate-800 mt-1 flex items-baseline gap-1 relative z-10">
+                  <span className="text-green-600">{stats.currentMembers}</span>
+                  <span className="text-lg text-slate-400">/</span>
+                  <span className="text-xl text-emerald-500" title="當屆新人總人數">{stats.newMembers}</span>
+              </div>
+          </div>
 
-        <div className="bg-gradient-to-br from-emerald-500 to-green-600 p-6 md:p-8 rounded-[2rem] shadow-xl text-white relative overflow-hidden group hover:scale-[1.02] transition-transform">
-            <div className="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform"><Award size={120} /></div>
-            <div className="relative z-10">
-                <h3 className="text-green-100 font-bold mb-2 flex items-center gap-2"><Award size={20}/> 累積參賽人次</h3>
-                <div className="text-5xl md:text-6xl font-black tracking-tight">{raceStats.historicalTotalRegistered} <span className="text-xl text-green-200 font-medium">人次</span></div>
-            </div>
-        </div>
+          <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow group">
+              <div className="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform"><ShieldAlert size={24}/></div>
+              <h3 className="text-slate-500 font-bold text-sm">帶隊教官</h3>
+              <div className="text-3xl font-black text-slate-800 mt-1">{stats.teamLeaders}</div>
+          </div>
+
+          <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow group">
+              <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-500 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform"><Award size={24}/></div>
+              <h3 className="text-slate-500 font-bold text-sm">VIP 會員</h3>
+              <div className="text-3xl font-black text-slate-800 mt-1">{stats.vipMembers}</div>
+          </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
           
-          <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-100 flex flex-col overflow-hidden">
-              <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-slate-800"><MapIcon className="text-blue-600"/> 醫鐵人員分佈</h3>
-              <div className="w-full h-[400px] rounded-xl overflow-hidden z-0 relative border border-slate-200 bg-slate-50">
-                  {isMounted && (
+          <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200 flex flex-col h-full">
+              <h3 className="text-lg font-black text-slate-800 mb-6 flex items-center gap-2">
+                  <MapIcon className="text-blue-500"/> 本年度賽事類型分佈 ({CURRENT_YEAR})
+              </h3>
+              
+              <div className="flex flex-col md:flex-row gap-6 flex-1">
+                  <div className="w-full md:w-1/3 flex flex-col justify-center space-y-3">
+                      <div className="flex justify-between items-center bg-slate-50 p-3.5 rounded-xl border border-slate-100">
+                          <span className="flex items-center gap-2 text-sm font-bold text-slate-700"><Footprints size={16} className="text-blue-500"/> 馬拉松路跑</span>
+                          <span className="font-black text-slate-800">{raceStats.marathon} <span className="text-xs text-slate-400 font-normal">場</span></span>
+                      </div>
+                      <div className="flex justify-between items-center bg-slate-50 p-3.5 rounded-xl border border-slate-100">
+                          <span className="flex items-center gap-2 text-sm font-bold text-slate-700"><Mountain size={16} className="text-green-600"/> 越野</span>
+                          <span className="font-black text-slate-800">{raceStats.trail} <span className="text-xs text-slate-400 font-normal">場</span></span>
+                      </div>
+                      <div className="flex justify-between items-center bg-slate-50 p-3.5 rounded-xl border border-slate-100">
+                          <span className="flex items-center gap-2 text-sm font-bold text-slate-700"><Bike size={16} className="text-amber-500"/> 自行車</span>
+                          <span className="font-black text-slate-800">{raceStats.bike} <span className="text-xs text-slate-400 font-normal">場</span></span>
+                      </div>
+                      <div className="flex justify-between items-center bg-slate-50 p-3.5 rounded-xl border border-slate-100">
+                          <span className="flex items-center gap-2 text-sm font-bold text-slate-700"><Flag size={16} className="text-red-500"/> 鐵人項</span>
+                          <span className="font-black text-slate-800">{raceStats.tri} <span className="text-xs text-slate-400 font-normal">場</span></span>
+                      </div>
+                  </div>
+                  
+                  <div className="w-full md:w-2/3 h-[300px] md:h-auto min-h-[350px] rounded-xl overflow-hidden border border-slate-200 relative z-0">
+                      {/* 🌟 核心修改：加入各項防呆屬性，徹底鎖死地圖 */}
                       <MapContainer 
-                        center={[23.7, 120.95]} 
-                        zoom={7.5} 
-                        minZoom={7} 
-                        maxBounds={taiwanBounds} 
-                        maxBoundsViscosity={1.0} 
-                        style={{ height: '100%', width: '100%' }}
+                          center={TAIWAN_CENTER} 
+                          zoom={7} 
+                          style={{ height: '100%', width: '100%' }}
+                          dragging={false}
+                          touchZoom={false}
+                          doubleClickZoom={false}
+                          scrollWheelZoom={false}
+                          zoomControl={false}
+                          keyboard={false}
                       >
-                          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                          {memberStats.cityData.map((city, idx) => (
-                              <Marker key={idx} position={city.pos}>
-                                  <Popup><div className="font-bold text-center">{city.name}</div><div className="text-center text-blue-600 font-black">{city.count} 人</div></Popup>
+                          <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" attribution='&copy; CartoDB' />
+                          {raceLocations.map((loc, idx) => (
+                              <Marker key={idx} position={loc.coord}>
+                                  <Popup>
+                                      <div className="font-bold text-slate-800">{loc.name}</div>
+                                      <div className="text-xs text-slate-500">{loc.date}</div>
+                                  </Popup>
                               </Marker>
                           ))}
                       </MapContainer>
-                  )}
-              </div>
-          </div>
-
-          <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-100 flex flex-col overflow-hidden">
-              <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-slate-800"><UserCircle className="text-pink-500"/> 會員生理性別比例</h3>
-              <div className="w-full flex items-center justify-center bg-slate-50 rounded-xl border border-slate-100 relative" style={{ height: 400, minHeight: 400 }}>
-                  {isMounted && memberStats.genderData.length > 0 ? (
-                      <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
-                              <Pie
-                                  data={memberStats.genderData}
-                                  cx="50%" cy="50%"
-                                  labelLine={false}
-                                  label={renderCustomizedLabel}
-                                  outerRadius={130}
-                                  dataKey="value" stroke="none"
-                              >
-                                  {memberStats.genderData.map((entry, index) => (
-                                      <Cell key={`cell-${index}`} fill={entry.color} />
-                                  ))}
-                              </Pie>
-                              <Tooltip formatter={(value, name) => [`${value} 人`, name]} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                              <Legend verticalAlign="bottom" height={36} iconType="circle"/>
-                          </PieChart>
-                      </ResponsiveContainer>
-                  ) : (
-                      <div className="text-slate-400 font-bold">尚無足夠性別數據</div>
-                  )}
-              </div>
-          </div>
-      </div>
-
-      <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-100 flex flex-col overflow-hidden">
-          <h3 className="font-bold text-lg mb-6 flex items-center gap-2 text-slate-800"><Activity className="text-purple-600"/> {new Date().getFullYear()}年度賽事類型分布</h3>
-          
-          <div className="w-full bg-slate-50 rounded-xl border border-slate-100 p-2 md:p-4 relative" style={{ height: 380, minHeight: 380 }}>
-              {isMounted && raceStats.currentYearTypes.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={raceStats.currentYearTypes} margin={{ top: 20, right: 30, left: 0, bottom: 60 }}>
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0"/>
-                          <XAxis 
-                              dataKey="name" 
-                              tick={{ fontWeight: 'bold', fill: '#64748b', fontSize: 12 }} 
-                              axisLine={false} 
-                              tickLine={false} 
-                              interval={0} 
-                              angle={-45} 
-                              textAnchor="end"
-                              dy={10}
-                          />
-                          <YAxis tick={{fill: '#64748b', fontSize: 12}} axisLine={false} tickLine={false}/>
-                          <Tooltip cursor={{fill: '#f1f5f9'}} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                          <Bar dataKey="count" name="場次" radius={[6, 6, 0, 0]} barSize={50} maxBarSize={60}>
-                              {raceStats.currentYearTypes.map((entry, index) => (
-                                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                              ))}
-                          </Bar>
-                      </BarChart>
-                  </ResponsiveContainer>
-              ) : (
-                  <div className="h-full flex items-center justify-center text-slate-400 font-bold">
-                      今年度尚未建檔任何賽事
                   </div>
-              )}
+              </div>
           </div>
-      </div>
 
+          <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200 flex flex-col h-full">
+              <h3 className="text-lg font-black text-slate-800 mb-6 flex items-center gap-2">
+                  <Users className="text-indigo-500"/> 醫護鐵人會員分佈
+              </h3>
+              
+              <div className="flex flex-col md:flex-row gap-6 flex-1">
+                  <div className="w-full md:w-1/3 flex flex-col justify-center space-y-2">
+                      <div className="flex justify-between items-center bg-indigo-50/50 p-3 rounded-xl border border-indigo-100 mb-2">
+                          <span className="flex items-center gap-1.5 text-xs font-bold text-indigo-800"><User size={14}/> 生理男/女</span>
+                          <span className="font-black text-indigo-900 text-sm">{demoStats.male} <span className="text-[10px] text-indigo-400">/</span> {demoStats.female}</span>
+                      </div>
+
+                      <div className="flex justify-between items-center px-2 py-1.5">
+                          <span className="text-sm font-bold text-slate-600 flex items-center gap-2"><MapPin size={14} className="text-slate-400"/> 北部</span>
+                          <span className="font-black text-slate-800">{demoStats.north} <span className="text-[10px] text-slate-400">人</span></span>
+                      </div>
+                      <div className="flex justify-between items-center px-2 py-1.5 bg-slate-50 rounded-lg">
+                          <span className="text-sm font-bold text-slate-600 flex items-center gap-2"><MapPin size={14} className="text-slate-400"/> 中部</span>
+                          <span className="font-black text-slate-800">{demoStats.central} <span className="text-[10px] text-slate-400">人</span></span>
+                      </div>
+                      <div className="flex justify-between items-center px-2 py-1.5">
+                          <span className="text-sm font-bold text-slate-600 flex items-center gap-2"><MapPin size={14} className="text-slate-400"/> 南部</span>
+                          <span className="font-black text-slate-800">{demoStats.south} <span className="text-[10px] text-slate-400">人</span></span>
+                      </div>
+                      <div className="flex justify-between items-center px-2 py-1.5 bg-slate-50 rounded-lg">
+                          <span className="text-sm font-bold text-slate-600 flex items-center gap-2"><MapPin size={14} className="text-slate-400"/> 宜花東</span>
+                          <span className="font-black text-slate-800">{demoStats.east} <span className="text-[10px] text-slate-400">人</span></span>
+                      </div>
+                      <div className="flex justify-between items-center px-2 py-1.5">
+                          <span className="text-sm font-bold text-slate-600 flex items-center gap-2"><MapPin size={14} className="text-slate-400"/> 金馬澎</span>
+                          <span className="font-black text-slate-800">{demoStats.islands} <span className="text-[10px] text-slate-400">人</span></span>
+                      </div>
+                  </div>
+                  
+                  <div className="w-full md:w-2/3 h-[300px] md:h-auto min-h-[350px] rounded-xl overflow-hidden border border-slate-200 relative z-0 bg-blue-50/30">
+                      {/* 🌟 核心修改：加入各項防呆屬性，徹底鎖死地圖 */}
+                      <MapContainer 
+                          center={[23.8, 120.5]} 
+                          zoom={6.5} 
+                          style={{ height: '100%', width: '100%' }}
+                          dragging={false}
+                          touchZoom={false}
+                          doubleClickZoom={false}
+                          scrollWheelZoom={false}
+                          zoomControl={false}
+                          keyboard={false}
+                      >
+                          <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" attribution='&copy; CartoDB' />
+                          
+                          {demoStats.north > 0 && (
+                              <CircleMarker center={regionCenters.north} radius={Math.max(10, Math.min(30, demoStats.north / 10))} pathOptions={{ color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.6 }}>
+                                  <Popup><div className="font-bold">北部會員: {demoStats.north} 人</div></Popup>
+                              </CircleMarker>
+                          )}
+                          {demoStats.central > 0 && (
+                              <CircleMarker center={regionCenters.central} radius={Math.max(10, Math.min(30, demoStats.central / 10))} pathOptions={{ color: '#f59e0b', fillColor: '#f59e0b', fillOpacity: 0.6 }}>
+                                  <Popup><div className="font-bold">中部會員: {demoStats.central} 人</div></Popup>
+                              </CircleMarker>
+                          )}
+                          {demoStats.south > 0 && (
+                              <CircleMarker center={regionCenters.south} radius={Math.max(10, Math.min(30, demoStats.south / 10))} pathOptions={{ color: '#10b981', fillColor: '#10b981', fillOpacity: 0.6 }}>
+                                  <Popup><div className="font-bold">南部會員: {demoStats.south} 人</div></Popup>
+                              </CircleMarker>
+                          )}
+                          {demoStats.east > 0 && (
+                              <CircleMarker center={regionCenters.east} radius={Math.max(10, Math.min(30, demoStats.east / 10))} pathOptions={{ color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.6 }}>
+                                  <Popup><div className="font-bold">東部會員: {demoStats.east} 人</div></Popup>
+                              </CircleMarker>
+                          )}
+                          {demoStats.islands > 0 && (
+                              <CircleMarker center={regionCenters.islands} radius={Math.max(8, Math.min(25, demoStats.islands / 5))} pathOptions={{ color: '#8b5cf6', fillColor: '#8b5cf6', fillOpacity: 0.6 }}>
+                                  <Popup><div className="font-bold">離島會員: {demoStats.islands} 人</div></Popup>
+                              </CircleMarker>
+                          )}
+                      </MapContainer>
+                  </div>
+              </div>
+          </div>
+
+      </div>
     </div>
   )
 }
