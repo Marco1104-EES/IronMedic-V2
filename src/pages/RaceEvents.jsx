@@ -1,15 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { Calendar, MapPin, Users, Clock, ChevronRight, Activity, Flame, ShieldAlert, Timer, CheckCircle, X, Loader2, UsersRound, Crown, Sprout, Handshake, Send, CreditCard, Flag, Settings, Bell, ChevronDown, ChevronUp } from 'lucide-react'
+import { Calendar, MapPin, Users, Clock, ChevronRight, Activity, Flame, ShieldAlert, Timer, CheckCircle, X, Loader2, UsersRound, Crown, Sprout, Handshake, Send, Flag, Settings, Bell, ChevronDown, ChevronUp, Trash2, AlertTriangle, Medal, ServerCrash, Server } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
-
-// 🌟 同步 DigitalID.jsx 的通知資料來源
-const INITIAL_NOTIFICATIONS = [
-    { id: 1, tab: 'system', category: 'race', message: '新賽事已開放報名！', date: new Date().toISOString(), isRead: false },
-    { id: 2, tab: 'personal', category: 'cert', message: '您的 EMT-1 證照即將於 30 天後到期，請盡速更新。', date: new Date(Date.now() - 86400000).toISOString(), isRead: false },
-    { id: 3, tab: 'system', category: 'shop', message: '專屬 VIP 優惠：鐵人裝備商城全館 8 折！', date: new Date(Date.now() - 86400000 * 3).toISOString(), isRead: true },
-    { id: 4, tab: 'personal', category: 'old', message: '這是一則一年前的舊通知，即將被系統自動清除。', date: '2024-01-01T00:00:00.000Z', isRead: true }
-]
 
 export default function RaceEvents() {
   const [races, setRaces] = useState([])
@@ -18,29 +10,26 @@ export default function RaceEvents() {
   const [timeFilter, setTimeFilter] = useState('CURRENT_YEAR') 
 
   const [previewRace, setPreviewRace] = useState(null)
-  
-  // 🌟 權限快取：瞬間讀取 LocalStorage
   const [userRole, setUserRole] = useState(() => localStorage.getItem('iron_medic_user_role') || 'USER') 
-  
   const [onlineCount, setOnlineCount] = useState(1) 
-  // 🌟 新人廣播聚光燈狀態
   const [newcomersOnline, setNewcomersOnline] = useState([])
 
-  // 🌟 加入通知狀態
-  const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS)
-  
+  const [notifications, setNotifications] = useState([])
+  const [showNotifPanel, setShowNotifPanel] = useState(false)
+  const [notifTab, setNotifTab] = useState('system')
+
   const [showStats, setShowStats] = useState(false)
+  
+  // 🌟 新增：伺服器健康度狀態
+  const [serverStatus, setServerStatus] = useState('checking') // 'checking', 'healthy', 'warning', 'error'
+  const [serverLatency, setServerLatency] = useState(0)
 
   const navigate = useNavigate()
   const CURRENT_YEAR = new Date().getFullYear()
   const channelRef = useRef(null)
+  const notifChannelRef = useRef(null)
 
   useEffect(() => {
-    // 🌟 8個月自動刪除機制 (與 DigitalID.jsx 同步)
-    const eightMonthsAgo = new Date();
-    eightMonthsAgo.setMonth(eightMonthsAgo.getMonth() - 8);
-    setNotifications(prev => prev.filter(n => new Date(n.date) >= eightMonthsAgo));
-
     const cachedRaces = localStorage.getItem('iron_medic_races_cache');
     if (cachedRaces) {
         try {
@@ -51,6 +40,15 @@ export default function RaceEvents() {
     
     fetchUserDataAndRaces()
     setupRealtimePresence()
+    
+    // 🌟 若為管理員，啟動系統健康度背景檢測
+    const role = localStorage.getItem('iron_medic_user_role') || 'USER';
+    if (['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN'].includes(role)) {
+        checkServerHealth();
+        // 每 5 分鐘背景重測一次
+        const healthInterval = setInterval(checkServerHealth, 300000);
+        return () => clearInterval(healthInterval);
+    }
     
     let idleTimer;
     const resetIdleTimer = () => {
@@ -75,9 +73,29 @@ export default function RaceEvents() {
         window.removeEventListener('keypress', resetIdleTimer);
         window.removeEventListener('scroll', resetIdleTimer);
         window.removeEventListener('click', resetIdleTimer);
+        if (notifChannelRef.current) supabase.removeChannel(notifChannelRef.current);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // 🌟 輕量級伺服器連線測試 (連動 SystemStatus 概念)
+  const checkServerHealth = async () => {
+      const start = performance.now();
+      try {
+          // 發送一個極輕量的請求測試延遲
+          const { error } = await supabase.from('profiles').select('id').limit(1);
+          const latency = Math.round(performance.now() - start);
+          setServerLatency(latency);
+          
+          if (error) throw error;
+          
+          if (latency > 1500) setServerStatus('warning'); // 超過 1.5 秒亮黃燈
+          else setServerStatus('healthy'); // 綠燈
+          
+      } catch (err) {
+          setServerStatus('error'); // 紅燈
+      }
+  }
 
   const setupRealtimePresence = () => {
       const channel = supabase.channel('room_1', {
@@ -93,10 +111,8 @@ export default function RaceEvents() {
 
           for (const id in state) {
               count += state[id].length;
-              // 🌟 掃描在線名單中是否有新人
               state[id].forEach(u => {
                   if (u.is_new_member && u.name) {
-                      // 避免多開分頁重複顯示
                       if (!newcomers.some(n => n.name === u.name)) newcomers.push(u);
                   }
               });
@@ -111,40 +127,64 @@ export default function RaceEvents() {
         });
   }
 
+  const setupRealtimeNotifications = (userId) => {
+      const channel = supabase.channel('race-events-notifs')
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'user_notifications', filter: `user_id=eq.${userId}` }, (payload) => {
+              setNotifications(prev => [{...payload.new, date: payload.new.created_at}, ...prev]);
+          })
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'user_notifications', filter: `user_id=eq.${userId}` }, (payload) => {
+              setNotifications(prev => prev.map(n => n.id === payload.new.id ? {...payload.new, date: payload.new.created_at} : n));
+          })
+          .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'user_notifications', filter: `user_id=eq.${userId}` }, (payload) => {
+              setNotifications(prev => prev.filter(n => n.id !== payload.old.id));
+          })
+          .subscribe()
+      notifChannelRef.current = channel;
+  }
+
   const fetchUserDataAndRaces = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser()
       
       if (user && user.email) {
           try {
-              supabase.from('profiles').select('role, full_name, is_new_member').eq('email', user.email).maybeSingle()
-                .then(({ data: profile }) => {
-                    if (profile) {
-                        const role = profile.role ? profile.role.toUpperCase() : 'USER';
-                        setUserRole(role);
-                        localStorage.setItem('iron_medic_user_role', role); 
+              const { data: profile } = await supabase.from('profiles').select('id, role, full_name, is_new_member').eq('email', user.email).maybeSingle()
+              if (profile) {
+                  const role = profile.role ? profile.role.toUpperCase() : 'USER';
+                  setUserRole(role);
+                  localStorage.setItem('iron_medic_user_role', role); 
 
-                        // 🌟 把自己的資訊推播給所有人知道，包含是否為新人
-                        if (channelRef.current) {
-                            channelRef.current.track({
-                                online_at: new Date().toISOString(),
-                                is_new_member: profile.is_new_member === 'Y',
-                                name: profile.full_name,
-                                avatar: profile.full_name ? profile.full_name.charAt(0) : '?'
-                            });
-                        }
-                    }
-                });
+                  if (channelRef.current) {
+                      channelRef.current.track({
+                          online_at: new Date().toISOString(),
+                          is_new_member: profile.is_new_member === 'Y',
+                          name: profile.full_name,
+                          avatar: profile.full_name ? profile.full_name.charAt(0) : '?'
+                      });
+                  }
+
+                  const eightMonthsAgo = new Date();
+                  eightMonthsAgo.setMonth(eightMonthsAgo.getMonth() - 8);
+                  
+                  const { data: notifs } = await supabase
+                      .from('user_notifications')
+                      .select('*')
+                      .eq('user_id', user.id)
+                      .gte('created_at', eightMonthsAgo.toISOString())
+                      .order('created_at', { ascending: false })
+                  
+                  if (notifs) {
+                      setNotifications(notifs.map(n => ({ ...n, date: n.created_at })))
+                  }
+                  
+                  setupRealtimeNotifications(user.id);
+              }
           } catch (e) { console.log("獲取身分失敗，略過", e) }
       }
 
-      const { data: racesData, error } = await supabase
-        .from('races')
-        .select('*')
-        .order('date', { ascending: true })
+      const { data: racesData, error } = await supabase.from('races').select('*').order('date', { ascending: true })
 
       if (error) throw error
-      
       if (racesData) {
           setRaces(racesData);
           localStorage.setItem('iron_medic_races_cache', JSON.stringify(racesData));
@@ -154,6 +194,28 @@ export default function RaceEvents() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const markAllAsRead = async () => {
+      setNotifications(prev => prev.map(n => ({ ...n, is_read: true, isRead: true })));
+      try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) await supabase.from('user_notifications').update({ is_read: true }).eq('user_id', user.id).eq('is_read', false);
+      } catch(e){}
+  }
+
+  const deleteNotification = async (id) => {
+      setNotifications(prev => prev.filter(n => n.id !== id));
+      try { await supabase.from('user_notifications').delete().eq('id', id); } catch(e){}
+  }
+
+  const getNotifIcon = (category) => {
+      switch(category) {
+          case 'race': return <Flag size={16} className="text-blue-500"/>;
+          case 'cert': return <AlertTriangle size={16} className="text-red-500"/>;
+          case 'shop': return <Medal size={16} className="text-amber-500"/>;
+          default: return <Bell size={16} className="text-slate-500"/>;
+      }
   }
 
   const handleTimeFilterChange = (newTimeFilter) => {
@@ -174,46 +236,13 @@ export default function RaceEvents() {
   }
 
   const renderStatusBadge = (status, isHot, isFull) => {
-    if (isFull) {
-        return (
-            <div className="absolute top-3 left-3 md:top-4 md:left-4 flex gap-2">
-                <span className="bg-red-500/90 backdrop-blur text-white text-[10px] md:text-xs font-black px-2.5 py-1 md:px-3 rounded-full shadow-md flex items-center gap-1">
-                    <CheckCircle size={12} /> 滿編 / 可候補
-                </span>
-            </div>
-        )
-    }
-
+    if (isFull) return <div className="absolute top-3 left-3 md:top-4 md:left-4 flex gap-2"><span className="bg-red-500/90 backdrop-blur text-white text-[10px] md:text-xs font-black px-2.5 py-1 md:px-3 rounded-full shadow-md flex items-center gap-1"><CheckCircle size={12} /> 滿編 / 可候補</span></div>
     switch (status) {
-      case 'OPEN':
-        return (
-          <div className="absolute top-3 left-3 md:top-4 md:left-4 flex gap-2">
-            <span className="bg-green-500/90 backdrop-blur text-white text-[10px] md:text-xs font-black px-2.5 py-1 md:px-3 rounded-full shadow-md flex items-center gap-1">
-              <Activity size={12} className="animate-pulse" /> 招募中
-            </span>
-            {isHot && <span className="bg-red-500/90 backdrop-blur text-white text-[10px] md:text-xs font-black px-2.5 py-1 md:px-3 rounded-full shadow-md flex items-center gap-1"><Flame size={12} /> 火熱</span>}
-          </div>
-        )
-      case 'NEGOTIATING':
-        return (
-            <div className="absolute top-3 left-3 md:top-4 md:left-4 flex gap-2">
-                <span className="bg-amber-500/90 backdrop-blur text-white text-[10px] md:text-xs font-black px-2.5 py-1 md:px-3 rounded-full shadow-md flex items-center gap-1">
-                    <Handshake size={12} /> 洽談中
-                </span>
-            </div>
-        )
-      case 'SUBMITTED':
-        return (
-            <div className="absolute top-3 left-3 md:top-4 md:left-4 flex gap-2">
-                <span className="bg-slate-700/90 backdrop-blur text-white text-[10px] md:text-xs font-black px-2.5 py-1 md:px-3 rounded-full shadow-md flex items-center gap-1">
-                    <Send size={12} /> 名單已送出
-                </span>
-            </div>
-        )
-      case 'FULL':
-        return <div className="absolute top-3 left-3 md:top-4 md:left-4"><span className="bg-slate-800/90 backdrop-blur text-white text-[10px] md:text-xs font-black px-2.5 py-1 md:px-3 rounded-full shadow-md flex items-center gap-1"><CheckCircle size={12} /> 滿編</span></div>
-      case 'UPCOMING':
-        return <div className="absolute top-3 left-3 md:top-4 md:left-4"><span className="bg-amber-500/90 backdrop-blur text-white text-[10px] md:text-xs font-black px-2.5 py-1 md:px-3 rounded-full shadow-md flex items-center gap-1"><Timer size={12} /> 預備</span></div>
+      case 'OPEN': return <div className="absolute top-3 left-3 md:top-4 md:left-4 flex gap-2"><span className="bg-green-500/90 backdrop-blur text-white text-[10px] md:text-xs font-black px-2.5 py-1 md:px-3 rounded-full shadow-md flex items-center gap-1"><Activity size={12} className="animate-pulse" /> 招募中</span>{isHot && <span className="bg-red-500/90 backdrop-blur text-white text-[10px] md:text-xs font-black px-2.5 py-1 md:px-3 rounded-full shadow-md flex items-center gap-1"><Flame size={12} /> 火熱</span>}</div>
+      case 'NEGOTIATING': return <div className="absolute top-3 left-3 md:top-4 md:left-4 flex gap-2"><span className="bg-amber-500/90 backdrop-blur text-white text-[10px] md:text-xs font-black px-2.5 py-1 md:px-3 rounded-full shadow-md flex items-center gap-1"><Handshake size={12} /> 洽談中</span></div>
+      case 'SUBMITTED': return <div className="absolute top-3 left-3 md:top-4 md:left-4 flex gap-2"><span className="bg-slate-700/90 backdrop-blur text-white text-[10px] md:text-xs font-black px-2.5 py-1 md:px-3 rounded-full shadow-md flex items-center gap-1"><Send size={12} /> 名單已送出</span></div>
+      case 'FULL': return <div className="absolute top-3 left-3 md:top-4 md:left-4"><span className="bg-slate-800/90 backdrop-blur text-white text-[10px] md:text-xs font-black px-2.5 py-1 md:px-3 rounded-full shadow-md flex items-center gap-1"><CheckCircle size={12} /> 滿編</span></div>
+      case 'UPCOMING': return <div className="absolute top-3 left-3 md:top-4 md:left-4"><span className="bg-amber-500/90 backdrop-blur text-white text-[10px] md:text-xs font-black px-2.5 py-1 md:px-3 rounded-full shadow-md flex items-center gap-1"><Timer size={12} /> 預備</span></div>
       default: return null
     }
   }
@@ -232,32 +261,14 @@ export default function RaceEvents() {
                           if(!item) return; 
                           try {
                               const parsedUser = JSON.parse(item);
-                              
                               if (parsedUser.name === '測試者' || parsedUser.id === 'test') return;
-                              
                               if(parsedUser && parsedUser.name) {
-                                  participantDetails.push({
-                                      name: parsedUser.name,
-                                      timestamp: parsedUser.timestamp || '10:00:00:000', 
-                                      isVip: parsedUser.isVip || false, 
-                                      isNew: parsedUser.isNew || false,
-                                      roleTag: parsedUser.roleTag || null, 
-                                      slotGroup: slot.group,
-                                      slotName: slot.name
-                                  });
+                                  participantDetails.push({ name: parsedUser.name, timestamp: parsedUser.timestamp || '10:00:00:000', isVip: parsedUser.isVip || false, isNew: parsedUser.isNew || false, roleTag: parsedUser.roleTag || null, slotGroup: slot.group, slotName: slot.name });
                               }
                           } catch (e) {
                               if (item.length > 0 && !item.startsWith('{')) { 
                                   if (item.includes('測試者')) return;
-                                  
-                                  participantDetails.push({
-                                      name: item,
-                                      timestamp: `10:00:00:000`, 
-                                      isVip: item.includes('管理員') || item.includes('VIP'), 
-                                      isNew: item.includes('新人'),
-                                      slotGroup: slot.group,
-                                      slotName: slot.name
-                                  });
+                                  participantDetails.push({ name: item, timestamp: `10:00:00:000`, isVip: item.includes('管理員') || item.includes('VIP'), isNew: item.includes('新人'), slotGroup: slot.group, slotName: slot.name });
                               }
                           }
                       })
@@ -273,7 +284,6 @@ export default function RaceEvents() {
   const filteredRaces = races.filter(race => {
       if (!race.date) return false;
       const raceYear = new Date(race.date).getFullYear();
-      
       let matchTime = false;
       if (timeFilter === 'CURRENT_YEAR') matchTime = raceYear === CURRENT_YEAR;
       else if (timeFilter === 'PAST') matchTime = raceYear < CURRENT_YEAR;
@@ -295,15 +305,13 @@ export default function RaceEvents() {
       return null;
   }
 
-  const unreadCountReal = notifications.filter(n => !n.isRead).length;
+  const unreadCountReal = notifications.filter(n => !(n.isRead || n.is_read)).length;
 
-  // 🌟 賽事統計邏輯
   const raceStats = useMemo(() => {
     let total = races.length;
     let currentYearCount = 0;
     let pastCount = 0;
     let futureCount = 0;
-    
     let openCount = 0;
     let negotiatingCount = 0;
     let submittedCount = 0;
@@ -312,7 +320,6 @@ export default function RaceEvents() {
     races.forEach(race => {
       if (!race.date) return;
       const raceYear = new Date(race.date).getFullYear();
-      
       if (raceYear === CURRENT_YEAR) currentYearCount++;
       else if (raceYear < CURRENT_YEAR) pastCount++;
       else if (raceYear > CURRENT_YEAR) futureCount++;
@@ -327,17 +334,15 @@ export default function RaceEvents() {
   }, [races, CURRENT_YEAR]);
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-24 font-sans flex flex-col relative">
+    <div className="min-h-screen bg-slate-50 pb-24 font-sans flex flex-col relative overflow-x-hidden">
       <div className="bg-slate-900 pt-20 md:pt-24 pb-32 px-4 md:px-8 text-center relative overflow-hidden shrink-0">
           
-          {/* 🌟 手機版極致優化：左側在線人數與 Spotlight 防擠壓 */}
           <div className="absolute top-4 left-4 md:top-6 md:left-8 z-40 flex flex-col items-start gap-2 max-w-[45%] sm:max-w-none">
               <div className="flex items-center gap-2 bg-slate-800/80 backdrop-blur-md px-3 py-1.5 md:px-4 md:py-2 rounded-full border border-slate-700 shadow-lg shrink-0">
                   <div className="w-2.5 h-2.5 md:w-3 md:h-3 rounded-full bg-green-500 animate-pulse shadow-[0_0_10px_rgba(34,197,94,0.9)]"></div>
                   <span className="text-[11px] sm:text-xs md:text-sm font-black text-slate-200 tracking-wider whitespace-nowrap">目前在線：{onlineCount}</span>
               </div>
               
-              {/* ✨ 新人上線 Spotlight (手機版縮小間距、限制頭像數) */}
               {newcomersOnline.length > 0 && (
                   <div className="flex items-center gap-1.5 md:gap-2 animate-fade-in-up bg-amber-500/20 backdrop-blur-sm border border-amber-500/50 px-2 py-1 sm:px-3 sm:py-1.5 rounded-full shadow-[0_0_15px_rgba(245,158,11,0.2)] overflow-hidden max-w-full">
                       <span className="text-[10px] md:text-xs font-black text-amber-300 flex items-center gap-1 shrink-0 whitespace-nowrap">
@@ -357,35 +362,62 @@ export default function RaceEvents() {
               )}
           </div>
 
-          {/* 🌟 手機版極致優化：右側按鈕區塊 (手機版自動改為上下堆疊) */}
           <div className="absolute top-4 right-4 md:top-6 md:right-8 z-40 flex flex-col sm:flex-row items-end sm:items-center gap-2 sm:gap-3 max-w-[50%] sm:max-w-none">
               
+              {/* 🌟 系統狀態連動燈號 (僅管理員可見) */}
               {(['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN'].includes(userRole)) && (
-                  <button 
-                      onClick={() => navigate('/admin/dashboard')} 
-                      className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 md:px-4 md:py-2.5 rounded-full text-xs md:text-sm font-bold transition-all shadow-lg active:scale-95 shrink-0"
-                  >
-                      <Settings size={16} /> 
-                      <span className="hidden sm:inline whitespace-nowrap">管理員後台</span>
-                      <span className="sm:hidden whitespace-nowrap">後台</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                      <button 
+                          onClick={() => navigate('/admin/system-status')}
+                          className={`flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold transition-all shadow-lg active:scale-95 shrink-0 border backdrop-blur-md
+                              ${serverStatus === 'checking' ? 'bg-slate-700/50 border-slate-600 text-slate-300' : 
+                                serverStatus === 'healthy' ? 'bg-green-500/20 border-green-500/50 text-green-400' : 
+                                serverStatus === 'warning' ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 
+                                'bg-red-500/30 border-red-500/50 text-red-400 animate-pulse'}`}
+                          title="系統伺服器監控"
+                      >
+                          {serverStatus === 'checking' ? <Loader2 size={14} className="animate-spin"/> : 
+                           serverStatus === 'error' ? <ServerCrash size={14}/> : <Server size={14}/>}
+                          <span className="hidden sm:inline whitespace-nowrap">
+                              {serverStatus === 'checking' ? '連線中' : 
+                               serverStatus === 'healthy' ? `${serverLatency}ms 正常` : 
+                               serverStatus === 'warning' ? '連線延遲' : '系統異常'}
+                          </span>
+                      </button>
+
+                      <button 
+                          onClick={() => navigate('/admin/dashboard')} 
+                          className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 md:px-4 md:py-2.5 rounded-full text-xs md:text-sm font-bold transition-all shadow-lg active:scale-95 shrink-0"
+                      >
+                          <Settings size={16} /> 
+                          <span className="hidden sm:inline whitespace-nowrap">管理員後台</span>
+                          <span className="sm:hidden whitespace-nowrap">後台</span>
+                      </button>
+                  </div>
               )}
 
-              <button 
-                  onClick={() => navigate('/my-id')} 
-                  className="relative flex items-center gap-2 bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 px-3 py-2 md:px-4 md:py-2.5 rounded-full text-white text-xs md:text-sm font-bold transition-all shadow-lg shadow-black/20 active:scale-95 group shrink-0"
-              >
-                  <div className="relative">
+              <div className="flex items-center gap-2">
+                  <button 
+                      onClick={() => setShowNotifPanel(true)} 
+                      className="relative flex items-center justify-center bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 w-9 h-9 md:w-11 md:h-11 rounded-full text-white transition-all shadow-lg shadow-black/20 active:scale-95 group shrink-0"
+                      title="系統通知"
+                  >
                       <Bell size={18} className="sm:w-[22px] sm:h-[22px] text-white group-hover:text-amber-400 transition-colors group-hover:animate-wiggle"/> 
                       {unreadCountReal > 0 && (
                           <span className="absolute -top-1 -right-1 flex h-4 w-4 sm:h-5 sm:w-5 items-center justify-center rounded-full bg-red-500 text-[9px] sm:text-[10px] font-black text-white border-2 border-slate-900 shadow-sm animate-pulse">
-                              {unreadCountReal}
+                              {unreadCountReal > 99 ? '99+' : unreadCountReal}
                           </span>
                       )}
-                  </div>
-                  <span className="hidden sm:inline whitespace-nowrap">我的數位 ID 卡</span>
-                  <span className="sm:hidden whitespace-nowrap">數位 ID</span>
-              </button>
+                  </button>
+
+                  <button 
+                      onClick={() => navigate('/my-id')} 
+                      className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 px-3 py-2 md:px-4 md:py-2.5 rounded-full text-white text-xs md:text-sm font-bold transition-all shadow-lg shadow-black/20 active:scale-95 shrink-0"
+                  >
+                      <span className="hidden sm:inline whitespace-nowrap">我的數位 ID 卡</span>
+                      <span className="sm:hidden whitespace-nowrap">數位 ID</span>
+                  </button>
+              </div>
           </div>
 
           <div className="absolute inset-0 opacity-20 bg-[url('https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&q=80&w=1920')] bg-cover bg-center"></div>
@@ -396,9 +428,7 @@ export default function RaceEvents() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-20 relative z-20 w-full flex-1">
-          
           <div className="bg-white/95 backdrop-blur-xl rounded-2xl md:rounded-[2rem] shadow-xl p-3 md:p-4 flex flex-col xl:flex-row justify-between items-center gap-3 md:gap-4 mb-4 border border-slate-100/50">
-              
               <div className="flex gap-2 w-full xl:w-auto overflow-x-auto pb-1 md:pb-0 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden snap-x">
                   <button onClick={() => setStatusFilter('ALL')} className={`shrink-0 px-4 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all whitespace-nowrap snap-start ${statusFilter === 'ALL' ? 'bg-slate-800 text-white shadow-md' : 'text-slate-500 hover:bg-slate-100 bg-slate-50/50'}`}>全部賽事</button>
                   <button onClick={() => setStatusFilter('OPEN')} className={`shrink-0 px-4 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all whitespace-nowrap flex items-center gap-1.5 snap-start ${statusFilter === 'OPEN' ? 'bg-green-500 text-white shadow-md shadow-green-500/20' : 'text-slate-500 hover:bg-slate-100 bg-slate-50/50'}`}><Activity size={14} className="hidden sm:block"/> 招募中</button>
@@ -463,13 +493,11 @@ export default function RaceEvents() {
                   {filteredRaces.map((race, idx) => {
                       const { totalRegistered, participantDetails } = extractParticipantsData(race);
                       const required = race.medic_required || 0;
-                      
                       let progressPercentage = 0;
                       if (required > 0) {
                           progressPercentage = Math.round((totalRegistered / required) * 100);
                           progressPercentage = Math.max(2, Math.min(progressPercentage, 100)); 
                       }
-                      
                       const isFull = totalRegistered >= required && required > 0;
                       const isAlmostFull = !isFull && progressPercentage >= 80;
 
@@ -487,9 +515,7 @@ export default function RaceEvents() {
                           <div className="h-[180px] md:h-[200px] relative overflow-hidden bg-slate-200 shrink-0">
                               <img src={race.image_url} alt={race.name} className={`w-full h-full object-cover transition-transform duration-700 group-hover:scale-105 ${isFull || race.status === 'SUBMITTED' ? 'grayscale opacity-70' : ''}`} />
                               <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-slate-900/20 to-transparent"></div>
-                              
                               {renderStatusBadge(race.status, race.is_hot, isFull)}
-                              
                               <div className="absolute bottom-3 left-3 md:bottom-4 md:left-4 flex items-center gap-2">
                                   <span className="bg-white/20 backdrop-blur-md text-white text-[10px] md:text-xs font-bold px-2.5 md:px-3 py-1 md:py-1.5 rounded-lg border border-white/30">{race.type}</span>
                               </div>
@@ -497,7 +523,6 @@ export default function RaceEvents() {
 
                           <div className="p-5 md:p-6 flex flex-col flex-1">
                               <h3 className="text-lg md:text-xl font-black text-slate-800 mb-4 md:mb-5 line-clamp-2 leading-snug group-hover:text-blue-600 transition-colors">{race.name}</h3>
-                              
                               <div className="space-y-2 md:space-y-2.5 mb-6 md:mb-8 flex-1">
                                   <div className="flex items-center text-slate-600 text-xs md:text-sm font-medium bg-slate-50 p-2 md:p-2.5 rounded-xl"><Calendar size={14} className="text-blue-500 mr-2.5 shrink-0"/><span>{race.date}</span></div>
                                   <div className="flex items-center text-slate-600 text-xs md:text-sm font-medium bg-slate-50 p-2 md:p-2.5 rounded-xl"><MapPin size={14} className="text-red-500 mr-2.5 shrink-0"/><span className="truncate">{race.location}</span></div>
@@ -505,7 +530,6 @@ export default function RaceEvents() {
 
                               <div className="mb-5 md:mb-6">
                                   <div className="flex justify-between items-end mb-2">
-                                      
                                       <div className="flex items-center cursor-pointer hover:bg-slate-100 p-1.5 -ml-1.5 rounded-xl transition-colors active:scale-95" onClick={() => setPreviewRace({...race, participants: participantDetails})} title="點擊查看名單">
                                           {participantDetails.length > 0 ? (
                                               <div className="flex -space-x-2.5 md:-space-x-3">
@@ -514,37 +538,21 @@ export default function RaceEvents() {
                                                   ))}
                                               </div>
                                           ) : (
-                                              <div className="w-7 h-7 md:w-8 md:h-8 rounded-full border-2 border-slate-200 bg-slate-100 flex items-center justify-center text-slate-400">
-                                                  <UsersRound size={12} md:size={14}/>
-                                              </div>
+                                              <div className="w-7 h-7 md:w-8 md:h-8 rounded-full border-2 border-slate-200 bg-slate-100 flex items-center justify-center text-slate-400"><UsersRound size={12} md:size={14}/></div>
                                           )}
-                                          <span className="text-[10px] md:text-xs font-bold ml-2 md:ml-3 flex items-center gap-1 text-slate-600">
-                                              {totalRegistered} 人已報名 <ChevronRight size={12}/>
-                                          </span>
+                                          <span className="text-[10px] md:text-xs font-bold ml-2 md:ml-3 flex items-center gap-1 text-slate-600">{totalRegistered} 人已報名 <ChevronRight size={12}/></span>
                                       </div>
-                                      
                                       <div className="flex flex-col items-end">
-                                           {isFull ? (
-                                              <span className="text-[9px] md:text-[10px] font-black text-red-500 mb-0.5">已滿編</span>
-                                           ) : isAlmostFull ? (
-                                              <span className="text-[9px] md:text-[10px] font-black text-amber-500 mb-0.5">即將額滿</span>
-                                           ) : null}
+                                           {isFull ? <span className="text-[9px] md:text-[10px] font-black text-red-500 mb-0.5">已滿編</span> : isAlmostFull ? <span className="text-[9px] md:text-[10px] font-black text-amber-500 mb-0.5">即將額滿</span> : null}
                                           <div className="text-[10px] md:text-xs font-black text-slate-400">總需 {required} 人</div>
                                       </div>
                                   </div>
-
                                   <div className="w-full bg-slate-200 rounded-full h-1.5 md:h-2 overflow-hidden shadow-inner">
-                                      <div 
-                                          className={`h-full rounded-full transition-all duration-1000 
-                                              ${isFull ? 'bg-red-500' : isAlmostFull ? 'bg-amber-400' : 'bg-blue-500'}`} 
-                                          style={{ width: `${progressPercentage}%` }}
-                                      ></div>
+                                      <div className={`h-full rounded-full transition-all duration-1000 ${isFull ? 'bg-red-500' : isAlmostFull ? 'bg-amber-400' : 'bg-blue-500'}`} style={{ width: `${progressPercentage}%` }}></div>
                                   </div>
                               </div>
 
-                              <button onClick={() => navigate(`/race-detail/${race.id}`)} disabled={race.status === 'UPCOMING'}
-                                  className={`w-full py-3 md:py-4 rounded-xl font-black text-[13px] md:text-[15px] flex items-center justify-center gap-2 transition-all active:scale-95 ${btnConfig.class}`}
-                              >
+                              <button onClick={() => navigate(`/race-detail/${race.id}`)} disabled={race.status === 'UPCOMING'} className={`w-full py-3 md:py-4 rounded-xl font-black text-[13px] md:text-[15px] flex items-center justify-center gap-2 transition-all active:scale-95 ${btnConfig.class}`}>
                                   {btnConfig.text}
                                   {race.status !== 'UPCOMING' && <ChevronRight size={16} md:size={18} className="group-hover:translate-x-1 transition-transform" />}
                               </button>
@@ -554,6 +562,61 @@ export default function RaceEvents() {
               </div>
           )}
       </div>
+
+      {showNotifPanel && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex justify-end animate-fade-in" onClick={() => setShowNotifPanel(false)}>
+              <div className="bg-slate-50 w-full sm:w-[400px] h-full flex flex-col shadow-2xl animate-slide-left" onClick={e => e.stopPropagation()}>
+                  <div className="px-6 py-5 border-b border-slate-200 bg-white flex justify-between items-center shrink-0">
+                      <h3 className="text-xl font-black text-slate-800 flex items-center gap-2"><Bell className="text-blue-600"/> 系統通知</h3>
+                      <button onClick={() => setShowNotifPanel(false)} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors active:scale-95"><X size={20}/></button>
+                  </div>
+                  <div className="flex bg-white px-4 pt-2 border-b border-slate-200 shrink-0">
+                      <button onClick={() => setNotifTab('system')} className={`flex-1 pb-3 text-sm font-bold border-b-2 transition-colors ${notifTab === 'system' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>賽事通報</button>
+                      <button onClick={() => setNotifTab('personal')} className={`flex-1 pb-3 text-sm font-bold border-b-2 transition-colors ${notifTab === 'personal' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>個人提醒</button>
+                  </div>
+                  
+                  {/* 🌟 權限控制：僅超級管理員可見的資料庫告警 */}
+                  {notifTab === 'system' && userRole === 'SUPER_ADMIN' && (
+                      <div className="px-4 pt-4 shrink-0">
+                          <div className="bg-red-50/80 border border-red-200 rounded-xl p-3.5 flex gap-3 shadow-sm">
+                              <AlertTriangle size={18} className="text-red-500 shrink-0 mt-0.5"/>
+                              <div>
+                                  <div className="text-xs font-black text-red-700">⚠️ 系統資料庫負載告警</div>
+                                  <div className="text-[10px] font-bold text-red-500/80 mt-1 leading-relaxed">
+                                      為避免全體廣播導致資料庫爆滿，系統級通知（如：新增賽事）目前已啟用負載保護，僅限定派發給「當屆有效會員」。
+                                  </div>
+                              </div>
+                          </div>
+                      </div>
+                  )}
+
+                  <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                      <div className="flex justify-between items-center mb-2 px-1">
+                          <span className="text-xs font-bold text-slate-400">保留近 8 個月的通知</span>
+                          <button onClick={markAllAsRead} className="text-xs font-bold text-blue-600 hover:underline">全部標示已讀</button>
+                      </div>
+                      {notifications.filter(n => n.tab === notifTab).length > 0 ? (
+                          notifications.filter(n => n.tab === notifTab).map(notif => {
+                              const isItemRead = notif.isRead || notif.is_read;
+                              return (
+                              <div key={notif.id} className={`p-4 rounded-2xl border transition-all relative group ${isItemRead ? 'bg-slate-100/50 border-slate-200 opacity-80' : 'bg-white border-blue-200 shadow-sm'}`}>
+                                  <button onClick={() => deleteNotification(notif.id)} className="absolute top-2 right-2 p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={14}/></button>
+                                  <div className="flex gap-3">
+                                      <div className={`mt-0.5 w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isItemRead ? 'bg-slate-200' : 'bg-blue-50'}`}>{getNotifIcon(notif.category)}</div>
+                                      <div className="flex-1 pr-6">
+                                          <div className="text-[10px] text-slate-400 font-medium mb-1 flex items-center gap-1"><Clock size={10}/> {new Date(notif.date).toLocaleDateString()}</div>
+                                          <p className={`text-sm leading-relaxed ${isItemRead ? 'text-slate-600' : 'text-slate-800 font-bold'}`}>{notif.message}</p>
+                                      </div>
+                                  </div>
+                              </div>
+                          )})
+                      ) : (
+                          <div className="text-center py-10 text-slate-400 font-medium text-sm">目前沒有任何通知</div>
+                      )}
+                  </div>
+              </div>
+          </div>
+      )}
 
       {previewRace && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in" onClick={() => setPreviewRace(null)}>
@@ -569,9 +632,7 @@ export default function RaceEvents() {
                           return (
                           <div key={i} className="flex flex-col sm:flex-row sm:items-center gap-3 p-4 rounded-xl border border-slate-100 hover:bg-slate-50 hover:border-slate-200 transition-all cursor-default">
                               <div className="flex items-center gap-3">
-                                  <div className="w-10 h-10 shrink-0 rounded-full flex items-center justify-center text-sm font-black text-white shadow-sm" style={{ backgroundColor: `hsl(${i * 60 + 200}, 70%, 50%)` }}>
-                                      {getInitial(cleanName)}
-                                  </div>
+                                  <div className="w-10 h-10 shrink-0 rounded-full flex items-center justify-center text-sm font-black text-white shadow-sm" style={{ backgroundColor: `hsl(${i * 60 + 200}, 70%, 50%)` }}>{getInitial(cleanName)}</div>
                                   <div>
                                       <div className="font-bold text-slate-800 flex items-center gap-2 flex-wrap">
                                           {cleanName}
@@ -579,12 +640,8 @@ export default function RaceEvents() {
                                           {!p.roleTag && p.isVip && <span className="flex items-center text-[10px] bg-amber-100 text-amber-700 border border-amber-300 px-1.5 py-0.5 rounded font-black"><Crown size={10} className="mr-1"/> VIP</span>}
                                           {p.isNew && <span className="flex items-center text-[10px] bg-green-100 text-green-700 border border-green-300 px-1.5 py-0.5 rounded font-black"><Sprout size={10} className="mr-1"/> 新人</span>}
                                       </div>
-                                      <div className="text-xs text-slate-500 font-bold mt-1">
-                                          📍 {p.slotGroup} - {p.slotName}
-                                      </div>
-                                      <div className="text-[10px] text-slate-400 font-mono mt-1 flex items-center gap-1">
-                                          <Clock size={10}/> 登記時間: {p.timestamp}
-                                      </div>
+                                      <div className="text-xs text-slate-500 font-bold mt-1">📍 {p.slotGroup} - {p.slotName}</div>
+                                      <div className="text-[10px] text-slate-400 font-mono mt-1 flex items-center gap-1"><Clock size={10}/> 登記時間: {p.timestamp}</div>
                                   </div>
                               </div>
                           </div>

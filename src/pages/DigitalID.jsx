@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { 
     Medal, Calendar, ShieldCheck, AlertTriangle, Clock, MapPin, ChevronRight, ChevronLeft, 
     Activity, Crown, Sprout, Loader2, CreditCard, LogOut, QrCode, CheckCircle, 
@@ -8,13 +8,6 @@ import {
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
-
-const INITIAL_NOTIFICATIONS = [
-    { id: 1, tab: 'system', category: 'race', message: '新賽事已開放報名！', date: new Date().toISOString(), isRead: false },
-    { id: 2, tab: 'personal', category: 'cert', message: '您的 EMT-1 證照即將於 30 天後到期，請盡速更新。', date: new Date(Date.now() - 86400000).toISOString(), isRead: false },
-    { id: 3, tab: 'system', category: 'shop', message: '專屬 VIP 優惠：鐵人裝備商城全館 8 折！', date: new Date(Date.now() - 86400000 * 3).toISOString(), isRead: true },
-    { id: 4, tab: 'personal', category: 'old', message: '這是一則一年前的舊通知，即將被系統自動清除。', date: '2024-01-01T00:00:00.000Z', isRead: true }
-]
 
 const InfoRow = ({ label, value, icon: Icon, alert = false }) => (
     <div className="flex flex-col py-3 border-b border-slate-100 last:border-0">
@@ -47,7 +40,7 @@ export default function DigitalID() {
   
   const [showNotifPanel, setShowNotifPanel] = useState(false)
   const [notifTab, setNotifTab] = useState('system') 
-  const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS)
+  const [notifications, setNotifications] = useState([])
   
   const [profile, setProfile] = useState(null)
   const [myRaces, setMyRaces] = useState([]) 
@@ -57,15 +50,32 @@ export default function DigitalID() {
   const [activeModal, setActiveModal] = useState(null) 
   const [isEditing, setIsEditing] = useState(false)
   const [formData, setFormData] = useState({})
+  const [saving, setSaving] = useState(false)
+
+  const notifChannelRef = useRef(null)
 
   useEffect(() => {
-    const eightMonthsAgo = new Date();
-    eightMonthsAgo.setMonth(eightMonthsAgo.getMonth() - 8);
-    setNotifications(prev => prev.filter(n => new Date(n.date) >= eightMonthsAgo));
-
     fetchData();
+    return () => {
+        if (notifChannelRef.current) supabase.removeChannel(notifChannelRef.current);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  const setupRealtimeNotifications = (userId) => {
+      const channel = supabase.channel('digital-id-notifs')
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'user_notifications', filter: `user_id=eq.${userId}` }, (payload) => {
+              setNotifications(prev => [{...payload.new, date: payload.new.created_at}, ...prev]);
+          })
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'user_notifications', filter: `user_id=eq.${userId}` }, (payload) => {
+              setNotifications(prev => prev.map(n => n.id === payload.new.id ? {...payload.new, date: payload.new.created_at} : n));
+          })
+          .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'user_notifications', filter: `user_id=eq.${userId}` }, (payload) => {
+              setNotifications(prev => prev.filter(n => n.id !== payload.old.id));
+          })
+          .subscribe()
+      notifChannelRef.current = channel;
+  }
 
   const fetchData = async () => {
     setLoadingProfile(true)
@@ -87,6 +97,24 @@ export default function DigitalID() {
         if (data) {
             currentUserProfile = { ...currentUserProfile, ...data }
         }
+
+        const eightMonthsAgo = new Date();
+        eightMonthsAgo.setMonth(eightMonthsAgo.getMonth() - 8);
+
+        try {
+            const { data: notifs } = await supabase
+                .from('user_notifications')
+                .select('*')
+                .eq('user_id', user.id)
+                .gte('created_at', eightMonthsAgo.toISOString())
+                .order('created_at', { ascending: false })
+            
+            if (notifs) {
+                const mappedNotifs = notifs.map(n => ({ ...n, date: n.created_at }))
+                setNotifications(mappedNotifs)
+            }
+            setupRealtimeNotifications(user.id);
+        } catch(e) { console.log("user_notifications 表格可能尚未建立", e) }
       } 
       
       setProfile(currentUserProfile)
@@ -200,6 +228,24 @@ export default function DigitalID() {
           if (updateError) throw updateError
 
           setMyRaces(myRaces.filter(r => r.id !== raceId))
+          
+          // 🌟 強化錯誤捕捉的退賽通知寫入
+          try {
+              const { error: notifError } = await supabase.from('user_notifications').insert({
+                  user_id: profile.id,
+                  tab: 'personal',
+                  category: 'race',
+                  message: `您已成功取消報名【${raceName}】，名額已釋出。`,
+                  is_read: false
+              })
+              if (notifError) {
+                  console.error("Supabase 通知寫入失敗:", notifError);
+                  alert(`⚠️ 退賽成功，但通知發送失敗：${notifError.message} (請檢查 RLS 政策)`);
+              }
+          } catch(e) { 
+              console.error("發送退賽通知異常", e);
+          }
+
           alert("✅ 退賽成功，名額已釋出！")
 
       } catch (error) {
@@ -220,59 +266,79 @@ export default function DigitalID() {
       setFormData(prev => ({ ...prev, [name]: value }))
   }
 
-  // 🌟 極速背景儲存 (樂觀 UI + Fire and Forget)
-  const handleSaveChanges = (section) => {
-      const updatePayload = { ...formData }
-      let notifyMsg = ''
+  const handleSaveChanges = async (section) => {
+      setSaving(true)
+      try {
+          const updatePayload = { ...formData }
+          let notifyMsg = ''
+          let sectionName = section === 'basic' ? '核心基本資料' : '醫護與裝備';
 
-      if (section === 'basic') {
-          updatePayload.basic_edit_count = (profile.basic_edit_count || 0) + 1;
-          notifyMsg = `人員 [${profile.full_name}] 修改了「核心基本資料」`;
-      } else if (section === 'medical') {
-          updatePayload.med_edit_count = (profile.med_edit_count || 0) + 1;
-          notifyMsg = `人員 [${profile.full_name}] 修改了「醫護與裝備」`;
-      }
-
-      // 1. 樂觀 UI：瞬間更新畫面，讓使用者無縫接軌
-      setProfile(updatePayload)
-      setIsEditing(false)
-      alert(`✅ 資料已儲存！`)
-
-      // 2. 背景隱形通道：在背景慢慢寫入，即使報錯也不卡住使用者畫面
-      setTimeout(async () => {
-          try {
-              const { data: { user } } = await supabase.auth.getUser()
-              if (user && user.email) { 
-                  // 移除前端才有的計數器欄位，防止存入 Supabase 時報錯
-                  const { basic_edit_count, med_edit_count, ...safeDbPayload } = updatePayload;
-                  
-                  // 強制覆蓋寫入
-                  await supabase.from('profiles').upsert({ ...safeDbPayload, email: user.email.toLowerCase() }, { onConflict: 'email' })
-                  
-                  // 發送通知給後台
-                  try {
-                      await supabase.from('admin_notifications').insert({
-                          user_id: user.id, 
-                          user_name: profile.full_name || safeDbPayload.full_name,
-                          type: 'PROFILE_UPDATE', 
-                          message: notifyMsg
-                      })
-                  } catch (e) {
-                      console.error("背景發送通知失敗", e)
-                  }
-              }
-          } catch (e) { 
-              console.error("背景儲存失敗", e) 
+          if (section === 'basic') {
+              updatePayload.basic_edit_count = (profile.basic_edit_count || 0) + 1;
+              notifyMsg = `人員 [${profile.full_name}] 修改了「核心基本資料」`;
+          } else if (section === 'medical') {
+              updatePayload.med_edit_count = (profile.med_edit_count || 0) + 1;
+              notifyMsg = `人員 [${profile.full_name}] 修改了「醫護與裝備」`;
           }
-      }, 0);
+
+          const { data: { user } } = await supabase.auth.getUser()
+          if (user && user.email) { 
+              const { basic_edit_count, med_edit_count, ...safeDbPayload } = updatePayload;
+
+              const { error: upsertError } = await supabase.from('profiles').upsert({ ...safeDbPayload, email: user.email.toLowerCase() }, { onConflict: 'email' })
+              if (upsertError) throw upsertError;
+
+              try {
+                  await supabase.from('admin_notifications').insert({
+                      user_id: user.id, 
+                      user_name: profile.full_name || safeDbPayload.full_name,
+                      type: 'PROFILE_UPDATE', 
+                      message: notifyMsg
+                  })
+                  
+                  const { error: notifError } = await supabase.from('user_notifications').insert({
+                      user_id: user.id,
+                      tab: 'personal',
+                      category: 'bell',
+                      message: `您的「${sectionName}」已成功更新並送出審核。`,
+                      is_read: false
+                  })
+                   if (notifError) {
+                      console.error("Supabase 通知寫入失敗:", notifError);
+                  }
+              } catch (e) {
+                  console.error("發送通知失敗", e)
+              }
+          }
+
+          setProfile(updatePayload)
+          setIsEditing(false)
+          alert(`✅ 資料更新成功！\n系統已發送修改通知給超級管理員。`)
+
+      } catch (error) {
+          alert('儲存失敗：' + error.message)
+      } finally {
+          setSaving(false)
+      }
   }
 
   const handleApplyModification = () => {
       alert("📝 已為您開啟「修改申請單」。\n請填寫您欲變更的欄位與原因，我們將由專人為您處理。")
   }
 
-  const deleteNotification = (id) => { setNotifications(prev => prev.filter(n => n.id !== id)); }
-  const markAllAsRead = () => { setNotifications(prev => prev.map(n => ({ ...n, isRead: true }))); }
+  const deleteNotification = async (id) => { 
+      setNotifications(prev => prev.filter(n => n.id !== id)); 
+      try { await supabase.from('user_notifications').delete().eq('id', id) } catch(e){}
+  }
+  
+  const markAllAsRead = async () => { 
+      setNotifications(prev => prev.map(n => ({ ...n, isRead: true, is_read: true }))); 
+      try {
+          if (profile && profile.id) {
+              await supabase.from('user_notifications').update({ is_read: true }).eq('user_id', profile.id).eq('is_read', false)
+          }
+      } catch(e){}
+  }
 
   const getNotifIcon = (category) => {
       switch(category) {
@@ -302,7 +368,8 @@ export default function DigitalID() {
   const finishedCount = pastRaces.length;
   const totalEnrolledCount = myRaces.length;
   const attendanceRate = pastRaces.length > 0 ? '100%' : 'N/A';
-  const unreadCountReal = notifications.filter(n => !n.isRead).length;
+  
+  const unreadCountReal = notifications.filter(n => !(n.isRead || n.is_read)).length;
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans pb-24 animate-fade-in flex flex-col relative overflow-x-hidden">
@@ -319,7 +386,7 @@ export default function DigitalID() {
                   <Bell size={22} className="group-hover:animate-wiggle"/>
                   {unreadCountReal > 0 && (
                       <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-black text-white border-2 border-slate-900 shadow-sm animate-pulse">
-                          {unreadCountReal}
+                          {unreadCountReal > 99 ? '99+' : unreadCountReal}
                       </span>
                   )}
               </button>
@@ -374,8 +441,8 @@ export default function DigitalID() {
               <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar snap-x">
                   {myRaces.filter(r => new Date(r.date) >= new Date()).length > 0 ? (
                       myRaces.filter(r => new Date(r.date) >= new Date()).map(race => (
-                          <div key={race.id} onClick={() => navigate(`/race-detail/${race.id}`)} className="bg-white min-w-[260px] md:min-w-[300px] p-4 rounded-[1.5rem] shadow-sm border border-slate-200 cursor-pointer hover:shadow-md transition-all snap-start active:scale-95 flex flex-col justify-between">
-                              <div>
+                          <div key={race.id} className="bg-white min-w-[260px] md:min-w-[300px] p-4 rounded-[1.5rem] shadow-sm border border-slate-200 hover:shadow-md transition-all snap-start flex flex-col justify-between">
+                              <div onClick={() => navigate(`/race-detail/${race.id}`)} className="cursor-pointer active:scale-95 flex-1">
                                   <div className="flex justify-between items-start mb-2">
                                       <span className={`text-[10px] font-black px-2 py-0.5 rounded-md ${race.status === 'FULL' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>
                                           {race.status === 'OPEN' ? '招募中' : race.status === 'FULL' ? '滿編' : '處理中'}
@@ -395,7 +462,7 @@ export default function DigitalID() {
                                   <button 
                                       onClick={(e) => handleCancelRace(e, race.id, race.name)}
                                       disabled={isCanceling}
-                                      className="text-[10px] font-black bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors border border-red-200 disabled:opacity-50 active:scale-95"
+                                      className="text-[10px] font-black bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors border border-red-200 disabled:opacity-50 active:scale-95 z-10"
                                   >
                                       {isCanceling ? <Loader2 size={12} className="animate-spin"/> : <XCircle size={12}/>} 
                                       取消報名
@@ -491,26 +558,28 @@ export default function DigitalID() {
                       </div>
 
                       {notifications.filter(n => n.tab === notifTab).length > 0 ? (
-                          notifications.filter(n => n.tab === notifTab).map(notif => (
-                              <div key={notif.id} className={`p-4 rounded-2xl border transition-all relative group ${notif.isRead ? 'bg-slate-100/50 border-slate-200 opacity-80' : 'bg-white border-blue-200 shadow-sm'}`}>
+                          notifications.filter(n => n.tab === notifTab).map(notif => {
+                              const isItemRead = notif.isRead || notif.is_read;
+                              return (
+                              <div key={notif.id} className={`p-4 rounded-2xl border transition-all relative group ${isItemRead ? 'bg-slate-100/50 border-slate-200 opacity-80' : 'bg-white border-blue-200 shadow-sm'}`}>
                                   <button onClick={() => deleteNotification(notif.id)} className="absolute top-2 right-2 p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all">
                                       <Trash2 size={14}/>
                                   </button>
                                   <div className="flex gap-3">
-                                      <div className={`mt-0.5 w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${notif.isRead ? 'bg-slate-200' : 'bg-blue-50'}`}>
+                                      <div className={`mt-0.5 w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isItemRead ? 'bg-slate-200' : 'bg-blue-50'}`}>
                                           {getNotifIcon(notif.category)}
                                       </div>
                                       <div className="flex-1 pr-6">
                                           <div className="text-[10px] text-slate-400 font-medium mb-1 flex items-center gap-1">
                                               <Clock size={10}/> {new Date(notif.date).toLocaleDateString()}
                                           </div>
-                                          <p className={`text-sm leading-relaxed ${notif.isRead ? 'text-slate-600' : 'text-slate-800 font-bold'}`}>
+                                          <p className={`text-sm leading-relaxed ${isItemRead ? 'text-slate-600' : 'text-slate-800 font-bold'}`}>
                                               {notif.message}
                                           </p>
                                       </div>
                                   </div>
                               </div>
-                          ))
+                          )})
                       ) : (
                           <div className="text-center py-10 text-slate-400 font-medium text-sm">目前沒有任何通知</div>
                       )}
@@ -637,7 +706,6 @@ export default function DigitalID() {
 
                       {activeModal === 'medical' && isEditing && (
                           <div className="space-y-4 bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-                              {/* 🌟 核心更新：統一證照下拉選單 */}
                               <EditInputRow label="醫護證照種類" name="medical_license" type="select" options={['EMT-1', 'EMT-2', 'EMTP', '醫師', '醫療線上護理師']} formData={formData} handleInputChange={handleInputChange} />
                               <EditInputRow label="證照有效期限" name="license_expiry" type="date" formData={formData} handleInputChange={handleInputChange} />
                               <EditInputRow label="特殊病史與過敏" name="medical_history" formData={formData} handleInputChange={handleInputChange} />
@@ -656,9 +724,8 @@ export default function DigitalID() {
                       {isEditing ? (
                           <div className="flex gap-3">
                               <button onClick={() => setIsEditing(false)} className="flex-1 py-3.5 bg-slate-100 text-slate-600 font-black rounded-xl hover:bg-slate-200 transition-colors active:scale-95">取消編輯</button>
-                              {/* 🌟 核心更新：極速儲存按鈕 */}
-                              <button onClick={() => handleSaveChanges(activeModal)} className="flex-[2] py-3.5 bg-blue-600 text-white font-black rounded-xl hover:bg-blue-700 shadow-md shadow-blue-600/30 flex justify-center items-center gap-2 transition-colors active:scale-95">
-                                  <Check size={18}/> 儲存資料
+                              <button onClick={() => handleSaveChanges(activeModal)} disabled={saving} className="flex-[2] py-3.5 bg-blue-600 text-white font-black rounded-xl hover:bg-blue-700 shadow-md shadow-blue-600/30 flex justify-center items-center gap-2 transition-colors disabled:opacity-50 active:scale-95">
+                                  {saving ? <Loader2 className="animate-spin" size={18}/> : <Check size={18}/>} 儲存並發送通知
                               </button>
                           </div>
                       ) : (

@@ -12,21 +12,20 @@ export default function RaceDetail() {
   const [selectedSlot, setSelectedSlot] = useState(null)
   const [previewSlot, setPreviewSlot] = useState(null) 
   const [waitlist, setWaitlist] = useState([]) 
-  const [currentUser, setCurrentUser] = useState(null) // 🌟 改用真實的登入者狀態
+  const [currentUser, setCurrentUser] = useState(null) 
 
-  // 🌟 神之手專用狀態
   const [isGodMode, setIsGodMode] = useState(false)
   const [insertModalOpen, setInsertModalOpen] = useState(false)
   const [insertData, setInsertData] = useState({ slotId: null, name: '', roleTag: '' })
 
   useEffect(() => { 
       fetchCurrentUserAndRace() 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
   const fetchCurrentUserAndRace = async () => {
       setLoading(true)
       try {
-          // 1. 抓取真實使用者
           const { data: { user } } = await supabase.auth.getUser()
           let fetchedUser = null;
           let godModeCheck = false;
@@ -35,7 +34,6 @@ export default function RaceDetail() {
               const { data: profile } = await supabase.from('profiles').select('*').eq('email', user.email).maybeSingle()
               if (profile) {
                   fetchedUser = profile;
-                  // 🌟 判定是否為超級管理員或總監
                   const role = profile.role?.toUpperCase() || 'USER';
                   if (role === 'SUPER_ADMIN' || role === 'TOURNAMENT_DIRECTOR') {
                       godModeCheck = true;
@@ -45,7 +43,6 @@ export default function RaceDetail() {
           setCurrentUser(fetchedUser);
           setIsGodMode(godModeCheck);
 
-          // 2. 抓取賽事詳情
           const { data, error } = await supabase.from('races').select('*').eq('id', id).single()
           if (error) throw error
           if (data) {
@@ -126,7 +123,6 @@ export default function RaceDetail() {
       };
 
       if (!isSelectedSlotFull) {
-          // 🌟 樂觀 UI：瞬間打勾更新畫面
           const updatedSlots = activeRace.slots.map(s => {
               if (s.id === selectedSlot) {
                   const currentFilled = s.filled || 0;
@@ -139,10 +135,22 @@ export default function RaceDetail() {
           setActiveRace({ ...activeRace, slots: updatedSlots });
           alert(`✅ 報名成功！您已正式加入【${targetSlotData.name}】`);
 
-          // 隱形通道寫入資料庫
           try {
               const { error } = await supabase.from('races').update({ slots_data: updatedSlots }).eq('id', activeRace.id);
               if (error) throw error;
+              
+              // 🌟 核心修補：報名正取成功發信
+              try {
+                  const { error: notifError } = await supabase.from('user_notifications').insert({
+                      user_id: currentUser.id,
+                      tab: 'personal', // 歸類在個人提醒
+                      category: 'race',
+                      message: `您已成功報名【${activeRace.title}】的「${targetSlotData.name}」賽段。`,
+                      is_read: false
+                  });
+                  if (notifError) console.error("發送報名通知失敗", notifError);
+              } catch(e) { console.error("發送報名通知異常", e) }
+
           } catch(e) { alert("報名寫入資料庫異常：" + e.message) }
 
       } else {
@@ -155,6 +163,19 @@ export default function RaceDetail() {
           try {
               const { error } = await supabase.from('races').update({ waitlist_data: newWaitlist }).eq('id', activeRace.id);
               if (error) throw error;
+              
+              // 🌟 核心修補：候補登記成功發信
+              try {
+                  const { error: notifError } = await supabase.from('user_notifications').insert({
+                      user_id: currentUser.id,
+                      tab: 'personal', // 歸類在個人提醒
+                      category: 'race',
+                      message: `您已進入【${activeRace.title}】的候補名單，請靜候系統或總監通知。`,
+                      is_read: false
+                  });
+                  if (notifError) console.error("發送候補通知失敗", notifError);
+              } catch(e) { console.error("發送候補通知異常", e) }
+
           } catch(e) { alert("候補寫入資料庫異常：" + e.message) }
       }
   }
@@ -179,7 +200,6 @@ export default function RaceDetail() {
           return s;
       });
 
-      // 更新畫面與預覽視窗
       setActiveRace({ ...activeRace, slots: updatedSlots });
       const updatedPreviewSlot = updatedSlots.find(s => s.id === slotId);
       if(updatedPreviewSlot) {
@@ -189,11 +209,24 @@ export default function RaceDetail() {
       try {
           const { error } = await supabase.from('races').update({ slots_data: updatedSlots }).eq('id', activeRace.id);
           if (error) throw error;
+          
+          // 🌟 核心修補：神之手踢除發信 (若有真實 ID)
+          if (userIdToKick && !String(userIdToKick).startsWith('force_')) {
+              try {
+                  await supabase.from('user_notifications').insert({
+                      user_id: userIdToKick,
+                      tab: 'personal',
+                      category: 'alert',
+                      message: `您在【${activeRace.title}】的名額已被管理員異動，如有疑問請聯繫總監。`,
+                      is_read: false
+                  });
+              } catch(e) { console.error("發送踢除通知失敗", e) }
+          }
       } catch(e) { alert("踢除寫入失敗：" + e.message) }
   }
 
   const openInsertModal = (e, slotId) => {
-      e.stopPropagation(); // 避免點擊到外層選取賽段
+      e.stopPropagation(); 
       setInsertData({ slotId, name: '', roleTag: '' });
       setInsertModalOpen(true);
   }
@@ -252,6 +285,17 @@ export default function RaceDetail() {
       try {
           const { error } = await supabase.from('races').update({ slots_data: updatedSlots, waitlist_data: newWaitlist }).eq('id', activeRace.id);
           if (error) throw error;
+          
+          // 🌟 核心修補：神之手遞補發信給幸運兒
+          try {
+              await supabase.from('user_notifications').insert({
+                  user_id: user.id,
+                  tab: 'personal',
+                  category: 'race',
+                  message: `🎉 恭喜！您在【${activeRace.title}】的候補名額已成功轉為正取！`,
+                  is_read: false
+              });
+          } catch(e) { console.error("發送遞補通知失敗", e) }
       } catch(e) { alert("核准寫入失敗：" + e.message) }
   }
 
@@ -564,7 +608,6 @@ export default function RaceDetail() {
           </div>
       </div>
 
-      {/* 🌟 內頁預覽 Modal：包含「神之手踢除按鈕」 */}
       {previewSlot && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-fade-in" onClick={() => setPreviewSlot(null)}>
               <div className="bg-white rounded-[2rem] shadow-2xl max-w-sm md:max-w-md w-full p-6 animate-bounce-in flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
@@ -599,7 +642,6 @@ export default function RaceDetail() {
                                   </div>
                               </div>
                               
-                              {/* 🌟 神之手：踢除按鈕 */}
                               {isGodMode ? (
                                   <button onClick={() => handleKickUser(previewSlot.id, participant.id || participant.name, participant.name)} className="shrink-0 p-2 text-red-500 hover:bg-red-100 rounded-lg transition-colors border border-transparent hover:border-red-200" title="神之手踢除">
                                       <Trash2 size={18}/>
@@ -616,7 +658,6 @@ export default function RaceDetail() {
           </div>
       )}
 
-      {/* 🌟 強制安插人員 Modal */}
       {insertModalOpen && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[110] p-4 animate-fade-in" onClick={() => setInsertModalOpen(false)}>
               <div className="bg-white rounded-[2rem] shadow-2xl max-w-sm w-full p-6 animate-bounce-in" onClick={e => e.stopPropagation()}>
