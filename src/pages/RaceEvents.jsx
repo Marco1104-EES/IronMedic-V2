@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react'
-import { Calendar, MapPin, Users, Clock, ChevronRight, Activity, Flame, ShieldAlert, Timer, CheckCircle, X, Loader2, UsersRound, Crown, Sprout, Handshake, Send, CreditCard, Flag, Settings, Bell } from 'lucide-react'
+import { useState, useEffect, useRef, useMemo } from 'react'
+import { Calendar, MapPin, Users, Clock, ChevronRight, Activity, Flame, ShieldAlert, Timer, CheckCircle, X, Loader2, UsersRound, Crown, Sprout, Handshake, Send, CreditCard, Flag, Settings, Bell, ChevronDown, ChevronUp } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 
@@ -28,6 +28,8 @@ export default function RaceEvents() {
 
   // 🌟 加入通知狀態
   const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS)
+  
+  const [showStats, setShowStats] = useState(false)
 
   const navigate = useNavigate()
   const CURRENT_YEAR = new Date().getFullYear()
@@ -295,64 +297,99 @@ export default function RaceEvents() {
 
   const unreadCountReal = notifications.filter(n => !n.isRead).length;
 
+  // 🌟 賽事統計邏輯
+  const raceStats = useMemo(() => {
+    let total = races.length;
+    let currentYearCount = 0;
+    let pastCount = 0;
+    let futureCount = 0;
+    
+    let openCount = 0;
+    let negotiatingCount = 0;
+    let submittedCount = 0;
+    let upcomingCount = 0;
+
+    races.forEach(race => {
+      if (!race.date) return;
+      const raceYear = new Date(race.date).getFullYear();
+      
+      if (raceYear === CURRENT_YEAR) currentYearCount++;
+      else if (raceYear < CURRENT_YEAR) pastCount++;
+      else if (raceYear > CURRENT_YEAR) futureCount++;
+
+      if (race.status === 'OPEN') openCount++;
+      else if (race.status === 'NEGOTIATING') negotiatingCount++;
+      else if (race.status === 'SUBMITTED') submittedCount++;
+      else if (race.status === 'UPCOMING') upcomingCount++;
+    });
+
+    return { total, currentYearCount, pastCount, futureCount, openCount, negotiatingCount, submittedCount, upcomingCount };
+  }, [races, CURRENT_YEAR]);
+
   return (
     <div className="min-h-screen bg-slate-50 pb-24 font-sans flex flex-col relative">
       <div className="bg-slate-900 pt-20 md:pt-24 pb-32 px-4 md:px-8 text-center relative overflow-hidden shrink-0">
           
-          {/* 🌟 包含在線人數與新人 Spotlight 的左上角區塊 */}
-          <div className="absolute top-4 left-4 md:top-6 md:left-8 z-30 flex flex-col items-start gap-2">
-              <div className="flex items-center gap-2 bg-slate-800/80 backdrop-blur-md px-3 py-1.5 md:px-4 md:py-2 rounded-full border border-slate-700 shadow-lg">
+          {/* 🌟 手機版極致優化：左側在線人數與 Spotlight 防擠壓 */}
+          <div className="absolute top-4 left-4 md:top-6 md:left-8 z-40 flex flex-col items-start gap-2 max-w-[45%] sm:max-w-none">
+              <div className="flex items-center gap-2 bg-slate-800/80 backdrop-blur-md px-3 py-1.5 md:px-4 md:py-2 rounded-full border border-slate-700 shadow-lg shrink-0">
                   <div className="w-2.5 h-2.5 md:w-3 md:h-3 rounded-full bg-green-500 animate-pulse shadow-[0_0_10px_rgba(34,197,94,0.9)]"></div>
-                  <span className="text-xs md:text-sm font-black text-slate-200 tracking-wider">目前在線：{onlineCount} 人</span>
+                  <span className="text-[11px] sm:text-xs md:text-sm font-black text-slate-200 tracking-wider whitespace-nowrap">目前在線：{onlineCount}</span>
               </div>
               
-              {/* ✨ 新人上線 Spotlight (只在有新人時顯示) */}
+              {/* ✨ 新人上線 Spotlight (手機版縮小間距、限制頭像數) */}
               {newcomersOnline.length > 0 && (
-                  <div className="flex items-center gap-2 animate-fade-in-up bg-amber-500/20 backdrop-blur-sm border border-amber-500/50 px-3 py-1.5 rounded-full shadow-[0_0_15px_rgba(245,158,11,0.2)]">
-                      <span className="text-[10px] md:text-xs font-black text-amber-300 flex items-center gap-1"><Sprout size={12}/> 新人上線</span>
-                      <div className="flex -space-x-1.5">
-                          {newcomersOnline.slice(0, 4).map((nc, idx) => (
+                  <div className="flex items-center gap-1.5 md:gap-2 animate-fade-in-up bg-amber-500/20 backdrop-blur-sm border border-amber-500/50 px-2 py-1 sm:px-3 sm:py-1.5 rounded-full shadow-[0_0_15px_rgba(245,158,11,0.2)] overflow-hidden max-w-full">
+                      <span className="text-[10px] md:text-xs font-black text-amber-300 flex items-center gap-1 shrink-0 whitespace-nowrap">
+                          <Sprout size={12}/> 
+                          <span className="hidden sm:inline">新人上線</span>
+                          <span className="sm:hidden">新人</span>
+                      </span>
+                      <div className="flex -space-x-1.5 md:-space-x-1.5 shrink-0">
+                          {newcomersOnline.slice(0, 3).map((nc, idx) => (
                               <div key={idx} className="w-5 h-5 md:w-6 md:h-6 rounded-full bg-amber-400 text-amber-900 flex items-center justify-center text-[9px] md:text-[10px] font-black border border-slate-900 shadow-sm" title={`歡迎 ${nc.name}！`}>
                                   {nc.avatar}
                               </div>
                           ))}
-                          {newcomersOnline.length > 4 && <div className="w-5 h-5 md:w-6 md:h-6 rounded-full bg-slate-800 text-slate-300 flex items-center justify-center text-[8px] font-bold border border-slate-900">+{newcomersOnline.length - 4}</div>}
+                          {newcomersOnline.length > 3 && <div className="w-5 h-5 md:w-6 md:h-6 rounded-full bg-slate-800 text-slate-300 flex items-center justify-center text-[8px] font-bold border border-slate-900">+{newcomersOnline.length - 3}</div>}
                       </div>
                   </div>
               )}
           </div>
 
-          <div className="absolute top-4 right-4 md:top-6 md:right-8 z-30 flex items-center gap-3">
+          {/* 🌟 手機版極致優化：右側按鈕區塊 (手機版自動改為上下堆疊) */}
+          <div className="absolute top-4 right-4 md:top-6 md:right-8 z-40 flex flex-col sm:flex-row items-end sm:items-center gap-2 sm:gap-3 max-w-[50%] sm:max-w-none">
               
               {(['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN'].includes(userRole)) && (
                   <button 
                       onClick={() => navigate('/admin/dashboard')} 
-                      className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 md:px-4 md:py-2.5 rounded-full text-xs md:text-sm font-bold transition-all shadow-lg active:scale-95"
+                      className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 md:px-4 md:py-2.5 rounded-full text-xs md:text-sm font-bold transition-all shadow-lg active:scale-95 shrink-0"
                   >
                       <Settings size={16} /> 
-                      <span className="hidden sm:inline">管理員後台</span>
+                      <span className="hidden sm:inline whitespace-nowrap">管理員後台</span>
+                      <span className="sm:hidden whitespace-nowrap">後台</span>
                   </button>
               )}
 
               <button 
                   onClick={() => navigate('/my-id')} 
-                  className="relative flex items-center gap-2 bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 px-3 py-2 md:px-4 md:py-2.5 rounded-full text-white text-xs md:text-sm font-bold transition-all shadow-lg shadow-black/20 active:scale-95 group"
+                  className="relative flex items-center gap-2 bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 px-3 py-2 md:px-4 md:py-2.5 rounded-full text-white text-xs md:text-sm font-bold transition-all shadow-lg shadow-black/20 active:scale-95 group shrink-0"
               >
                   <div className="relative">
-                      <Bell size={22} className="text-white group-hover:text-amber-400 transition-colors group-hover:animate-wiggle"/> 
+                      <Bell size={18} className="sm:w-[22px] sm:h-[22px] text-white group-hover:text-amber-400 transition-colors group-hover:animate-wiggle"/> 
                       {unreadCountReal > 0 && (
-                          <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-black text-white border-2 border-slate-900 shadow-sm animate-pulse">
+                          <span className="absolute -top-1 -right-1 flex h-4 w-4 sm:h-5 sm:w-5 items-center justify-center rounded-full bg-red-500 text-[9px] sm:text-[10px] font-black text-white border-2 border-slate-900 shadow-sm animate-pulse">
                               {unreadCountReal}
                           </span>
                       )}
                   </div>
-                  <span className="hidden sm:inline">我的數位 ID 卡</span>
-                  <span className="sm:hidden">數位 ID</span>
+                  <span className="hidden sm:inline whitespace-nowrap">我的數位 ID 卡</span>
+                  <span className="sm:hidden whitespace-nowrap">數位 ID</span>
               </button>
           </div>
 
           <div className="absolute inset-0 opacity-20 bg-[url('https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&q=80&w=1920')] bg-cover bg-center"></div>
-          <div className="relative z-10">
+          <div className="relative z-10 pt-10 sm:pt-0">
               <h1 className="text-3xl md:text-5xl font-black text-white mb-3 md:mb-4 tracking-wider leading-tight">醫護鐵人賽事大廳</h1>
               <p className="text-slate-300 text-xs md:text-base font-medium max-w-2xl mx-auto px-4">選擇您的賽事，發揮您的專業。每一場賽事，都因為有您的參與而更加安全。</p>
           </div>
@@ -360,7 +397,7 @@ export default function RaceEvents() {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-20 relative z-20 w-full flex-1">
           
-          <div className="bg-white/95 backdrop-blur-xl rounded-2xl md:rounded-[2rem] shadow-xl p-3 md:p-4 flex flex-col xl:flex-row justify-between items-center gap-3 md:gap-4 mb-8 md:mb-10 border border-slate-100/50">
+          <div className="bg-white/95 backdrop-blur-xl rounded-2xl md:rounded-[2rem] shadow-xl p-3 md:p-4 flex flex-col xl:flex-row justify-between items-center gap-3 md:gap-4 mb-4 border border-slate-100/50">
               
               <div className="flex gap-2 w-full xl:w-auto overflow-x-auto pb-1 md:pb-0 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden snap-x">
                   <button onClick={() => setStatusFilter('ALL')} className={`shrink-0 px-4 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all whitespace-nowrap snap-start ${statusFilter === 'ALL' ? 'bg-slate-800 text-white shadow-md' : 'text-slate-500 hover:bg-slate-100 bg-slate-50/50'}`}>全部賽事</button>
@@ -374,6 +411,43 @@ export default function RaceEvents() {
                   <button onClick={() => handleTimeFilterChange('CURRENT_YEAR')} className={`flex-1 xl:flex-none px-2 sm:px-6 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all ${timeFilter === 'CURRENT_YEAR' ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20' : 'text-slate-400 hover:text-slate-600'}`}>{CURRENT_YEAR} 年</button>
                   <button onClick={() => handleTimeFilterChange('FUTURE')} className={`flex-1 xl:flex-none px-2 sm:px-6 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all ${timeFilter === 'FUTURE' ? 'bg-white text-blue-600 shadow-sm border border-slate-200/60' : 'text-slate-400 hover:text-slate-600'}`}>未來賽事</button>
               </div>
+          </div>
+
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 mb-8 overflow-hidden transition-all duration-300">
+              <div 
+                  className="px-6 py-4 flex justify-between items-center cursor-pointer bg-slate-50 hover:bg-slate-100 transition-colors"
+                  onClick={() => setShowStats(!showStats)}
+              >
+                  <div className="flex items-center gap-2">
+                      <Flag className="text-blue-600" size={20} />
+                      <h3 className="font-black text-slate-800">賽事總表統計</h3>
+                      <span className="bg-blue-100 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded-full ml-2">全部 {raceStats.total} 場</span>
+                  </div>
+                  {showStats ? <ChevronUp className="text-slate-400" size={20} /> : <ChevronDown className="text-slate-400" size={20} />}
+              </div>
+              
+              {showStats && (
+                  <div className="p-6 pt-2 border-t border-slate-100 bg-white grid grid-cols-1 md:grid-cols-2 gap-6 animate-fade-in-down">
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                          <h4 className="text-xs font-black text-slate-500 mb-3 flex items-center gap-1.5"><Calendar size={14}/> 年度統計</h4>
+                          <div className="flex flex-col gap-2">
+                              <div className="flex justify-between items-center text-sm"><span className="text-slate-600 font-bold">過去賽事</span><span className="font-black text-slate-800">{raceStats.pastCount}</span></div>
+                              <div className="flex justify-between items-center text-sm bg-blue-50/50 p-1.5 -mx-1.5 rounded-lg"><span className="text-blue-700 font-black">當屆 ({CURRENT_YEAR})</span><span className="font-black text-blue-700">{raceStats.currentYearCount}</span></div>
+                              <div className="flex justify-between items-center text-sm"><span className="text-slate-600 font-bold">未來賽事</span><span className="font-black text-slate-800">{raceStats.futureCount}</span></div>
+                          </div>
+                      </div>
+                      
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                          <h4 className="text-xs font-black text-slate-500 mb-3 flex items-center gap-1.5"><Activity size={14}/> 招募狀態</h4>
+                          <div className="flex flex-col gap-2">
+                              <div className="flex justify-between items-center text-sm"><span className="text-green-600 font-bold flex items-center gap-1"><Activity size={12}/> 招募中</span><span className="font-black text-green-700">{raceStats.openCount}</span></div>
+                              <div className="flex justify-between items-center text-sm"><span className="text-amber-600 font-bold flex items-center gap-1"><Handshake size={12}/> 洽談中</span><span className="font-black text-amber-700">{raceStats.negotiatingCount}</span></div>
+                              <div className="flex justify-between items-center text-sm"><span className="text-slate-600 font-bold flex items-center gap-1"><Send size={12}/> 已送名單</span><span className="font-black text-slate-800">{raceStats.submittedCount}</span></div>
+                              <div className="flex justify-between items-center text-sm"><span className="text-slate-400 font-bold flex items-center gap-1"><Timer size={12}/> 預備中</span><span className="font-black text-slate-500">{raceStats.upcomingCount}</span></div>
+                          </div>
+                      </div>
+                  </div>
+              )}
           </div>
 
           {loading ? (
