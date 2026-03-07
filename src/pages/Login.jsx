@@ -308,7 +308,7 @@ export default function Login() {
                   
                   <h3 className="text-2xl font-black text-slate-800 mb-2 text-center tracking-tight">哈囉！初次見面</h3>
                   <p className="text-slate-500 text-sm mb-6 text-center leading-relaxed">
-                      看起來您是第一次用這個 Google 帳號登入。<br/>為了幫您找回所有的戰功與賽事紀錄，請告訴我們您的通關密語。
+                      看起來您是第一次用這個 Google 帳號登入。<br/>為了幫您找回醫護鐵人身分以及所有的賽事紀錄，請告訴我們您的通關密語。
                   </p>
 
                   {identityError && (
