@@ -417,9 +417,9 @@ export default function RaceManager() {
           <div>
               <h2 className="text-xl md:text-2xl font-black text-slate-800 flex items-center gap-2">
                   {selectedYear === 'HISTORY_ALL' || (parseInt(selectedYear) < CURRENT_YEAR) ? <History className="text-slate-500"/> : selectedYear === 'FUTURE_ALL' || (parseInt(selectedYear) > CURRENT_YEAR) ? <CalendarClock className="text-blue-400"/> : <Flag className="text-blue-600"/>}
-                  {selectedYear === 'HISTORY_ALL' || (parseInt(selectedYear) < CURRENT_YEAR) ? '歷史賽事結算' : selectedYear === 'FUTURE_ALL' || (parseInt(selectedYear) > CURRENT_YEAR) ? '未來賽事規劃' : '賽事總覽'}
+                  {selectedYear === 'HISTORY_ALL' || (parseInt(selectedYear) < CURRENT_YEAR) ? '醫鐵賽事結算' : selectedYear === 'FUTURE_ALL' || (parseInt(selectedYear) > CURRENT_YEAR) ? '未來賽事規劃' : '賽事總覽'}
               </h2>
-              <p className="text-slate-500 text-xs md:text-sm mt-1">管理跨年度所有賽事，支援歷史結算與未來意願調查。</p>
+              <p className="text-slate-500 text-xs md:text-sm mt-1">管理年度所有賽事，支援歷史結算與未來意願調查。</p>
           </div>
           <button onClick={() => navigate('/admin/race-builder')} className="w-full sm:w-auto px-5 md:px-6 py-2.5 md:py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-black shadow-lg shadow-blue-600/30 transition-all flex items-center justify-center gap-2 active:scale-95">
               <Plus size={18}/> 建立新賽事

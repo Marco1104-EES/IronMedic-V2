@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { Calendar, MapPin, Users, Clock, ChevronRight, Activity, Flame, ShieldAlert, Timer, CheckCircle, X, Loader2, UsersRound, Crown, Sprout, Handshake, Send, Flag, Settings, Bell, ChevronDown, ChevronUp, Trash2, AlertTriangle, Medal, ServerCrash, Server } from 'lucide-react'
+// 🌟 這裡補上了 User 圖示！
+import { Calendar, MapPin, Users, Clock, ChevronRight, Activity, Flame, ShieldAlert, Timer, CheckCircle, X, Loader2, UsersRound, Crown, Sprout, Handshake, Send, Flag, Settings, Bell, ChevronDown, ChevronUp, Trash2, AlertTriangle, Medal, ServerCrash, Server, Menu, User } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 
@@ -20,14 +21,18 @@ export default function RaceEvents() {
 
   const [showStats, setShowStats] = useState(false)
   
-  // 🌟 新增：伺服器健康度狀態
-  const [serverStatus, setServerStatus] = useState('checking') // 'checking', 'healthy', 'warning', 'error'
+  const [serverStatus, setServerStatus] = useState('checking') 
   const [serverLatency, setServerLatency] = useState(0)
+
+  // 🌟 空間魔法專用狀態
+  const [showNewcomerFaces, setShowNewcomerFaces] = useState(false) // 控制新人頭像是否展開
+  const [showAdminMenu, setShowAdminMenu] = useState(false) // 控制管理員下拉選單
 
   const navigate = useNavigate()
   const CURRENT_YEAR = new Date().getFullYear()
   const channelRef = useRef(null)
   const notifChannelRef = useRef(null)
+  const adminMenuRef = useRef(null)
 
   useEffect(() => {
     const cachedRaces = localStorage.getItem('iron_medic_races_cache');
@@ -41,11 +46,9 @@ export default function RaceEvents() {
     fetchUserDataAndRaces()
     setupRealtimePresence()
     
-    // 🌟 若為管理員，啟動系統健康度背景檢測
     const role = localStorage.getItem('iron_medic_user_role') || 'USER';
     if (['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN'].includes(role)) {
         checkServerHealth();
-        // 每 5 分鐘背景重測一次
         const healthInterval = setInterval(checkServerHealth, 300000);
         return () => clearInterval(healthInterval);
     }
@@ -67,33 +70,40 @@ export default function RaceEvents() {
     window.addEventListener('click', resetIdleTimer);
     resetIdleTimer();
 
+    // 點擊外面關閉管理員選單
+    const handleClickOutside = (event) => {
+        if (adminMenuRef.current && !adminMenuRef.current.contains(event.target)) {
+            setShowAdminMenu(false);
+        }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+
     return () => {
         clearTimeout(idleTimer);
         window.removeEventListener('mousemove', resetIdleTimer);
         window.removeEventListener('keypress', resetIdleTimer);
         window.removeEventListener('scroll', resetIdleTimer);
         window.removeEventListener('click', resetIdleTimer);
+        document.removeEventListener('mousedown', handleClickOutside);
         if (notifChannelRef.current) supabase.removeChannel(notifChannelRef.current);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 🌟 輕量級伺服器連線測試 (連動 SystemStatus 概念)
   const checkServerHealth = async () => {
       const start = performance.now();
       try {
-          // 發送一個極輕量的請求測試延遲
           const { error } = await supabase.from('profiles').select('id').limit(1);
           const latency = Math.round(performance.now() - start);
           setServerLatency(latency);
           
           if (error) throw error;
           
-          if (latency > 1500) setServerStatus('warning'); // 超過 1.5 秒亮黃燈
-          else setServerStatus('healthy'); // 綠燈
+          if (latency > 1500) setServerStatus('warning'); 
+          else setServerStatus('healthy'); 
           
       } catch (err) {
-          setServerStatus('error'); // 紅燈
+          setServerStatus('error'); 
       }
   }
 
@@ -335,95 +345,113 @@ export default function RaceEvents() {
 
   return (
     <div className="min-h-screen bg-slate-50 pb-24 font-sans flex flex-col relative overflow-x-hidden">
-      <div className="bg-slate-900 pt-20 md:pt-24 pb-32 px-4 md:px-8 text-center relative overflow-hidden shrink-0">
+      
+      {/* 🌟 調整了頂部的 padding，確保畫面呼吸感 */}
+      <div className="bg-slate-900 pt-24 md:pt-28 pb-32 px-4 md:px-8 text-center relative overflow-hidden shrink-0">
           
-          <div className="absolute top-4 left-4 md:top-6 md:left-8 z-40 flex flex-col items-start gap-2 max-w-[45%] sm:max-w-none">
-              <div className="flex items-center gap-2 bg-slate-800/80 backdrop-blur-md px-3 py-1.5 md:px-4 md:py-2 rounded-full border border-slate-700 shadow-lg shrink-0">
-                  <div className="w-2.5 h-2.5 md:w-3 md:h-3 rounded-full bg-green-500 animate-pulse shadow-[0_0_10px_rgba(34,197,94,0.9)]"></div>
-                  <span className="text-[11px] sm:text-xs md:text-sm font-black text-slate-200 tracking-wider whitespace-nowrap">目前在線：{onlineCount}</span>
+          {/* ================= 左上角監控區 (神級重構) ================= */}
+          <div className="absolute top-4 left-4 md:top-6 md:left-8 z-40 flex items-center gap-2">
+              
+              {/* 1. 極簡化在線人數膠囊 */}
+              <div className="flex items-center gap-1.5 bg-slate-800/80 backdrop-blur-md px-2.5 py-1.5 md:px-3 md:py-2 rounded-full border border-slate-700 shadow-lg shrink-0" title="目前線上人數">
+                  <div className="w-2 h-2 md:w-2.5 md:h-2.5 rounded-full bg-green-500 animate-pulse shadow-[0_0_10px_rgba(34,197,94,0.9)]"></div>
+                  <span className="text-[10px] md:text-xs font-black text-slate-200 tracking-wider">{onlineCount}</span>
               </div>
               
+              {/* 2. 折疊式新人 Spotlight 膠囊 */}
               {newcomersOnline.length > 0 && (
-                  <div className="flex items-center gap-1.5 md:gap-2 animate-fade-in-up bg-amber-500/20 backdrop-blur-sm border border-amber-500/50 px-2 py-1 sm:px-3 sm:py-1.5 rounded-full shadow-[0_0_15px_rgba(245,158,11,0.2)] overflow-hidden max-w-full">
-                      <span className="text-[10px] md:text-xs font-black text-amber-300 flex items-center gap-1 shrink-0 whitespace-nowrap">
-                          <Sprout size={12}/> 
-                          <span className="hidden sm:inline">新人上線</span>
-                          <span className="sm:hidden">新人</span>
-                      </span>
-                      <div className="flex -space-x-1.5 md:-space-x-1.5 shrink-0">
-                          {newcomersOnline.slice(0, 3).map((nc, idx) => (
-                              <div key={idx} className="w-5 h-5 md:w-6 md:h-6 rounded-full bg-amber-400 text-amber-900 flex items-center justify-center text-[9px] md:text-[10px] font-black border border-slate-900 shadow-sm" title={`歡迎 ${nc.name}！`}>
-                                  {nc.avatar}
-                              </div>
-                          ))}
-                          {newcomersOnline.length > 3 && <div className="w-5 h-5 md:w-6 md:h-6 rounded-full bg-slate-800 text-slate-300 flex items-center justify-center text-[8px] font-bold border border-slate-900">+{newcomersOnline.length - 3}</div>}
-                      </div>
+                  <div 
+                      className={`flex items-center gap-1.5 cursor-pointer transition-all duration-300 ease-in-out overflow-hidden shadow-[0_0_15px_rgba(245,158,11,0.2)] 
+                          ${showNewcomerFaces ? 'bg-amber-500/90 border border-amber-400 pl-2 pr-1 py-1 sm:pl-3 sm:pr-1.5 sm:py-1.5 rounded-full' : 'bg-amber-500/20 backdrop-blur-sm border border-amber-500/50 px-2 py-1.5 md:px-3 md:py-2 rounded-full'}`}
+                      onClick={() => setShowNewcomerFaces(!showNewcomerFaces)}
+                      title="點擊展開/收合新人名單"
+                  >
+                      <Sprout size={14} className={showNewcomerFaces ? 'text-amber-900' : 'text-amber-400'}/> 
+                      {!showNewcomerFaces && (
+                          <span className="text-[10px] md:text-xs font-black text-amber-300 whitespace-nowrap">
+                              新人 +{newcomersOnline.length}
+                          </span>
+                      )}
+                      
+                      {/* 點擊後才展開的頭像區 */}
+                      {showNewcomerFaces && (
+                          <div className="flex -space-x-1.5 animate-fade-in pl-1">
+                              {newcomersOnline.slice(0, 3).map((nc, idx) => (
+                                  <div key={idx} className="w-5 h-5 md:w-6 md:h-6 rounded-full bg-amber-100 text-amber-900 flex items-center justify-center text-[9px] md:text-[10px] font-black border-2 border-amber-500 shadow-sm" title={`歡迎 ${nc.name}！`}>
+                                      {nc.avatar}
+                                  </div>
+                              ))}
+                              {newcomersOnline.length > 3 && <div className="w-5 h-5 md:w-6 md:h-6 rounded-full bg-amber-900 text-amber-300 flex items-center justify-center text-[8px] font-bold border-2 border-amber-500">+{newcomersOnline.length - 3}</div>}
+                          </div>
+                      )}
                   </div>
               )}
           </div>
 
-          <div className="absolute top-4 right-4 md:top-6 md:right-8 z-40 flex flex-col sm:flex-row items-end sm:items-center gap-2 sm:gap-3 max-w-[50%] sm:max-w-none">
+          {/* ================= 右上角控制區 (神級重構) ================= */}
+          <div className="absolute top-4 right-4 md:top-6 md:right-8 z-40 flex items-center gap-2 md:gap-3">
               
-              {/* 🌟 系統狀態連動燈號 (僅管理員可見) */}
+              {/* 🌟 大魔王折疊控制台 (僅管理員可見) */}
               {(['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN'].includes(userRole)) && (
-                  <div className="flex items-center gap-2">
+                  <div className="relative" ref={adminMenuRef}>
                       <button 
-                          onClick={() => navigate('/admin/system-status')}
-                          className={`flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold transition-all shadow-lg active:scale-95 shrink-0 border backdrop-blur-md
-                              ${serverStatus === 'checking' ? 'bg-slate-700/50 border-slate-600 text-slate-300' : 
-                                serverStatus === 'healthy' ? 'bg-green-500/20 border-green-500/50 text-green-400' : 
-                                serverStatus === 'warning' ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 
-                                'bg-red-500/30 border-red-500/50 text-red-400 animate-pulse'}`}
-                          title="系統伺服器監控"
+                          onClick={() => setShowAdminMenu(!showAdminMenu)}
+                          className={`w-9 h-9 md:w-11 md:h-11 rounded-full flex items-center justify-center transition-all shadow-lg active:scale-95 border backdrop-blur-md
+                              ${showAdminMenu ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800/80 border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white'}`}
+                          title="管理員控制台"
                       >
-                          {serverStatus === 'checking' ? <Loader2 size={14} className="animate-spin"/> : 
-                           serverStatus === 'error' ? <ServerCrash size={14}/> : <Server size={14}/>}
-                          <span className="hidden sm:inline whitespace-nowrap">
-                              {serverStatus === 'checking' ? '連線中' : 
-                               serverStatus === 'healthy' ? `${serverLatency}ms 正常` : 
-                               serverStatus === 'warning' ? '連線延遲' : '系統異常'}
-                          </span>
+                          {serverStatus === 'error' ? <ServerCrash size={18} className="text-red-400 animate-pulse"/> : <Settings size={18} className={showAdminMenu ? 'animate-spin-slow' : ''}/>}
                       </button>
 
-                      <button 
-                          onClick={() => navigate('/admin/dashboard')} 
-                          className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 md:px-4 md:py-2.5 rounded-full text-xs md:text-sm font-bold transition-all shadow-lg active:scale-95 shrink-0"
-                      >
-                          <Settings size={16} /> 
-                          <span className="hidden sm:inline whitespace-nowrap">管理員後台</span>
-                          <span className="sm:hidden whitespace-nowrap">後台</span>
-                      </button>
+                      {/* 下拉選單 */}
+                      {showAdminMenu && (
+                          <div className="absolute top-full right-0 mt-2 w-48 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-fade-in-down origin-top-right z-50">
+                              <div className="bg-slate-50 px-4 py-2 border-b border-slate-100 flex items-center justify-between">
+                                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Admin Hub</span>
+                                  {/* 伺服器狀態小圓燈 */}
+                                  <div className={`w-2 h-2 rounded-full ${serverStatus === 'healthy' ? 'bg-green-500' : serverStatus === 'warning' ? 'bg-amber-500' : 'bg-red-500'}`}></div>
+                              </div>
+                              <div className="p-2 space-y-1">
+                                  <button onClick={() => navigate('/admin/system-status')} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-slate-700 hover:bg-slate-100 transition-colors">
+                                      <Activity size={16} className="text-blue-500"/> 伺服器監控
+                                  </button>
+                                  <button onClick={() => navigate('/admin/dashboard')} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-black text-indigo-700 bg-indigo-50 hover:bg-indigo-100 transition-colors">
+                                      <Menu size={16} className="text-indigo-600"/> 進入管理後台
+                                  </button>
+                              </div>
+                          </div>
+                      )}
                   </div>
               )}
 
-              <div className="flex items-center gap-2">
-                  <button 
-                      onClick={() => setShowNotifPanel(true)} 
-                      className="relative flex items-center justify-center bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 w-9 h-9 md:w-11 md:h-11 rounded-full text-white transition-all shadow-lg shadow-black/20 active:scale-95 group shrink-0"
-                      title="系統通知"
-                  >
-                      <Bell size={18} className="sm:w-[22px] sm:h-[22px] text-white group-hover:text-amber-400 transition-colors group-hover:animate-wiggle"/> 
-                      {unreadCountReal > 0 && (
-                          <span className="absolute -top-1 -right-1 flex h-4 w-4 sm:h-5 sm:w-5 items-center justify-center rounded-full bg-red-500 text-[9px] sm:text-[10px] font-black text-white border-2 border-slate-900 shadow-sm animate-pulse">
-                              {unreadCountReal > 99 ? '99+' : unreadCountReal}
-                          </span>
-                      )}
-                  </button>
+              {/* 鈴鐺按鈕 (精緻化) */}
+              <button 
+                  onClick={() => setShowNotifPanel(true)} 
+                  className="relative flex items-center justify-center bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 w-9 h-9 md:w-11 md:h-11 rounded-full text-white transition-all shadow-lg shadow-black/20 active:scale-95 group shrink-0"
+                  title="系統通知"
+              >
+                  <Bell size={18} className="sm:w-[22px] sm:h-[22px] text-white group-hover:text-amber-400 transition-colors group-hover:animate-wiggle"/> 
+                  {unreadCountReal > 0 && (
+                      <span className="absolute -top-1 -right-1 flex h-4 w-4 sm:h-5 sm:w-5 items-center justify-center rounded-full bg-red-500 text-[9px] sm:text-[10px] font-black text-white border-2 border-slate-900 shadow-sm animate-pulse">
+                          {unreadCountReal > 99 ? '99+' : unreadCountReal}
+                      </span>
+                  )}
+              </button>
 
-                  <button 
-                      onClick={() => navigate('/my-id')} 
-                      className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 px-3 py-2 md:px-4 md:py-2.5 rounded-full text-white text-xs md:text-sm font-bold transition-all shadow-lg shadow-black/20 active:scale-95 shrink-0"
-                  >
-                      <span className="hidden sm:inline whitespace-nowrap">我的數位 ID 卡</span>
-                      <span className="sm:hidden whitespace-nowrap">數位 ID</span>
-                  </button>
-              </div>
+              {/* 數位 ID 縮寫版 */}
+              <button 
+                  onClick={() => navigate('/my-id')} 
+                  className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 px-3 py-2 md:px-4 md:py-2.5 rounded-full text-white text-[11px] sm:text-xs md:text-sm font-bold transition-all shadow-lg shadow-black/20 active:scale-95 shrink-0"
+              >
+                  <User size={16} className="hidden sm:block"/>
+                  <span className="whitespace-nowrap">數位 ID</span>
+              </button>
           </div>
 
           <div className="absolute inset-0 opacity-20 bg-[url('https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&q=80&w=1920')] bg-cover bg-center"></div>
-          <div className="relative z-10 pt-10 sm:pt-0">
-              <h1 className="text-3xl md:text-5xl font-black text-white mb-3 md:mb-4 tracking-wider leading-tight">醫護鐵人賽事大廳</h1>
-              <p className="text-slate-300 text-xs md:text-base font-medium max-w-2xl mx-auto px-4">選擇您的賽事，發揮您的專業。每一場賽事，都因為有您的參與而更加安全。</p>
+          <div className="relative z-10 pt-4 sm:pt-0">
+              <h1 className="text-3xl md:text-5xl font-black text-white mb-3 md:mb-4 tracking-wider leading-tight drop-shadow-lg">醫護鐵人賽事大廳</h1>
+              <p className="text-slate-300 text-xs md:text-base font-medium max-w-2xl mx-auto px-4 drop-shadow-md">選擇您的賽事，發揮您的專業。每一場賽事，都因為有您的參與而更加安全。</p>
           </div>
       </div>
 
@@ -575,7 +603,6 @@ export default function RaceEvents() {
                       <button onClick={() => setNotifTab('personal')} className={`flex-1 pb-3 text-sm font-bold border-b-2 transition-colors ${notifTab === 'personal' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>個人提醒</button>
                   </div>
                   
-                  {/* 🌟 權限控制：僅超級管理員可見的資料庫告警 */}
                   {notifTab === 'system' && userRole === 'SUPER_ADMIN' && (
                       <div className="px-4 pt-4 shrink-0">
                           <div className="bg-red-50/80 border border-red-200 rounded-xl p-3.5 flex gap-3 shadow-sm">

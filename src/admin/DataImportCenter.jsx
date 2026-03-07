@@ -933,7 +933,7 @@ export default function DataImportCenter() {
               <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2 mb-2">
                   <Settings2 className="text-purple-600"/> 擴充資料欄位控制中心
               </h2>
-              <p className="text-slate-500 text-sm mb-6">您可以在此自定義 <code className="bg-slate-100 px-1 rounded">ext_01</code> ~ <code className="bg-slate-100 px-1 rounded">ext_40</code> 的中文顯示名稱。設定後將在「會員名單整合」的對應選單中即刻生效。</p>
+              <p className="text-slate-500 text-sm mb-6">可以在此自定義 <code className="bg-slate-100 px-1 rounded">ext_01</code> ~ <code className="bg-slate-100 px-1 rounded">ext_40</code> 的中文顯示名稱。設定後將在「會員名單整合」的對應選單中即刻生效。</p>
               
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 max-h-[65vh] overflow-y-auto pr-2 custom-scrollbar">
                   {Array.from({length: 40}, (_, i) => {
@@ -962,9 +962,11 @@ export default function DataImportCenter() {
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
                 <div>
                     <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
-                        <Database className="text-blue-600"/> 資料整合匯入中心 <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold border border-slate-200">System V9.8 防覆蓋版</span>
+                        <Database className="text-blue-600"/> 資料整合匯入中心 <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold border border-slate-200">防覆蓋版 V9.8
+
+                        </span>
                     </h2>
-                    <p className="text-slate-500 text-sm mt-1">搭載智慧身分證辨識、防呆欄位鎖定與自定義擴充系統。</p>
+                    <p className="text-slate-500 text-sm mt-1">用身分證自動辨識、防呆欄位鎖定與自定義擴充系統。</p>
                 </div>
                 <div className="flex bg-slate-50 p-1 rounded-lg border border-slate-200">
                     <button onClick={()=>handleModeSwitch('full')} className={`px-4 py-2 rounded-md font-bold text-sm flex items-center gap-2 transition-all ${mode==='full' ? 'bg-white shadow-sm border border-slate-200 text-blue-600' : 'text-slate-500 hover:text-slate-700'} `}><Merge size={16}/> 完整資料整合</button>
@@ -1279,7 +1281,7 @@ export default function DataImportCenter() {
                 <h2 className="text-2xl font-black text-amber-600 flex items-center gap-2">
                     <Flag className="text-amber-500"/> 賽事年度總表批次建檔
                 </h2>
-                <p className="text-slate-500 text-sm mt-1">配備「智慧去重引擎」，教官與一般人員完美整合，保證人數不再失真！</p>
+                <p className="text-slate-500 text-sm mt-1">用自動篩選/排除重疊，帶隊教官/會員,高度整合版！</p>
             </div>
           </div>
 

@@ -1,12 +1,12 @@
-import { useState, useEffect } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useState, useEffect, useMemo } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from 'recharts'
 import { MapContainer, TileLayer, Marker, Popup, CircleMarker } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
-// 🌟 確保所有需要的圖示都有匯入
-import { Users, Activity, Award, ShieldAlert, Map as MapIcon, Loader2, Flag, Mountain, Bike, Footprints, User, MapPin, Bell, UserCheck, Calendar, Clock, History } from 'lucide-react'
+// 🌟 確保新增了 ArrowRight 圖示，用於 CRM 直達車
+import { Users, Activity, Award, ShieldAlert, Map as MapIcon, Loader2, Flag, Mountain, Bike, Footprints, User, MapPin, Bell, UserCheck, Calendar, Clock, History, ChevronUp, ChevronDown, Handshake, Send, Timer, ArrowRight } from 'lucide-react'
 
 // 修正 Leaflet icon 消失問題
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -37,10 +37,10 @@ const regionCenters = {
 }
 
 export default function Dashboard() {
-  // 🌟 接收來自 AdminLayout.jsx 的 URL 參數
   const location = useLocation()
   const searchParams = new URLSearchParams(location.search)
   const currentView = searchParams.get('view') 
+  const navigate = useNavigate() 
 
   const [loading, setLoading] = useState(true)
   const CURRENT_YEAR = new Date().getFullYear();
@@ -54,7 +54,7 @@ export default function Dashboard() {
       vipMembers: 0
   })
   
-  // 賽事分析資料
+  // 原本的賽事地圖分類資料
   const [raceStats, setRaceStats] = useState({
       marathon: 0, trail: 0, bike: 0, tri: 0
   })
@@ -66,9 +66,13 @@ export default function Dashboard() {
       north: 0, central: 0, south: 0, east: 0, islands: 0
   })
 
-  // 🌟 從舊版 SystemStatus 搬移過來的通知狀態
+  // 通知狀態
   const [recentRaces, setRecentRaces] = useState([])
   const [profileUpdates, setProfileUpdates] = useState([])
+
+  // 移植專用狀態：保留所有賽事原始資料供總表計算
+  const [allRacesData, setAllRacesData] = useState([])
+  const [showRaceOverview, setShowRaceOverview] = useState(true)
 
   useEffect(() => {
       fetchDashboardData()
@@ -77,7 +81,6 @@ export default function Dashboard() {
 
   const fetchDashboardData = async () => {
       try {
-          // 1. 頂部核心四大指標 (極速查詢)
           const [
               { count: total },
               { count: current },
@@ -100,14 +103,13 @@ export default function Dashboard() {
               vipMembers: vips || 0
           })
 
-          // 2. 獲取所有賽事資料 (儀表板用 + 通知中心用)
           const { data: races } = await supabase.from('races').select('id, name, date, type, location, status, medic_required, medic_registered').order('created_at', { ascending: false })
           let rMarathon = 0, rTrail = 0, rBike = 0, rTri = 0;
           let locations = []
 
           if (races) {
-              // 取前5筆作為通知中心顯示
               setRecentRaces(races.slice(0, 5))
+              setAllRacesData(races) 
 
               races.forEach(r => {
                   const raceDate = new Date(r.date)
@@ -130,7 +132,6 @@ export default function Dashboard() {
               setRaceLocations(locations)
           }
 
-          // 3. 獲取會員居住地與性別分類
           const { data: memberData } = await supabase.from('profiles').select('gender, address')
           if (memberData) {
               let mMale = 0, mFemale = 0;
@@ -154,11 +155,9 @@ export default function Dashboard() {
               })
           }
 
-          // 4. 抓取系統通知變更紀錄
           try {
               const { data: notifs } = await supabase.from('admin_notifications').select('*').eq('type', 'PROFILE_UPDATE').order('created_at', { ascending: false }).limit(10)
               if (notifs) {
-                  // 在載入完畢後，順便把這些看過的通知標記為已讀 (消掉左側紅點)
                   await supabase.from('admin_notifications').update({ is_read: true }).eq('is_read', false).eq('type', 'PROFILE_UPDATE')
                   setProfileUpdates(notifs.slice(0, 5))
               }
@@ -171,12 +170,47 @@ export default function Dashboard() {
       }
   }
 
+  const raceOverviewStats = useMemo(() => {
+    let total = allRacesData.length;
+    let currentYearCount = 0;
+    let pastCount = 0;
+    let futureCount = 0;
+    let openCount = 0;
+    let negotiatingCount = 0;
+    let submittedCount = 0;
+    let upcomingCount = 0;
+
+    allRacesData.forEach(race => {
+      if (!race.date) return;
+      const raceYear = new Date(race.date).getFullYear();
+      if (raceYear === CURRENT_YEAR) currentYearCount++;
+      else if (raceYear < CURRENT_YEAR) pastCount++;
+      else if (raceYear > CURRENT_YEAR) futureCount++;
+
+      if (race.status === 'OPEN') openCount++;
+      else if (race.status === 'NEGOTIATING') negotiatingCount++;
+      else if (race.status === 'SUBMITTED') submittedCount++;
+      else if (race.status === 'UPCOMING') upcomingCount++;
+    });
+
+    return { total, currentYearCount, pastCount, futureCount, openCount, negotiatingCount, submittedCount, upcomingCount };
+  }, [allRacesData, CURRENT_YEAR]);
+
   const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444']
   const TAIWAN_CENTER = [23.6978, 120.9605]
 
-  if (loading) return <div className="h-[60vh] flex items-center justify-center text-slate-400"><Loader2 className="animate-spin mr-2"/> 正在載入醫鐵總部戰情數據...</div>
+  // 🌟 核心修改：送出隱形包裹的導航函數
+  const handleReviewClick = (log) => {
+      navigate('/admin/members', {
+          state: { 
+              autoEditUserName: log.user_name, // 用名字去 CRM 裡找人
+              changesMessage: log.message      // 傳遞變更了什麼內容，供高亮使用
+          }
+      });
+  }
 
-  // 🌟 核心切換邏輯：如果網址帶有 view=NOTIFICATIONS，就只顯示您從 SystemStatus 搬過來的通知中心！
+  if (loading) return <div className="h-[60vh] flex items-center justify-center text-slate-400"><Loader2 className="animate-spin mr-2"/> 正在載入醫鐵總部賽事數據...</div>
+
   if (currentView === 'NOTIFICATIONS') {
       return (
           <div className="space-y-6 md:space-y-8 animate-fade-in pb-20">
@@ -188,7 +222,6 @@ export default function Dashboard() {
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {/* 1. 預定新增賽事動態 (原汁原味搬移) */}
                   <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
                       <div className="bg-blue-50/50 p-4 border-b border-blue-100 flex items-center gap-2">
                           <div className="p-1.5 bg-blue-100 text-blue-600 rounded-lg"><Flag size={18}/></div>
@@ -215,7 +248,6 @@ export default function Dashboard() {
                       </div>
                   </div>
 
-                  {/* 2. 會員資料變更紀錄 (原汁原味搬移) */}
                   <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
                       <div className="bg-indigo-50/50 p-4 border-b border-indigo-100 flex items-center gap-2">
                           <div className="p-1.5 bg-indigo-100 text-indigo-600 rounded-lg"><UserCheck size={18}/></div>
@@ -223,14 +255,22 @@ export default function Dashboard() {
                       </div>
                       <div className="p-4 flex-1 overflow-y-auto max-h-[500px] custom-scrollbar space-y-3">
                           {profileUpdates.length > 0 ? profileUpdates.map((log, i) => (
-                              <div key={i} className="flex gap-3 p-3 rounded-xl border border-slate-100 hover:bg-slate-50 transition-colors">
+                              // 🌟 點擊時觸發包裹發送
+                              <div 
+                                  key={i} 
+                                  onClick={() => handleReviewClick(log)}
+                                  className="flex gap-3 p-3 rounded-xl border border-slate-100 hover:bg-indigo-50/50 hover:border-indigo-200 transition-colors cursor-pointer group"
+                              >
                                   <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 font-black flex items-center justify-center shrink-0 text-xs">
                                       {log.user_name?.charAt(0) || '?'}
                                   </div>
-                                  <div>
+                                  <div className="flex-1">
                                       <div className="text-sm font-black text-slate-800">{log.user_name}</div>
                                       <div className="text-xs text-slate-500 font-medium mt-0.5 leading-snug">{log.message}</div>
-                                      <div className="text-[10px] text-slate-400 font-mono mt-1.5 flex items-center gap-1"><Clock size={10}/> {new Date(log.created_at).toLocaleString()}</div>
+                                      <div className="flex justify-between items-end mt-1.5">
+                                          <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1"><Clock size={10}/> {new Date(log.created_at).toLocaleString()}</div>
+                                          <span className="text-[10px] font-bold text-slate-400 group-hover:text-indigo-600 transition-colors flex items-center gap-1">前往 CRM 審查 <ArrowRight size={10}/></span>
+                                      </div>
                                   </div>
                               </div>
                           )) : (
@@ -246,7 +286,6 @@ export default function Dashboard() {
       )
   }
 
-  // 🌟 原本的 醫鐵數據儀表板 (Dashboard 主畫面)
   return (
     <div className="space-y-6 md:space-y-8 animate-fade-in pb-20">
       <div className="mb-8">
@@ -285,6 +324,43 @@ export default function Dashboard() {
           </div>
       </div>
 
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden transition-all duration-300">
+          <div 
+              className="px-6 py-4 flex justify-between items-center cursor-pointer bg-slate-50 hover:bg-slate-100 transition-colors"
+              onClick={() => setShowRaceOverview(!showRaceOverview)}
+          >
+              <div className="flex items-center gap-2">
+                  <Flag className="text-blue-600" size={20} />
+                  <h3 className="font-black text-slate-800">賽事總表統計</h3>
+                  <span className="bg-blue-100 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded-full ml-2">全部 {raceOverviewStats.total} 場</span>
+              </div>
+              {showRaceOverview ? <ChevronUp className="text-slate-400" size={20} /> : <ChevronDown className="text-slate-400" size={20} />}
+          </div>
+          
+          {showRaceOverview && (
+              <div className="p-6 pt-2 border-t border-slate-100 bg-white grid grid-cols-1 md:grid-cols-2 gap-6 animate-fade-in-down">
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                      <h4 className="text-xs font-black text-slate-500 mb-3 flex items-center gap-1.5"><Calendar size={14}/> 年度統計</h4>
+                      <div className="flex flex-col gap-2">
+                          <div className="flex justify-between items-center text-sm"><span className="text-slate-600 font-bold">過去賽事</span><span className="font-black text-slate-800">{raceOverviewStats.pastCount}</span></div>
+                          <div className="flex justify-between items-center text-sm bg-blue-50/50 p-1.5 -mx-1.5 rounded-lg"><span className="text-blue-700 font-black">當屆 ({CURRENT_YEAR})</span><span className="font-black text-blue-700">{raceOverviewStats.currentYearCount}</span></div>
+                          <div className="flex justify-between items-center text-sm"><span className="text-slate-600 font-bold">未來賽事</span><span className="font-black text-slate-800">{raceOverviewStats.futureCount}</span></div>
+                      </div>
+                  </div>
+                  
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                      <h4 className="text-xs font-black text-slate-500 mb-3 flex items-center gap-1.5"><Activity size={14}/> 招募狀態</h4>
+                      <div className="flex flex-col gap-2">
+                          <div className="flex justify-between items-center text-sm"><span className="text-green-600 font-bold flex items-center gap-1"><Activity size={12}/> 招募中</span><span className="font-black text-green-700">{raceOverviewStats.openCount}</span></div>
+                          <div className="flex justify-between items-center text-sm"><span className="text-amber-600 font-bold flex items-center gap-1"><Handshake size={12}/> 洽談中</span><span className="font-black text-amber-700">{raceOverviewStats.negotiatingCount}</span></div>
+                          <div className="flex justify-between items-center text-sm"><span className="text-slate-600 font-bold flex items-center gap-1"><Send size={12}/> 已送名單</span><span className="font-black text-slate-800">{raceOverviewStats.submittedCount}</span></div>
+                          <div className="flex justify-between items-center text-sm"><span className="text-slate-400 font-bold flex items-center gap-1"><Timer size={12}/> 預備中</span><span className="font-black text-slate-500">{raceOverviewStats.upcomingCount}</span></div>
+                      </div>
+                  </div>
+              </div>
+          )}
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
           
           <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200 flex flex-col h-full">
@@ -313,7 +389,6 @@ export default function Dashboard() {
                   </div>
                   
                   <div className="w-full md:w-2/3 h-[300px] md:h-auto min-h-[350px] rounded-xl overflow-hidden border border-slate-200 relative z-0">
-                      {/* 🌟 核心修改：加入各項防呆屬性，徹底鎖死地圖 */}
                       <MapContainer 
                           center={TAIWAN_CENTER} 
                           zoom={7} 
@@ -374,7 +449,6 @@ export default function Dashboard() {
                   </div>
                   
                   <div className="w-full md:w-2/3 h-[300px] md:h-auto min-h-[350px] rounded-xl overflow-hidden border border-slate-200 relative z-0 bg-blue-50/30">
-                      {/* 🌟 核心修改：加入各項防呆屬性，徹底鎖死地圖 */}
                       <MapContainer 
                           center={[23.8, 120.5]} 
                           zoom={6.5} 
