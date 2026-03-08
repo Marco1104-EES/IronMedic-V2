@@ -96,6 +96,7 @@ export default function DigitalID() {
         const { data, error } = await supabase.from('profiles').select('*').eq('email', user.email.toLowerCase()).maybeSingle()
         if (data) {
             currentUserProfile = { ...currentUserProfile, ...data }
+            console.log("📥 成功載入使用者資料: ", data); // 測試用：可以在瀏覽器 F12 看到到底回傳了什麼
         }
 
         const eightMonthsAgo = new Date();
@@ -229,7 +230,6 @@ export default function DigitalID() {
 
           setMyRaces(myRaces.filter(r => r.id !== raceId))
           
-          // 🌟 強化錯誤捕捉的退賽通知寫入
           try {
               const { error: notifError } = await supabase.from('user_notifications').insert({
                   user_id: profile.id,
@@ -322,10 +322,6 @@ export default function DigitalID() {
       }
   }
 
-  const handleApplyModification = () => {
-      alert("📝 已為您開啟「修改申請單」。\n請填寫您欲變更的欄位與原因，我們將由專人為您處理。")
-  }
-
   const deleteNotification = async (id) => { 
       setNotifications(prev => prev.filter(n => n.id !== id)); 
       try { await supabase.from('user_notifications').delete().eq('id', id) } catch(e){}
@@ -370,6 +366,9 @@ export default function DigitalID() {
   const attendanceRate = pastRaces.length > 0 ? '100%' : 'N/A';
   
   const unreadCountReal = notifications.filter(n => !(n.isRead || n.is_read)).length;
+
+  // 💡 極限包容判定法：不管資料庫存的是 Y, y, true, "true", 1, "1"，通通判定為有訓練資格！
+  const hasTrainingStatus = ['Y', 'y', 'true', true, '1', 1].includes(displayUser.training_status);
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans pb-24 animate-fade-in flex flex-col relative overflow-x-hidden">
@@ -422,11 +421,21 @@ export default function DigitalID() {
                   </button>
               </div>
 
+              {/* 🌟 核心修改點：五大護法徽章排序與強化顯示防呆 */}
               <div className="flex flex-wrap gap-2 relative z-10">
                   {displayUser.is_vip === 'Y' && <span className="bg-amber-400 text-amber-900 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1 shadow-lg shadow-amber-400/20"><Crown size={12}/> VIP</span>}
+                  
                   {displayUser.is_team_leader === 'Y' && <span className="bg-blue-500 text-white text-xs font-black px-3 py-1 rounded-full flex items-center gap-1 shadow-lg shadow-blue-500/20"><ShieldAlert size={12}/> 帶隊教官</span>}
+                  
                   {displayUser.is_new_member === 'Y' && <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/50 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><Sprout size={12}/> 新人</span>}
-                  {displayUser.training_status === 'Y' && <span className="bg-purple-500/20 text-purple-300 border border-purple-500/50 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><Zap size={12}/> 優先報名</span>}
+                  
+                  {/* ⚡ 終極防呆版「當屆訓練」徽章 */}
+                  {hasTrainingStatus && (
+                      <span className="bg-purple-500 text-white text-xs font-black px-3 py-1 rounded-full flex items-center gap-1 shadow-lg shadow-purple-500/30">
+                          <Zap size={12} className="text-purple-100"/> 當屆訓練
+                      </span>
+                  )}
+                  
                   {displayUser.is_current_member === 'Y' ? 
                       <span className="bg-green-500/20 text-green-400 border border-green-500/50 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><CheckCircle size={12}/> 有效會員</span> : 
                       <span className="bg-red-500/20 text-red-400 border border-red-500/50 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><XCircle size={12}/> 非當屆會員</span>

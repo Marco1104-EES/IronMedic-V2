@@ -1,13 +1,7 @@
 import { useState, useEffect } from 'react'
-import { Calendar, MapPin, Clock, ImagePlus, Flag, Plus, Trash2, Save, ShieldAlert, Activity, Users, Settings, Flame, ExternalLink, Loader2, Edit3, Handshake, Send, Wand2, UsersRound, Crown, Sprout, XCircle, AlertCircle } from 'lucide-react'
+import { Calendar, MapPin, Clock, ImagePlus, Flag, Plus, Trash2, Save, ShieldAlert, Activity, Users, Settings, Flame, ExternalLink, Loader2, Edit3, Handshake, Send, Wand2, UsersRound, Crown, Sprout, XCircle, AlertCircle, CheckCircle } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 import { useLocation, useNavigate } from 'react-router-dom'
-
-const TAIWAN_CITIES = [
-  '台北市', '新北市', '基隆市', '桃園市', '新竹市', '新竹縣', '苗栗縣', 
-  '台中市', '彰化縣', '南投縣', '雲林縣', '嘉義市', '嘉義縣', '台南市', 
-  '高雄市', '屏東縣', '宜蘭縣', '花蓮縣', '台東縣', '澎湖縣', '金門縣', '連江縣'
-]
 
 export default function RaceBuilder() {
   const location = useLocation()
@@ -17,371 +11,376 @@ export default function RaceBuilder() {
   const editId = searchParams.get('id')
 
   const [raceData, setRaceData] = useState({
-      title: '', date: '', startTime: '', location: '', city: '', type: '馬拉松', status: 'OPEN', imageUrl: '', isHot: false
+      title: '', date: '', startTime: '', location: '', type: '馬拉松', status: 'OPEN', imageUrl: '', isHot: false, openTime: ''
   })
   const [slots, setSlots] = useState([])
-  const [isSubmitting, setIsSubmitting] = useState(false) 
-  const [isFetchingData, setIsFetchingData] = useState(false)
-  const [isGuessing, setIsGuessing] = useState(false)
-
-  const SLOT_TEMPLATES = {
-      '馬拉松': [ { group: '一般組別', name: '全程馬拉松組', capacity: 10, genderLimit: 'ANY' }, { group: '一般組別', name: '半程馬拉松組', capacity: 10, genderLimit: 'ANY' } ],
-      '鐵人三項': [ { group: '個人組', name: '全程 226 組 (需三鐵衣)', capacity: 5, genderLimit: 'ANY' }, { group: '接力組', name: '🏊 游泳棒 (需三鐵衣)', capacity: 3, genderLimit: 'ANY' } ],
-      '二鐵': [ { group: '個人組', name: '標準賽 (跑-騎-跑)', capacity: 10, genderLimit: 'ANY' } ],
-      '游泳': [ { group: '一般組別', name: '3000m 挑戰組', capacity: 5, genderLimit: 'ANY' } ],
-      '自行車': [ { group: '一般組別', name: '競賽組', capacity: 10, genderLimit: 'ANY' } ],
-      '路跑接力': [ ...Array.from({ length: 7 }, (_, i) => ({ group: 'A組 - 競賽組', name: `第${i + 1}棒`, capacity: 1, genderLimit: 'ANY' })) ]
-  }
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [loading, setLoading] = useState(!!editId)
+  
+  const [newSlot, setNewSlot] = useState({ group: '一般組別', name: '', capacity: 1, genderLimit: 'None' })
 
   useEffect(() => {
-      if (editId) {
-          fetchExistingRace(editId)
-      } else {
-          const template = SLOT_TEMPLATES['馬拉松'].map((s, i) => ({ ...s, id: Date.now() + i }))
-          setSlots(template)
-      }
+      if (editId) fetchRaceData(editId)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editId])
 
-  const fetchExistingRace = async (id) => {
-      setIsFetchingData(true)
+  const fetchRaceData = async (id) => {
       try {
           const { data, error } = await supabase.from('races').select('*').eq('id', id).single()
           if (error) throw error
+          
           if (data) {
-              let matchedCity = '';
-              if (data.location) {
-                  TAIWAN_CITIES.forEach(c => {
-                      if (data.location.includes(c)) matchedCity = c;
-                  });
-              }
-
               setRaceData({
-                  title: data.name, date: data.date, startTime: data.gather_time || '', 
-                  location: data.location, city: matchedCity, type: data.type, status: data.status, 
-                  imageUrl: data.image_url || '', isHot: data.is_hot
+                  title: data.name || '',
+                  date: data.date || '',
+                  startTime: data.gather_time || '',
+                  location: data.location || '',
+                  type: data.type || '馬拉松',
+                  status: data.status || 'OPEN',
+                  imageUrl: data.image_url || '',
+                  isHot: data.is_hot || false,
+                  // 防呆：確保如果有資料才轉換時間格式
+                  openTime: data.open_time ? new Date(data.open_time).toISOString().slice(0, 16) : ''
               })
               setSlots(data.slots_data || [])
           }
       } catch (error) {
-          alert("讀取賽事資料失敗，請回清單重試。")
+          alert('載入賽事資料失敗，請確認網路或資料庫狀態。')
           navigate('/admin/races')
       } finally {
-          setIsFetchingData(false)
+          setLoading(false)
       }
   }
 
-  const handleTypeChange = (e) => {
-      const newType = e.target.value
-      setRaceData({...raceData, type: newType})
-      
-      if (window.confirm("更改賽事類型會重置下方的「任務名額配置模板」，確定要重置嗎？\n(如果您已經手動編輯過名單，建議點選取消)")) {
-          const template = SLOT_TEMPLATES[newType] || [];
-          setSlots(template.map((slot, index) => ({ ...slot, id: Date.now() + index })));
+  const handleAddSlot = () => {
+      if (!newSlot.name) return alert('請輸入賽段名稱')
+      setSlots([...slots, { id: Date.now().toString(), ...newSlot, filled: 0, assignee: null }])
+      setNewSlot({ ...newSlot, name: '', capacity: 1 }) 
+  }
+
+  const handleRemoveSlot = (id) => {
+      const slotToRemove = slots.find(s => s.id === id)
+      if (slotToRemove && slotToRemove.filled > 0) {
+          return alert('此賽段已有報名人員，無法直接刪除！請先清空名單。')
       }
+      setSlots(slots.filter(s => s.id !== id))
   }
 
-  const addSlot = () => {
-      const lastGroup = slots[slots.length - 1]?.group || '一般組別';
-      setSlots([...slots, { id: Date.now(), group: lastGroup, name: '', capacity: 1, genderLimit: 'ANY' }])
+  const handleCapacityChange = (id, newCap) => {
+      setSlots(slots.map(s => s.id === id ? { ...s, capacity: Number(newCap) } : s))
   }
 
-  const removeSlot = (id) => { setSlots(slots.filter(s => s.id !== id)) }
-  const updateSlot = (id, field, value) => { setSlots(slots.map(s => s.id === id ? { ...s, [field]: value } : s)) }
+  const handleGenderLimitChange = (id, newLimit) => {
+      setSlots(slots.map(s => s.id === id ? { ...s, genderLimit: newLimit } : s))
+  }
 
-  const handleSetRole = (slotId, participantId, newRole) => {
-      setSlots(slots.map(slot => {
-          if (slot.id === slotId && slot.assignee) {
-              const assignees = slot.assignee.split('|').map(item => {
-                  try {
-                      const p = JSON.parse(item);
-                      if (p.id === participantId) {
-                          return JSON.stringify({ ...p, roleTag: newRole });
-                      }
-                      return item;
-                  } catch(e) { return item; }
+  const handleRemoveAssignee = (slotId, participantIdOrName) => {
+      setSlots(slots.map(s => {
+          if (s.id === slotId && s.assignee) {
+              const assigneesArray = s.assignee.split('|').map(str => {
+                  try { return JSON.parse(str); } catch(e) { return { id: str, name: str, isLegacy: true }; }
               });
-              return { ...slot, assignee: assignees.join('|') };
+              
+              const newAssigneesArray = assigneesArray.filter(p => p.id !== participantIdOrName && p.name !== participantIdOrName);
+              
+              const newAssigneeString = newAssigneesArray.map(p => p.isLegacy ? p.name : JSON.stringify(p)).join('|');
+              
+              return { ...s, filled: Math.max(0, s.filled - 1), assignee: newAssigneeString };
           }
-          return slot;
-      }));
+          return s;
+      }))
   }
 
-  const handleAILocationGuess = () => {
-      if (!raceData.title && !raceData.imageUrl) {
-          return alert('請先輸入「賽事名稱」或「宣傳連結」，系統才有線索可以分析喔！');
+  const handleAssignRole = (slotId, participantIdOrName, roleTag) => {
+      setSlots(slots.map(s => {
+          if (s.id === slotId && s.assignee) {
+              const assigneesArray = s.assignee.split('|').map(str => {
+                  try { return JSON.parse(str); } catch(e) { return { id: str, name: str, isLegacy: true }; }
+              });
+              
+              const updatedAssignees = assigneesArray.map(p => {
+                  if (p.id === participantIdOrName || p.name === participantIdOrName) {
+                      return { ...p, roleTag: roleTag || null };
+                  }
+                  return p;
+              });
+              
+              const newAssigneeString = updatedAssignees.map(p => p.isLegacy ? p.name : JSON.stringify(p)).join('|');
+              return { ...s, assignee: newAssigneeString };
+          }
+          return s;
+      }))
+  }
+
+  const handleSaveRace = async () => {
+      if (!raceData.title || !raceData.date) return alert('請至少填寫賽事名稱與日期')
+      
+      setIsSubmitting(true)
+      
+      // 🌟 移除 city 欄位，避免 schema error
+      const payload = {
+          name: raceData.title,
+          date: raceData.date,
+          gather_time: raceData.startTime,
+          location: raceData.location,
+          type: raceData.type,
+          status: raceData.status,
+          image_url: raceData.imageUrl,
+          slots_data: slots,
+          is_hot: raceData.isHot,
+          medic_required: slots.reduce((acc, curr) => acc + Number(curr.capacity || 0), 0),
+          medic_registered: slots.reduce((acc, curr) => acc + Number(curr.filled || 0), 0),
       }
 
-      setIsGuessing(true)
-      
-      setTimeout(() => {
-          const textToAnalyze = `${raceData.title} ${raceData.imageUrl}`.toLowerCase();
-          let guessedCity = '';
+      // 💡 防呆：如果使用者有設定 openTime，我們才嘗試送出 open_time 欄位。
+      // 如果您的資料庫還沒建這個欄位，這裡會被 Supabase 擋下，所以請務必先去後台建立！
+      if (raceData.openTime) {
+          payload.open_time = new Date(raceData.openTime).toISOString();
+      }
 
-          const cityKeywords = {
-              '台北': '台北市', '新北': '新北市', '萬金石': '新北市', '烏來': '新北市', '渣打': '台北市',
-              '桃園': '桃園市', '新竹': '新竹縣', '苗栗': '苗栗縣', '台中': '台中市', '后里': '台中市', '新社': '台中市',
-              '彰化': '彰化縣', '田中': '彰化縣', '南投': '南投縣', '日月潭': '南投縣',
-              '雲林': '雲林縣', '西螺': '雲林縣', '太平媽': '雲林縣', '嘉義': '嘉義縣',
-              '台南': '台南市', '曾文': '台南市', '高雄': '高雄市', '富邦': '高雄市',
-              '屏東': '屏東縣', '大鵬灣': '屏東縣', '宜蘭': '宜蘭縣', '礁溪': '宜蘭縣', '冬山': '宜蘭縣',
-              '花蓮': '花蓮縣', '太魯閣': '花蓮縣', '台東': '台東縣', '金門': '金門縣', '澎湖': '澎湖縣'
-          };
-
-          for (const [key, fullCity] of Object.entries(cityKeywords)) {
-              if (textToAnalyze.includes(key)) {
-                  guessedCity = fullCity;
-                  break;
-              }
-          }
-
-          setIsGuessing(false)
-
-          if (guessedCity) {
-              setRaceData(prev => ({ ...prev, city: guessedCity, location: prev.location || guessedCity }));
-              alert(`🤖 智能分析成功！\n根據賽事資訊，推測舉辦地點為：【${guessedCity}】\n已為您自動填入。`);
-          } else {
-              alert('🤖 智能分析完畢。\n目前資訊量不足，無法確認確切縣市，請手動選擇。');
-          }
-      }, 1000)
-  }
-
-  // 🌟 核心防護：存檔時，強制用「真實名單人數」覆寫可能錯亂的 `filled`
-  const handleSaveRace = async () => {
-      if(!raceData.title || !raceData.date || !raceData.location) return alert("請填寫完整的賽事資訊！")
-      if (slots.length === 0) return alert("請至少建立一個賽段！")
-      const emptySlot = slots.find(s => !s.name || !s.group); if(emptySlot) return alert("有「隊伍/組別」或「賽段名稱」未填寫！")
-
-      setIsSubmitting(true);
       try {
-          const totalRequired = slots.reduce((acc, curr) => acc + Number(curr.capacity), 0);
-          
-          // 🛡️ 自動超渡機制：重新點名
-          const healedSlots = slots.map(s => ({
-              ...s,
-              filled: parseAssignees(s.assignee).length // 強制使用陣列真實長度
-          }));
-
-          const payload = {
-              name: raceData.title, date: raceData.date, location: raceData.location,
-              type: raceData.type, status: raceData.status, image_url: raceData.imageUrl,
-              is_hot: raceData.isHot, gather_time: raceData.startTime, 
-              medic_required: totalRequired, slots_data: healedSlots 
-          };
-
           if (editId) {
               const { error } = await supabase.from('races').update(payload).eq('id', editId)
-              if (error) throw error;
-              alert(`🎉 賽事「${raceData.title}」更新成功！（幽靈資料已清除）`);
-              navigate('/admin/races') 
+              if (error) {
+                  // 特別攔截 open_time 找不到的錯誤
+                  if (error.message.includes('Could not find the \'open_time\' column')) {
+                      throw new Error('儲存失敗：您尚未在資料庫(races)中建立「open_time」欄位！請先建立，或者清除開放時間後再儲存。');
+                  }
+                  throw error;
+              }
+              alert('賽事更新成功！')
           } else {
-              payload.medic_registered = 0; 
               const { error } = await supabase.from('races').insert([payload])
-              if (error) throw error;
-              alert(`🎉 賽事「${raceData.title}」發佈成功！`);
-              navigate('/admin/races') 
+              if (error) {
+                  if (error.message.includes('Could not find the \'open_time\' column')) {
+                      throw new Error('建立失敗：您尚未在資料庫(races)中建立「open_time」欄位！請先建立，或者清除開放時間後再儲存。');
+                  }
+                  throw error;
+              }
+              alert('賽事建立成功！')
           }
+          navigate('/admin/races')
       } catch (error) {
-          alert(`儲存失敗：${error.message}`);
+          alert(error.message)
       } finally {
-          setIsSubmitting(false);
+          setIsSubmitting(false)
       }
   }
 
-  const openImageLink = () => {
-      if (raceData.imageUrl && raceData.imageUrl.startsWith('http')) {
-          window.open(raceData.imageUrl, '_blank', 'noopener,noreferrer');
-      } else { alert("請輸入有效的圖片 URL (以 http:// 或 https:// 開頭)"); }
-  }
-
-  if (isFetchingData) return <div className="h-64 flex items-center justify-center text-slate-500"><Loader2 className="animate-spin mr-2"/> 讀取賽事資料中...</div>
-
-  const renderStatusIcon = (status) => {
-      switch(status) {
-          case 'OPEN': return <Activity size={16} className="text-green-500"/>;
-          case 'NEGOTIATING': return <Handshake size={16} className="text-blue-500"/>;
-          case 'SUBMITTED': return <Send size={16} className="text-slate-600"/>;
-          case 'FULL': return <CheckCircle size={16} className="text-emerald-500"/>;
-          case 'CANCELLED': return <XCircle size={16} className="text-slate-800"/>;
-          case 'SHORTAGE': return <AlertCircle size={16} className="text-red-500"/>;
-          default: return <Clock size={16} className="text-slate-400"/>;
-      }
-  }
-
-  const parseAssignees = (assigneeString) => {
-      if (!assigneeString) return [];
-      const rawAssignees = assigneeString.split('|');
-      return rawAssignees.map(item => {
-          if (!item) return null;
-          try {
-              return JSON.parse(item); 
-          } catch (e) {
-              return { id: item, name: item.trim().split(' #')[0], timestamp: '舊資料匯入', isLegacy: true };
-          }
-      }).filter(Boolean);
-  }
-
-  const getInitial = (name) => name ? name.replace(/[^a-zA-Z\u4e00-\u9fa5]/g, '').charAt(0) || '?' : '?'
+  if (loading) return <div className="h-[60vh] flex items-center justify-center text-slate-400"><Loader2 className="animate-spin mr-2"/> 載入賽事資料中...</div>
 
   return (
-    <div className="space-y-6 pb-20 animate-fade-in text-slate-800 w-full">
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+    <div className="space-y-6 md:space-y-8 animate-fade-in pb-20">
+      
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
           <div>
               <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
-                  {editId ? <Edit3 className="text-amber-500"/> : <Flag className="text-blue-600"/>}
-                  {editId ? '編輯賽事資訊' : '建立新任務'} 
+                  <Wand2 className="text-amber-500"/> {editId ? '編輯任務參數' : '建立新任務'}
               </h2>
-              <p className="text-slate-500 text-sm mt-1">{editId ? '修改賽事內容與組別名額，儲存後將即時生效。' : '請在此設定賽事的基本資訊、屬性，並規劃各組別的賽段與人力需求。'}</p>
+              <p className="text-slate-500 font-medium text-sm mt-1">設定賽事細節、招募名額與時間分流控制</p>
           </div>
-          <button onClick={handleSaveRace} disabled={isSubmitting} className={`px-8 py-3 rounded-xl font-black shadow-lg transition-all flex items-center gap-2 ${isSubmitting ? 'bg-slate-400 text-white cursor-not-allowed' : editId ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-amber-500/30' : 'bg-slate-900 hover:bg-blue-600 text-white'}`}>
-              {isSubmitting ? <><Loader2 className="animate-spin" size={18}/> 儲存中...</> : <><Save size={18}/> {editId ? '確認並更新賽事' : '簽署並發佈賽事'}</>}
-          </button>
+          <div className="flex gap-3 w-full md:w-auto">
+              <button onClick={() => navigate('/admin/races')} className="flex-1 md:flex-none px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-colors">取消</button>
+              <button onClick={handleSaveRace} disabled={isSubmitting} className="flex-1 md:flex-none px-6 py-3 bg-blue-600 text-white rounded-xl font-black shadow-lg shadow-blue-600/30 hover:bg-blue-700 hover:shadow-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2">
+                  {isSubmitting ? <Loader2 size={18} className="animate-spin"/> : <Save size={18}/>} 
+                  {editId ? '儲存變更' : '發布任務'}
+              </button>
+          </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 w-full">
-          <div className="xl:col-span-1 space-y-6">
-              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-                  <h3 className="font-black text-lg mb-4 flex items-center gap-2 border-b border-slate-100 pb-3"><Activity className="text-blue-500"/> 賽事資訊 (General Info)</h3>
-                  <div className="space-y-4">
-                      <div><label className="block text-sm font-bold text-slate-700 mb-1">賽事名稱</label><input type="text" className="w-full border border-slate-300 p-2.5 rounded-lg outline-none" value={raceData.title} onChange={e => setRaceData({...raceData, title: e.target.value})}/></div>
-                      <div className="grid grid-cols-2 gap-4">
-                          <div><label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-1"><Calendar size={14}/> 日期</label><input type="date" className="w-full border border-slate-300 p-2.5 rounded-lg outline-none cursor-text" value={raceData.date} onChange={e => setRaceData({...raceData, date: e.target.value})}/></div>
-                          <div><label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-1"><Clock size={14}/> 最早鳴槍時間</label><input type="text" placeholder="例如: 05:30" className="w-full border border-slate-300 p-2.5 rounded-lg outline-none cursor-text" value={raceData.startTime} onChange={e => setRaceData({...raceData, startTime: e.target.value})}/></div>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8">
+          
+          <div className="lg:col-span-7 space-y-6 md:space-y-8">
+              
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 md:p-8">
+                  <h3 className="text-lg font-black text-slate-800 mb-6 flex items-center gap-2 border-b pb-4"><Settings className="text-blue-500"/> 基本賽事資訊</h3>
+                  
+                  <div className="space-y-5">
+                      <div>
+                          <label className="block text-sm font-bold text-slate-700 mb-1">賽事名稱 <span className="text-red-500">*</span></label>
+                          <input type="text" className="w-full border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-blue-500 transition-colors font-black text-slate-800 text-lg" placeholder="例如：2026 台北馬拉松" value={raceData.title} onChange={e => setRaceData({...raceData, title: e.target.value})}/>
                       </div>
-                      
-                      <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 mt-2">
-                          <div className="flex justify-between items-center mb-2">
-                              <label className="block text-sm font-bold text-blue-900 flex items-center gap-1"><MapPin size={14} className="text-blue-600"/> 集合地點</label>
-                              <button onClick={handleAILocationGuess} disabled={isGuessing} className="text-xs font-bold text-blue-600 bg-white border border-blue-200 px-2 py-1 rounded shadow-sm flex items-center gap-1 hover:bg-blue-50 transition-colors disabled:opacity-50">
-                                  {isGuessing ? <Loader2 size={12} className="animate-spin"/> : <Wand2 size={12}/>} 智能帶入
-                              </button>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                          <div>
+                              <label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-1"><Calendar size={16} className="text-slate-400"/> 賽事日期 <span className="text-red-500">*</span></label>
+                              <input type="date" className="w-full border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-blue-500 transition-colors font-medium text-slate-700" value={raceData.date} onChange={e => setRaceData({...raceData, date: e.target.value})}/>
                           </div>
-                          <div className="flex flex-col gap-2">
-                              <select className="w-full border border-slate-300 p-2.5 rounded-lg outline-none text-slate-700 bg-white font-medium" value={raceData.city} onChange={e => {
-                                  const newCity = e.target.value;
-                                  setRaceData(prev => ({...prev, city: newCity, location: prev.location ? prev.location : newCity}));
-                              }}>
-                                  <option value="">請選擇縣市...</option>
-                                  {TAIWAN_CITIES.map(city => <option key={city} value={city}>{city}</option>)}
-                              </select>
-                              <input type="text" placeholder="請輸入詳細地標或廣場名稱" className="w-full border border-slate-300 p-2.5 rounded-lg outline-none text-slate-700 bg-white" value={raceData.location} onChange={e => setRaceData({...raceData, location: e.target.value})}/>
+                          <div>
+                              <label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-1"><Clock size={16} className="text-slate-400"/> 集合/鳴槍時間</label>
+                              <input type="time" className="w-full border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-blue-500 transition-colors font-medium text-slate-700" value={raceData.startTime} onChange={e => setRaceData({...raceData, startTime: e.target.value})}/>
                           </div>
                       </div>
 
-                      <div className="pt-2">
-                          <label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-1"><ImagePlus size={14}/> 宣傳海報圖片 或 報名網址</label>
-                          <div className="flex gap-2 items-center">
-                              <input type="text" placeholder="https://..." className="w-full border border-slate-300 p-2.5 rounded-lg outline-none text-sm font-mono flex-1" value={raceData.imageUrl} onChange={e => setRaceData({...raceData, imageUrl: e.target.value})}/>
-                              <button onClick={openImageLink} className={`px-3 py-2.5 rounded-lg transition-colors text-xs font-bold flex items-center gap-1 whitespace-nowrap ${raceData.imageUrl ? 'bg-slate-800 text-white hover:bg-slate-700' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`} title="在新分頁預覽"><ExternalLink size={14} />測試確認</button>
-                          </div>
+                      <div>
+                          <label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-1"><MapPin size={16} className="text-slate-400"/> 詳細地點</label>
+                          {/* 🌟 拔除原本的「縣市分類」，這裡直接讓管理員填寫地點 */}
+                          <input type="text" className="w-full border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-blue-500 transition-colors font-medium text-slate-700" placeholder="例如：台北市政府廣場" value={raceData.location} onChange={e => setRaceData({...raceData, location: e.target.value})}/>
+                      </div>
+
+                      <div>
+                          <label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-1"><Clock size={16} className="text-purple-500"/> 預計開放報名時間 (Time-Gated)</label>
+                          <input type="datetime-local" className="w-full border-2 border-purple-200 p-3 rounded-xl outline-none focus:border-purple-500 transition-colors font-black text-purple-900 bg-purple-50" value={raceData.openTime} onChange={e => setRaceData({...raceData, openTime: e.target.value})}/>
+                          <p className="text-xs text-slate-500 mt-1.5 font-medium leading-relaxed">
+                              設定後將啟動梯次分流：<br/>
+                              🔹 Day 0 (開放當日至午夜)：僅限 <span className="text-blue-600 font-bold">帶隊教官</span><br/>
+                              🔹 Day 1 (隔日 00:00 起)：開放 <span className="text-emerald-600 font-bold">新人、當屆訓練</span><br/>
+                              🔹 Day 2 (第三日 00:00 起)：全面開放 <span className="text-slate-700 font-bold">所有當屆會員</span><br/>
+                              (VIP 無視天數隨時可報，未設定則視為全面開放)
+                          </p>
                       </div>
                   </div>
               </div>
 
-              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-                  <h3 className="font-black text-lg mb-4 flex items-center gap-2 border-b border-slate-100 pb-3"><Settings className="text-slate-500"/> 賽事屬性 (Attributes)</h3>
-                  <div className="space-y-4">
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 md:p-8">
+                  <h3 className="text-lg font-black text-slate-800 mb-6 flex items-center gap-2 border-b pb-4"><ImagePlus className="text-indigo-500"/> 視覺與狀態控制</h3>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                       <div>
-                          <label className="block text-sm font-bold text-slate-700 mb-1">賽事類型 (影響裝備檢查)</label>
-                          <select className="w-full border border-slate-300 p-2.5 rounded-lg outline-none font-bold text-blue-700 bg-blue-50/30 cursor-pointer hover:bg-blue-50" value={raceData.type} onChange={handleTypeChange}>
-                              <option value="馬拉松">馬拉松 (一般路跑)</option><option value="鐵人三項">鐵人三項 (🚨 強制檢查三鐵衣)</option><option value="二鐵">二鐵</option><option value="游泳">水上/游泳</option><option value="自行車">自行車</option><option value="路跑接力">路跑接力</option>
+                          <label className="block text-sm font-bold text-slate-700 mb-2">賽事類型</label>
+                          <select className="w-full border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 transition-colors font-bold text-indigo-900 bg-indigo-50" value={raceData.type} onChange={e => setRaceData({...raceData, type: e.target.value})}>
+                              <option value="馬拉松">馬拉松</option>
+                              <option value="越野賽">越野賽</option>
+                              <option value="自行車">自行車</option>
+                              <option value="鐵人三項">鐵人三項</option>
+                              <option value="二鐵">二鐵</option>
+                              <option value="游泳">游泳</option>
+                              <option value="路跑接力">路跑接力</option>
+                              <option value="其他">其他</option>
                           </select>
                       </div>
                       <div>
-                          <label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-                              任務生命週期狀態
-                          </label>
-                          <div className="relative">
-                              <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                                  {renderStatusIcon(raceData.status)}
-                              </div>
-                              <select className="w-full border border-slate-300 py-2.5 pl-9 pr-4 rounded-lg outline-none font-bold cursor-pointer hover:border-blue-400 transition-colors bg-white appearance-none" value={raceData.status} onChange={e => setRaceData({...raceData, status: e.target.value})}>
-                                  <option value="OPEN">🟢 招募中 (開放報名)</option>
-                                  <option value="NEGOTIATING">🤝 洽談中 (意願收集/預備)</option>
-                                  <option value="SUBMITTED">📤 已送名單 (鎖定/停止報名)</option>
-                                  <option value="FULL">⚫ 滿編 (停止報名，開放候補)</option>
-                                  <option value="CANCELLED">🚫 無合作/停辦 (結案)</option>
-                                  <option value="SHORTAGE">⚠️ 招不到人 (異常結案)</option>
-                              </select>
+                          <label className="block text-sm font-bold text-slate-700 mb-2">招募狀態</label>
+                          <select className={`w-full border-2 p-3 rounded-xl outline-none font-bold transition-colors ${raceData.status === 'OPEN' ? 'bg-green-50 border-green-200 text-green-700 focus:border-green-500' : raceData.status === 'FULL' ? 'bg-red-50 border-red-200 text-red-700 focus:border-red-500' : raceData.status === 'UPCOMING' ? 'bg-amber-50 border-amber-200 text-amber-700 focus:border-amber-500' : 'bg-slate-50 border-slate-200 text-slate-700 focus:border-slate-500'}`} value={raceData.status} onChange={e => setRaceData({...raceData, status: e.target.value})}>
+                              <option value="UPCOMING">⏳ 即將開放 (UPCOMING)</option>
+                              <option value="OPEN">🟢 招募中 (OPEN)</option>
+                              <option value="FULL">🔴 滿編/停止招募 (FULL)</option>
+                              <option value="NEGOTIATING">🤝 洽談中 (NEGOTIATING)</option>
+                              <option value="SUBMITTED">✅ 已送大會名單 (SUBMITTED)</option>
+                          </select>
+                      </div>
+                  </div>
+
+                  <div className="mb-6">
+                      <label className="flex items-center gap-3 cursor-pointer p-4 bg-orange-50 border border-orange-200 rounded-xl hover:bg-orange-100 transition-colors">
+                          <input type="checkbox" className="w-5 h-5 accent-orange-500" checked={raceData.isHot} onChange={e => setRaceData({...raceData, isHot: e.target.checked})}/>
+                          <div>
+                              <div className="font-black text-orange-700 flex items-center gap-1"><Flame size={16}/> 標記為熱門/重點賽事</div>
+                              <div className="text-xs text-orange-600/80 font-medium">將在賽事大廳中加上火焰特效凸顯</div>
+                          </div>
+                      </label>
+                  </div>
+
+                  {/* 🌟 圖片區塊瘦身：拔除輸入網址，統一使用系統預設圖 */}
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                      <div className="flex items-center gap-2 mb-2">
+                          <ImagePlus className="text-slate-400" size={18}/>
+                          <span className="font-bold text-slate-700 text-sm">賽事主視覺</span>
+                      </div>
+                      <p className="text-xs text-slate-500 mb-4">系統將自動套用高質感的預設賽事背景，讓前台大廳保持一致的視覺風格，無需手動上傳圖片。</p>
+                      
+                      <div className="rounded-xl overflow-hidden border-2 border-slate-200 h-32 relative bg-[url('https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&q=80&w=600')] bg-cover bg-center">
+                          <div className="absolute inset-0 bg-slate-900/40"></div>
+                          <div className="absolute inset-0 flex items-center justify-center">
+                              <span className="font-black tracking-widest text-white/90 drop-shadow-md">系統通用預設背景</span>
                           </div>
                       </div>
-                      <label className="flex items-center gap-2 p-3 bg-red-50 border border-red-100 rounded-xl cursor-pointer hover:bg-red-100 transition-colors">
-                          <input type="checkbox" className="w-5 h-5 accent-red-500" checked={raceData.isHot} onChange={e => setRaceData({...raceData, isHot: e.target.checked})}/>
-                          <span className="font-bold text-red-600 flex items-center gap-1"><Flame size={18}/> 標記為「火熱賽事」</span>
-                      </label>
                   </div>
               </div>
           </div>
 
-          <div className="xl:col-span-2">
-              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 md:p-8 min-h-full">
-                  <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
-                      <div>
-                          <h3 className="font-black text-xl text-slate-800 flex items-center gap-2"><Users className="text-blue-600"/> 任務名額配置與報名狀況</h3>
-                          <p className="text-xs text-slate-500 mt-1">您可以自由調整隊伍、棒次名稱與需求人數，下方會即時顯示已報名人員。</p>
+          <div className="lg:col-span-5 space-y-6 md:space-y-8">
+              
+              <div className="bg-slate-900 rounded-2xl shadow-xl shadow-slate-900/20 border border-slate-800 p-6 md:p-8 relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-bl-full blur-2xl"></div>
+                  
+                  <h3 className="text-xl font-black text-white mb-6 flex items-center gap-2 border-b border-slate-700 pb-4"><UsersRound className="text-blue-400"/> 任務名額與賽段設定</h3>
+                  
+                  <div className="bg-slate-800 p-5 rounded-xl border border-slate-700 mb-6 shadow-inner">
+                      <div className="grid grid-cols-2 gap-4 mb-4">
+                          <div>
+                              <label className="block text-xs font-bold text-slate-400 mb-1">賽段/組別分類</label>
+                              <input type="text" className="w-full border border-slate-600 bg-slate-900 p-2.5 rounded-lg outline-none focus:border-blue-500 text-white text-sm" placeholder="例: 全馬組" value={newSlot.group} onChange={e => setNewSlot({...newSlot, group: e.target.value})}/>
+                          </div>
+                          <div>
+                              <label className="block text-xs font-bold text-slate-400 mb-1">特定配速/任務名稱</label>
+                              <input type="text" className="w-full border border-slate-600 bg-slate-900 p-2.5 rounded-lg outline-none focus:border-blue-500 text-white text-sm" placeholder="例: 4:30 列車" value={newSlot.name} onChange={e => setNewSlot({...newSlot, name: e.target.value})}/>
+                          </div>
                       </div>
-                      <button onClick={addSlot} className="flex items-center gap-1 bg-blue-100 text-blue-700 hover:bg-blue-200 px-4 py-2 rounded-lg font-bold text-sm transition-colors shadow-sm"><Plus size={16}/> 新增賽段</button>
+                      <div className="grid grid-cols-2 gap-4 mb-4">
+                          <div>
+                              <label className="block text-xs font-bold text-slate-400 mb-1">需求人數</label>
+                              <input type="number" min="1" className="w-full border border-slate-600 bg-slate-900 p-2.5 rounded-lg outline-none focus:border-blue-500 text-white text-sm font-mono" value={newSlot.capacity} onChange={e => setNewSlot({...newSlot, capacity: parseInt(e.target.value) || 1})}/>
+                          </div>
+                          <div>
+                              <label className="block text-xs font-bold text-slate-400 mb-1">性別限制</label>
+                              <select className="w-full border border-slate-600 bg-slate-900 p-2.5 rounded-lg outline-none focus:border-pink-500 text-white text-sm" value={newSlot.genderLimit} onChange={e => setNewSlot({...newSlot, genderLimit: e.target.value})}>
+                                  <option value="None">無限制</option>
+                                  <option value="F">🚺 限女性</option>
+                              </select>
+                          </div>
+                      </div>
+                      <button onClick={handleAddSlot} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-lg transition-colors flex items-center justify-center gap-2 shadow-lg shadow-blue-900/50">
+                          <Plus size={18}/> 新增至賽段列表
+                      </button>
                   </div>
 
-                  <div className="space-y-6">
+                  <div className="space-y-4 max-h-[600px] overflow-y-auto custom-scrollbar pr-2">
+                      {slots.length === 0 && (
+                          <div className="text-center py-8 border-2 border-dashed border-slate-700 rounded-xl text-slate-500 font-medium">尚未新增任何賽段</div>
+                      )}
+                      
                       {slots.map((slot, index) => {
-                          const assignees = parseAssignees(slot.assignee);
+                          const assignees = slot.assignee ? slot.assignee.split('|').map(str => {
+                              try { return JSON.parse(str); } catch(e) { return { id: str, name: str, isLegacy: true }; }
+                          }) : [];
                           
-                          // 🌟 真實防護：直接計算陣列長度，不再理會可能壞掉的 slot.filled
-                          const actualFilled = assignees.length; 
-                          const isFull = actualFilled >= slot.capacity && slot.capacity > 0;
-
                           return (
-                          <div key={slot.id} className={`p-5 rounded-xl border-2 relative group transition-all ${isFull ? 'border-green-300 bg-green-50/20' : 'border-slate-100 bg-slate-50 hover:border-blue-300'}`}>
-                              <div className="absolute -left-3 -top-3 w-8 h-8 bg-slate-800 text-white rounded-full flex items-center justify-center font-black text-sm border-4 border-white shadow-sm">{index + 1}</div>
-                              
-                              <div className="grid grid-cols-1 md:grid-cols-12 gap-4 mb-4">
-                                  <div className="md:col-span-3"><label className="block text-xs font-bold text-slate-500 mb-1">隊伍 / 組別</label><input type="text" placeholder="例如：A組" className="w-full border border-slate-300 p-2 rounded outline-none font-bold text-blue-700 bg-white cursor-text" value={slot.group} onChange={e => updateSlot(slot.id, 'group', e.target.value)} /></div>
-                                  <div className="md:col-span-4"><label className="block text-xs font-bold text-slate-500 mb-1">賽段 / 棒次名稱</label><input type="text" placeholder="例如：第1棒：游泳" className="w-full border border-slate-300 p-2 rounded outline-none font-bold text-slate-800 bg-white cursor-text" value={slot.name} onChange={e => updateSlot(slot.id, 'name', e.target.value)} /></div>
-                                  <div className="md:col-span-2">
-                                      <label className="block text-xs font-bold text-slate-500 mb-1">需求人數</label>
-                                      <input type="number" min="0" className={`w-full border p-2 rounded outline-none text-center font-bold bg-white cursor-text ${isFull ? 'text-green-600 border-green-300 bg-green-50' : 'text-blue-600 border-slate-300'}`} value={slot.capacity} onChange={e => updateSlot(slot.id, 'capacity', e.target.value)} />
+                          <div key={slot.id} className="bg-white rounded-xl overflow-hidden border border-slate-200 shadow-sm relative group">
+                              <div className="bg-slate-50 p-3 border-b border-slate-200 flex justify-between items-center">
+                                  <div className="flex flex-col">
+                                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{slot.group}</span>
+                                      <span className="font-black text-slate-800 text-base">{slot.name} {slot.genderLimit === 'F' && <span className="text-[10px] bg-pink-100 text-pink-600 px-2 py-0.5 rounded-full ml-1 align-middle border border-pink-200">限女</span>}</span>
                                   </div>
-                                  <div className="md:col-span-2">
-                                      <label className="block text-xs font-bold text-slate-500 mb-1">性別限制</label>
-                                      <select className={`w-full border border-slate-300 p-2 rounded outline-none text-xs font-bold ${slot.genderLimit === 'F' ? 'bg-pink-50 text-pink-600 border-pink-200' : 'bg-white text-slate-600'}`} value={slot.genderLimit} onChange={e => updateSlot(slot.id, 'genderLimit', e.target.value)}>
-                                          <option value="ANY">無</option><option value="F">🚨 限女</option><option value="M">🚨 限男</option>
-                                      </select>
-                                  </div>
-                                  <div className="md:col-span-1 flex items-end justify-end"><button onClick={() => removeSlot(slot.id)} className="p-2 text-red-400 hover:bg-red-100 hover:text-red-600 rounded-lg transition-colors mb-0.5"><Trash2 size={20}/></button></div>
+                                  <button onClick={() => handleRemoveSlot(slot.id)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="刪除此賽段"><Trash2 size={16}/></button>
                               </div>
-
-                              <div className="bg-white rounded-lg p-4 border border-slate-200 shadow-inner">
-                                  <div className="text-xs font-bold text-slate-500 mb-3 flex items-center justify-between border-b border-slate-100 pb-2">
-                                      <span className="flex items-center gap-1"><UsersRound size={14}/> 報名名單與職務指派</span>
-                                      {/* 🌟 顯示真實的人數 */}
-                                      <span className={`${isFull ? 'text-green-600' : 'text-blue-600'}`}>已報名: {actualFilled} / {slot.capacity}</span>
+                              <div className="p-4">
+                                  <div className="flex items-center gap-3 mb-4">
+                                      <div className="flex-1">
+                                          <label className="block text-[10px] font-bold text-slate-400 mb-1">開放名額</label>
+                                          <input type="number" min="1" className="w-full border border-slate-200 p-2 rounded outline-none text-sm font-bold focus:border-blue-500 text-slate-700" value={slot.capacity} onChange={e => handleCapacityChange(slot.id, e.target.value)}/>
+                                      </div>
+                                      <div className="flex-1">
+                                          <label className="block text-[10px] font-bold text-slate-400 mb-1">已報名</label>
+                                          <div className="w-full bg-slate-100 p-2 rounded text-sm font-black text-slate-500 text-center border border-transparent">
+                                              {slot.filled || 0}
+                                          </div>
+                                      </div>
                                   </div>
-                                  
+
                                   {assignees.length > 0 ? (
-                                      <div className="flex flex-col gap-2">
+                                      <div className="space-y-2 border-t border-slate-100 pt-3">
+                                          <div className="text-[10px] font-bold text-blue-600 flex items-center gap-1 mb-2"><CheckCircle size={10}/> 報名名單與職務指派</div>
                                           {assignees.map((p, i) => (
-                                              <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg">
+                                              <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between bg-slate-50 p-2 rounded border border-slate-100 gap-2">
                                                   <div className="flex items-center gap-2">
-                                                      <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black text-white" style={{ backgroundColor: `hsl(${i * 60 + 200}, 70%, 50%)` }}>
-                                                          {getInitial(p.name)}
-                                                      </div>
-                                                      <span className="text-sm font-bold text-slate-700">{p.name}</span>
-                                                      {p.isLegacy && <span className="text-[9px] bg-slate-200 text-slate-600 px-1 rounded border border-slate-300">舊</span>}
+                                                      <span className="text-xs font-black text-slate-700 truncate max-w-[120px]">{p.isLegacy ? p.name.split('#')[0] : p.name}</span>
+                                                      {p.isVip && <Crown size={12} className="text-amber-500"/>}
+                                                      {p.isNew && <Sprout size={12} className="text-green-500"/>}
                                                   </div>
-                                                  
-                                                  <div className="flex items-center gap-2">
+                                                  <div className="flex items-center gap-1 w-full sm:w-auto">
                                                       <select 
-                                                          className={`text-xs font-bold p-1 rounded border outline-none ${p.roleTag ? 'bg-amber-50 text-amber-700 border-amber-300' : 'bg-white text-slate-500 border-slate-300'}`}
+                                                          className="text-[10px] border border-slate-200 rounded p-1 outline-none bg-white font-bold flex-1 sm:w-[90px]"
                                                           value={p.roleTag || ""}
-                                                          onChange={(e) => handleSetRole(slot.id, p.id, e.target.value)}
+                                                          onChange={(e) => handleAssignRole(slot.id, p.id || p.name, e.target.value)}
                                                       >
-                                                          <option value="">無特殊職務</option>
+                                                          <option value="">一般參賽</option>
                                                           <option value="帶隊教官">🛡️ 帶隊教官</option>
                                                           <option value="賽道教官">🚩 賽道教官</option>
                                                           <option value="醫護教官">🏥 醫護教官</option>
                                                           <option value="官方代表">👑 官方代表</option>
                                                       </select>
+                                                      <button onClick={() => handleRemoveAssignee(slot.id, p.id || p.name)} className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-100 rounded transition-colors" title="強制移除此人"><XCircle size={14}/></button>
                                                   </div>
                                               </div>
                                           ))}

@@ -27,7 +27,6 @@ const FIELD_TRANSLATION_MAP = {
 };
 
 // 🚀 終極防跳動解法：獨立在外的 FieldEditor 元件
-// 它只在 onBlur(離開輸入框) 時才更新主程式的資料，打字過程中完全不會觸發主畫面重新渲染
 const FieldEditor = ({ label, name, type = "text", options = [], value, onChange, isHighlighted }) => {
     const [localValue, setLocalValue] = useState(value || '');
 
@@ -286,21 +285,25 @@ export default function MemberCRM() {
       }
   }
 
+  // 🌟 核心戰略修改：五大護法優先權神級配分！
+  // VIP > 帶隊教官 > 新人 > 訓練 > 當屆
   function getPriorityScore(m) {
       let score = 0
-      if (m.is_vip === 'Y') score += 9999
-      if (m.is_current_member === 'Y') score += 40
-      if (m.training_status === 'Y') score += 30
-      if (m.is_new_member === 'Y') score += 20
-      if (m.is_team_leader === 'Y') score += 10
+      if (m.is_vip === 'Y') score += 9999              // 絕對霸主
+      if (m.is_team_leader === 'Y') score += 40        // 帶隊教官 第二大
+      if (m.is_new_member === 'Y') score += 30         // 新人標記 第三大
+      if (m.training_status === 'Y') score += 20       // 當屆訓練 第四大
+      if (m.is_current_member === 'Y') score += 10     // 當屆會員 基本盤
       return score
   }
 
   const renderPriorityIcon = (m) => {
       const score = getPriorityScore(m)
       if (score >= 9000) return <span className="flex items-center text-amber-500 font-black bg-amber-50 px-2 py-1 rounded"><Crown size={16} className="mr-1"/> VIP</span>
-      if (score >= 50) return <span className="flex items-center text-red-500 font-bold bg-red-50 px-2 py-1 rounded"><Flame size={16} className="mr-1"/> 極高</span>
-      if (score >= 20) return <span className="flex items-center text-blue-500 font-bold bg-blue-50 px-2 py-1 rounded"><Zap size={16} className="mr-1"/> 高</span>
+      if (score >= 40) return <span className="flex items-center text-red-500 font-bold bg-red-50 px-2 py-1 rounded"><Flame size={16} className="mr-1"/> 帶隊官</span>
+      if (score >= 30) return <span className="flex items-center text-emerald-500 font-bold bg-emerald-50 px-2 py-1 rounded"><Activity size={16} className="mr-1"/> 新人</span>
+      if (score >= 20) return <span className="flex items-center text-blue-500 font-bold bg-blue-50 px-2 py-1 rounded"><Zap size={16} className="mr-1"/> 訓練</span>
+      if (score >= 10) return <span className="flex items-center text-slate-500 font-bold bg-slate-50 px-2 py-1 rounded"><CheckCircle size={16} className="mr-1"/> 當屆</span>
       return <span className="flex items-center text-slate-400"><Cloud size={16} className="mr-1"/> 一般</span>
   }
 
@@ -537,6 +540,10 @@ export default function MemberCRM() {
                                  ) : (
                                      <span className="text-[10px] text-slate-500 bg-slate-200 px-1.5 py-0.5 rounded flex items-center gap-0.5 font-medium"><XCircle size={10}/>非當屆</span>
                                  )}
+                                 {/* 🌟 在列表顯示當屆訓練小標籤 */}
+                                 {member.training_status === 'Y' && (
+                                     <span className="text-[10px] text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded flex items-center gap-0.5 font-bold"><Activity size={10}/>訓練</span>
+                                 )}
                                  <span className="text-[10px] font-bold text-slate-500 bg-white border border-slate-200 px-1.5 py-0.5 rounded">
                                      {member.role === 'VERIFIED_MEDIC' ? '醫護鐵人' : member.role === 'USER' ? '一般會員' : member.role}
                                  </span>
@@ -655,6 +662,7 @@ export default function MemberCRM() {
                                       </select>
                                   </div>
 
+                                  {/* 🌟 核心戰略 UI 修改：補上當屆會員訓練 */}
                                   <div className="grid grid-cols-2 gap-3 bg-white p-3 rounded-lg border border-slate-200">
                                       <label className="flex items-center gap-2 cursor-pointer p-1 hover:bg-slate-50 rounded">
                                           <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={editingMember.is_current_member === 'Y'} onChange={e => setEditingMember({...editingMember, is_current_member: e.target.checked ? 'Y' : 'N'})}/>
@@ -671,6 +679,10 @@ export default function MemberCRM() {
                                       <label className="flex items-center gap-2 cursor-pointer p-1 hover:bg-green-50 rounded">
                                           <input type="checkbox" className="w-4 h-4 accent-green-500" checked={editingMember.is_new_member === 'Y'} onChange={e => setEditingMember({...editingMember, is_new_member: e.target.checked ? 'Y' : 'N'})}/>
                                           <span className="font-bold text-sm text-green-700">新人標記</span>
+                                      </label>
+                                      <label className="flex items-center gap-2 cursor-pointer p-1 hover:bg-blue-50 rounded col-span-2 border-t pt-2 mt-1">
+                                          <input type="checkbox" className="w-4 h-4 accent-blue-500" checked={editingMember.training_status === 'Y'} onChange={e => setEditingMember({...editingMember, training_status: e.target.checked ? 'Y' : 'N'})}/>
+                                          <span className="font-bold text-sm text-blue-700 flex items-center gap-1"><Activity size={14}/> 當屆會員訓練 <span className="text-[10px] text-blue-400 font-normal ml-1">(優先權+20)</span></span>
                                       </label>
                                   </div>
                               </div>

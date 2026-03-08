@@ -50,7 +50,8 @@ export default function RaceDetail() {
                   id: data.id, title: data.name, date: data.date, gatherTime: data.gather_time,
                   location: data.location, type: data.type, status: data.status,
                   imageUrl: data.image_url, slots: data.slots_data || [],
-                  waitlist_data: data.waitlist_data || [] 
+                  waitlist_data: data.waitlist_data || [],
+                  openTime: data.open_time // 🌟 讀取開放報名時間
               })
               setWaitlist(data.waitlist_data || [])
           } else { navigate('/races') }
@@ -60,20 +61,44 @@ export default function RaceDetail() {
       } finally { setLoading(false) }
   }
 
+  // 🌟 階級判定 (Tier)
   const getUserTier = (user) => {
-      if (!user) return 5;
+      if (!user) return 6;
       if (user.is_vip === 'Y') return 1;
-      if (user.total_races < 2) return 2; return user.is_team_leader === 'Y' ? 3 : user.is_current_member === 'Y' ? 4 : 5; 
+      if (user.is_team_leader === 'Y') return 2;
+      if (user.is_new_member === 'Y' || user.total_races < 2) return 3;
+      if (user.training_status === 'Y' || user.training_status === true || user.training_status === 'true' || user.training_status === 1) return 4;
+      if (user.is_current_member === 'Y') return 5;
+      return 6;
+  }
+
+  // 🌟 梯次分流引擎 (Midnight-Cutoff)
+  const getRegistrationPhase = (openTimeStr) => {
+      if (!openTimeStr) return 2; // 如果沒設定時間，預設全面開放
+      const now = new Date();
+      const openTime = new Date(openTimeStr);
+      if (now < openTime) return -1; // 尚未開放
+
+      const midnight1 = new Date(openTime);
+      midnight1.setHours(24, 0, 0, 0); // 開放當天的午夜 00:00
+
+      const midnight2 = new Date(midnight1);
+      midnight2.setDate(midnight2.getDate() + 1); // 第二天的午夜 00:00
+
+      if (now < midnight1) return 0; // Day 0 (開放當日至午夜)
+      if (now < midnight2) return 1; // Day 1 (隔日整天)
+      return 2; // Day 2+ (第三日及以後)
   }
 
   const checkEligibility = () => {
-      if (!activeRace || !currentUser) return { allPassed: false, checks: {} }
+      if (!activeRace || !currentUser) return { allPassed: false, checks: {}, openMessage: '' }
       
       const checks = { 
           isCurrentMember: currentUser.is_current_member === 'Y', 
           isLicenseValid: currentUser.license_expiry && new Date(currentUser.license_expiry) >= new Date(activeRace.date), 
           isTriShirtValid: true, 
-          genderMatch: true 
+          genderMatch: true,
+          isTimeOpenForMe: true // 🌟 新增梯次開放檢查
       }
       
       if (['鐵人三項', '二鐵', '游泳'].includes(activeRace.type)) checks.isTriShirtValid = !!currentUser.shirt_expiry_25;
@@ -84,15 +109,46 @@ export default function RaceDetail() {
           if(currentUser.national_id && currentUser.national_id.charAt(1) === '2') uGender = 'F';
           if (slotInfo?.genderLimit === 'F' && uGender === 'M') checks.genderMatch = false;
       }
+
+      // 🌟 執行梯次分流邏輯
+      let openMessage = "";
+      const phase = getRegistrationPhase(activeRace.openTime);
+      const userTier = getUserTier(currentUser);
+
+      if (userTier === 6) {
+          checks.isTimeOpenForMe = false;
+          openMessage = "非當屆會員，無法報名賽事";
+      } else if (phase === -1) {
+          checks.isTimeOpenForMe = false;
+          openMessage = `本賽事將於 ${new Date(activeRace.openTime).toLocaleString('zh-TW', {hour12: false})} 開放報名`;
+      } else if (userTier === 1) { 
+          // VIP 綠色通道
+          checks.isTimeOpenForMe = true;
+      } else if (phase === 0) {
+          if (userTier === 2) checks.isTimeOpenForMe = true; // 僅帶隊官
+          else {
+              checks.isTimeOpenForMe = false;
+              openMessage = "今日僅開放「帶隊教官」報名，您的身分將於明日 00:00 解鎖";
+          }
+      } else if (phase === 1) {
+          if (userTier <= 4) checks.isTimeOpenForMe = true; // 帶隊官、新人、訓練
+          else {
+              checks.isTimeOpenForMe = false;
+              openMessage = "今日僅開放「帶隊官/新人/當屆訓練」，您的身分將於明日 00:00 解鎖";
+          }
+      } else {
+          checks.isTimeOpenForMe = true; // 全面開放給當屆
+      }
       
-      if (isGodMode) return { checks: { isCurrentMember: true, isLicenseValid: true, isTriShirtValid: true, genderMatch: true }, allPassed: true };
+      if (isGodMode) return { checks: { ...checks, isTimeOpenForMe: true }, allPassed: true, openMessage: '' };
       
-      return { checks, allPassed: Object.values(checks).every(v => v === true) };
+      return { checks, allPassed: Object.values(checks).every(v => v === true), openMessage };
   }
 
   const eligibility = checkEligibility();
   const allPassed = eligibility.allPassed;
   const checks = eligibility.checks;
+  const openMessage = eligibility.openMessage;
 
   const getInitial = (name) => name ? name.replace(/[^a-zA-Z\u4e00-\u9fa5]/g, '').charAt(0) || '?' : '?'
 
@@ -116,7 +172,7 @@ export default function RaceDetail() {
           email: currentUser.email,
           tier: getUserTier(currentUser),
           isVip: currentUser.is_vip === 'Y',
-          isNew: currentUser.total_races < 2,
+          isNew: currentUser.is_new_member === 'Y' || currentUser.total_races < 2,
           timestamp: timestamp,
           slot: selectedSlot,
           isMe: true 
@@ -139,11 +195,10 @@ export default function RaceDetail() {
               const { error } = await supabase.from('races').update({ slots_data: updatedSlots }).eq('id', activeRace.id);
               if (error) throw error;
               
-              // 🌟 核心修補：報名正取成功發信
               try {
                   const { error: notifError } = await supabase.from('user_notifications').insert({
                       user_id: currentUser.id,
-                      tab: 'personal', // 歸類在個人提醒
+                      tab: 'personal', 
                       category: 'race',
                       message: `您已成功報名【${activeRace.title}】的「${targetSlotData.name}」賽段。`,
                       is_read: false
@@ -164,11 +219,10 @@ export default function RaceDetail() {
               const { error } = await supabase.from('races').update({ waitlist_data: newWaitlist }).eq('id', activeRace.id);
               if (error) throw error;
               
-              // 🌟 核心修補：候補登記成功發信
               try {
                   const { error: notifError } = await supabase.from('user_notifications').insert({
                       user_id: currentUser.id,
-                      tab: 'personal', // 歸類在個人提醒
+                      tab: 'personal',
                       category: 'race',
                       message: `您已進入【${activeRace.title}】的候補名單，請靜候系統或總監通知。`,
                       is_read: false
@@ -210,7 +264,6 @@ export default function RaceDetail() {
           const { error } = await supabase.from('races').update({ slots_data: updatedSlots }).eq('id', activeRace.id);
           if (error) throw error;
           
-          // 🌟 核心修補：神之手踢除發信 (若有真實 ID)
           if (userIdToKick && !String(userIdToKick).startsWith('force_')) {
               try {
                   await supabase.from('user_notifications').insert({
@@ -286,7 +339,6 @@ export default function RaceDetail() {
           const { error } = await supabase.from('races').update({ slots_data: updatedSlots, waitlist_data: newWaitlist }).eq('id', activeRace.id);
           if (error) throw error;
           
-          // 🌟 核心修補：神之手遞補發信給幸運兒
           try {
               await supabase.from('user_notifications').insert({
                   user_id: user.id,
@@ -482,7 +534,7 @@ export default function RaceDetail() {
 
                   <div className="bg-white rounded-[2rem] shadow-xl shadow-slate-200/50 border border-slate-100 p-6 md:p-8">
                       <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
-                          <h2 className="text-xl font-black text-slate-800 flex items-center gap-2"><Users className="text-amber-500"/> 任務候補池 (Waitlist)</h2>
+                          <h2 className="text-xl font-black text-slate-800 flex items-center gap-2"><Users className="text-amber-500"/> 報名候補區 (Waitlist)</h2>
                           <span className="text-xs font-bold text-slate-400 bg-slate-100 px-3 py-1.5 rounded-full flex items-center gap-1 border border-slate-200 shadow-inner"><Timer size={12}/> 依階級與時間排序</span>
                       </div>
                       
@@ -541,7 +593,8 @@ export default function RaceDetail() {
                   </div>
               </div>
 
-              <div className="lg:col-span-4 lg:sticky lg:top-8">
+              {/* 🌟 墊高右側區塊，避免被手機懸浮按鈕遮擋 */}
+              <div className="lg:col-span-4 lg:sticky lg:top-8 pb-32 lg:pb-0">
                   <div className="bg-slate-900 rounded-[2rem] shadow-2xl shadow-slate-900/30 border border-slate-800 p-6 md:p-8 text-white z-30 flex flex-col">
                       <h3 className="text-xl font-black mb-8 border-b border-slate-700 pb-5 flex items-center gap-2">
                           <Activity className="text-blue-400"/> 系統資格審查 (ID Check)
@@ -585,11 +638,14 @@ export default function RaceDetail() {
                           </div>
                       </div>
 
-                      <div className="mt-8 pt-6 border-t border-slate-800">
+                      {/* 🌟 UX 優化：手機版將此區塊變成底部懸浮列 */}
+                      <div className="fixed bottom-0 left-0 right-0 z-[60] p-4 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 shadow-[0_-10px_30px_rgba(0,0,0,0.5)] lg:static lg:bg-transparent lg:p-0 lg:border-t lg:mt-8 lg:pt-6 lg:shadow-none lg:backdrop-blur-none">
                           {!allPassed && !isGodMode && (
-                              <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl text-sm font-bold flex gap-3 mb-6">
-                                  <AlertTriangle size={20} className="shrink-0"/>
-                                  資料不符報名規定，按鈕已鎖定。
+                              <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl text-sm font-bold flex gap-3 mb-4 lg:mb-6">
+                                  <AlertTriangle size={20} className="shrink-0 mt-0.5"/>
+                                  <div className="leading-relaxed">
+                                      {!checks.isTimeOpenForMe ? openMessage : '資料不符報名規定，按鈕已鎖定。'}
+                                  </div>
                               </div>
                           )}
 
@@ -608,6 +664,7 @@ export default function RaceDetail() {
           </div>
       </div>
 
+      {/* 以下 Modal 保留原狀 */}
       {previewSlot && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-fade-in" onClick={() => setPreviewSlot(null)}>
               <div className="bg-white rounded-[2rem] shadow-2xl max-w-sm md:max-w-md w-full p-6 animate-bounce-in flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
