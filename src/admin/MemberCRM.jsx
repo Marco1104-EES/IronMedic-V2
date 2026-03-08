@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 import * as XLSX from 'xlsx' 
@@ -25,6 +25,58 @@ const FIELD_TRANSLATION_MAP = {
     '關係': 'emergency_relation',
     '緊急電話': 'emergency_phone'
 };
+
+// 🚀 終極防跳動解法：獨立在外的 FieldEditor 元件
+// 它只在 onBlur(離開輸入框) 時才更新主程式的資料，打字過程中完全不會觸發主畫面重新渲染
+const FieldEditor = ({ label, name, type = "text", options = [], value, onChange, isHighlighted }) => {
+    const [localValue, setLocalValue] = useState(value || '');
+
+    // 當外部傳入的值改變時（例如換人編輯），同步更新內部值
+    useEffect(() => {
+        setLocalValue(value || '');
+    }, [value]);
+
+    const baseClass = "w-full border p-2.5 rounded-lg outline-none transition-all duration-500 text-slate-800 font-medium";
+    const normalClass = "border-slate-300 focus:ring-2 focus:ring-blue-500 bg-white";
+    const highlightClass = "border-amber-400 ring-4 ring-amber-500/50 bg-amber-50 shadow-[0_0_15px_rgba(245,158,11,0.3)]";
+    const combinedClass = `${baseClass} ${isHighlighted ? highlightClass : normalClass}`;
+
+    const handleBlur = () => {
+        // 只有在失去焦點時，才把資料送回主程式
+        onChange(name, localValue);
+    };
+
+    return (
+        <div className="relative">
+            <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1">
+                {label} 
+                {isHighlighted && <span className="text-[10px] bg-amber-500 text-white px-1.5 py-0.5 rounded font-black animate-bounce">變更</span>}
+            </label>
+            {type === 'select' ? (
+                <select 
+                    className={combinedClass} 
+                    value={localValue} 
+                    onChange={e => {
+                        setLocalValue(e.target.value);
+                        onChange(name, e.target.value); // Select 可以即時更新，因為點擊就收起了
+                    }}
+                >
+                    <option value="">請選擇</option>
+                    {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                </select>
+            ) : (
+                <input 
+                    type={type} 
+                    className={combinedClass} 
+                    value={localValue} 
+                    onChange={e => setLocalValue(e.target.value)} // 打字時只更新自己
+                    onBlur={handleBlur} // 離開時才更新主程式
+                />
+            )}
+        </div>
+    );
+};
+
 
 export default function MemberCRM() {
   const [members, setMembers] = useState([])
@@ -86,7 +138,7 @@ export default function MemberCRM() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, searchTerm, currentView])
 
-  // 🚀 核心魔法 V2：閱後即焚的「全庫狙擊系統」
+  // 🚀 閱後即焚的「全庫狙擊系統」
   useEffect(() => {
       const payload = location.state;
       
@@ -135,7 +187,6 @@ export default function MemberCRM() {
 
   }, [location.state, location.pathname, location.search, navigate]);
 
-  // 當關閉視窗時，清除高亮狀態與編輯對象
   const handleCloseEditModal = () => {
       setIsEditModalOpen(false);
       setHighlightFields([]);
@@ -343,38 +394,10 @@ export default function MemberCRM() {
     } catch (err) { alert('匯出失敗: ' + err.message) } finally { setExporting(false) }
   }
 
-  // 🌟 神級改造：加入高亮判斷邏輯
-  const EditInput = ({ label, name, type = "text", options = [] }) => {
-      // 檢查此欄位是否命中高亮名單
-      const isHighlighted = highlightFields.includes(name);
-      
-      const baseClass = "w-full border p-2.5 rounded-lg outline-none transition-all duration-500";
-      const normalClass = "border-slate-300 focus:ring-2 focus:ring-blue-500 bg-white";
-      const highlightClass = "border-amber-400 ring-4 ring-amber-500/50 bg-amber-50 shadow-[0_0_15px_rgba(245,158,11,0.3)] animate-pulse-light";
-      
-      const combinedClass = `${baseClass} ${isHighlighted ? highlightClass : normalClass}`;
-
-      return (
-          <div className="relative">
-              <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1">
-                  {label} 
-                  {isHighlighted && <span className="text-[10px] bg-amber-500 text-white px-1.5 py-0.5 rounded font-black animate-bounce">變更</span>}
-              </label>
-              {type === 'select' ? (
-                  <select className={combinedClass} 
-                      value={editingMember[name] || ''} 
-                      onChange={e => setEditingMember({...editingMember, [name]: e.target.value})}>
-                      <option value="">請選擇</option>
-                      {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                  </select>
-              ) : (
-                  <input type={type} className={combinedClass} 
-                      value={editingMember[name] || ''} 
-                      onChange={e => setEditingMember({...editingMember, [name]: e.target.value})}/>
-              )}
-          </div>
-      )
-  }
+  // 🌟 用 useCallback 包裝更新邏輯，供 FieldEditor 使用
+  const handleFieldChange = useCallback((name, value) => {
+      setEditingMember(prev => ({ ...prev, [name]: value }));
+  }, []);
 
   return (
     <div className="space-y-6 pb-20 relative animate-fade-in">
@@ -556,7 +579,7 @@ export default function MemberCRM() {
           <button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)} className="px-4 py-2 bg-slate-100 rounded-lg hover:bg-slate-200 disabled:opacity-50 font-bold text-slate-600 transition-colors">下一頁</button>
       </div>
 
-      {/* 🌟 CRM 專業編輯面板 (附帶高亮追蹤能力) */}
+      {/* 🌟 CRM 專業編輯面板 (徹底解決手機版失焦跳動) */}
       {isEditModalOpen && editingMember && (
           <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[100] p-4 animate-fade-in backdrop-blur-sm" onClick={handleCloseEditModal}>
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col max-h-[90vh] overflow-hidden" onClick={e => e.stopPropagation()}>
@@ -593,8 +616,9 @@ export default function MemberCRM() {
                                   <h4 className="font-black text-slate-800 border-b pb-2 flex items-center gap-2"><User size={16} className="text-indigo-500"/> 核心基本資料</h4>
                                   
                                   <div className="grid grid-cols-2 gap-4">
-                                      <EditInput label="中文姓名" name="full_name" />
-                                      <EditInput label="英文姓名" name="english_name" />
+                                      {/* 🌟 替換為獨立的 FieldEditor */}
+                                      <FieldEditor label="中文姓名" name="full_name" value={editingMember.full_name} onChange={handleFieldChange} isHighlighted={highlightFields.includes('full_name')} />
+                                      <FieldEditor label="英文姓名" name="english_name" value={editingMember.english_name} onChange={handleFieldChange} isHighlighted={highlightFields.includes('english_name')} />
                                   </div>
                                   
                                   <div>
@@ -603,16 +627,16 @@ export default function MemberCRM() {
                                   </div>
 
                                   <div className="grid grid-cols-2 gap-4">
-                                      <EditInput label="身分證字號" name="national_id" />
-                                      <EditInput label="生理性別" name="gender" type="select" options={['男', '女']} />
+                                      <FieldEditor label="身分證字號" name="national_id" value={editingMember.national_id} onChange={handleFieldChange} isHighlighted={highlightFields.includes('national_id')} />
+                                      <FieldEditor label="生理性別" name="gender" type="select" options={['男', '女']} value={editingMember.gender} onChange={handleFieldChange} isHighlighted={highlightFields.includes('gender')} />
                                   </div>
 
                                   <div className="grid grid-cols-2 gap-4">
-                                      <EditInput label="出生年月日" name="birthday" type="date" />
-                                      <EditInput label="手機號碼" name="phone" />
+                                      <FieldEditor label="出生年月日" name="birthday" type="date" value={editingMember.birthday} onChange={handleFieldChange} isHighlighted={highlightFields.includes('birthday')} />
+                                      <FieldEditor label="手機號碼" name="phone" value={editingMember.phone} onChange={handleFieldChange} isHighlighted={highlightFields.includes('phone')} />
                                   </div>
-                                  <EditInput label="聯絡信箱 (可收信)" name="contact_email" type="email" />
-                                  <EditInput label="通訊地址" name="address" />
+                                  <FieldEditor label="聯絡信箱 (可收信)" name="contact_email" type="email" value={editingMember.contact_email} onChange={handleFieldChange} isHighlighted={highlightFields.includes('contact_email')} />
+                                  <FieldEditor label="通訊地址" name="address" value={editingMember.address} onChange={handleFieldChange} isHighlighted={highlightFields.includes('address')} />
                               </div>
 
                               {/* 權限與狀態 */}
@@ -658,29 +682,29 @@ export default function MemberCRM() {
                                   <h4 className="font-black text-slate-800 border-b pb-2 flex items-center gap-2"><HeartPulse size={16} className="text-rose-500"/> 醫護與後勤資訊</h4>
                                   
                                   <div className="grid grid-cols-2 gap-4">
-                                      <EditInput label="醫護證照種類" name="medical_license" type="select" options={['EMT-1', 'EMT-2', 'EMTP', '醫師', '醫療線上護理師']} />
-                                      <EditInput label="證照有效期限" name="license_expiry" type="date" />
+                                      <FieldEditor label="醫護證照種類" name="medical_license" type="select" options={['EMT-1', 'EMT-2', 'EMTP', '醫師', '醫療線上護理師']} value={editingMember.medical_license} onChange={handleFieldChange} isHighlighted={highlightFields.includes('medical_license')} />
+                                      <FieldEditor label="證照有效期限" name="license_expiry" type="date" value={editingMember.license_expiry} onChange={handleFieldChange} isHighlighted={highlightFields.includes('license_expiry')} />
                                   </div>
                                   
                                   <div className="grid grid-cols-2 gap-4">
-                                      <EditInput label="血型" name="blood_type" type="select" options={['A', 'B', 'O', 'AB', '未知']} />
-                                      <EditInput label="衣服尺寸" name="shirt_size" type="select" options={['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL']} />
+                                      <FieldEditor label="血型" name="blood_type" type="select" options={['A', 'B', 'O', 'AB', '未知']} value={editingMember.blood_type} onChange={handleFieldChange} isHighlighted={highlightFields.includes('blood_type')} />
+                                      <FieldEditor label="衣服尺寸" name="shirt_size" type="select" options={['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL']} value={editingMember.shirt_size} onChange={handleFieldChange} isHighlighted={highlightFields.includes('shirt_size')} />
                                   </div>
 
-                                  <EditInput label="特殊病史與過敏" name="medical_history" />
+                                  <FieldEditor label="特殊病史與過敏" name="medical_history" value={editingMember.medical_history} onChange={handleFieldChange} isHighlighted={highlightFields.includes('medical_history')} />
 
                                   <div className="grid grid-cols-2 gap-4">
-                                      <EditInput label="交通偏好" name="transport_pref" type="select" options={['自行前往', '需要共乘', '搭乘大眾運輸']} />
-                                      <EditInput label="住宿偏好" name="stay_pref" type="select" options={['自行處理', '需要代訂']} />
+                                      <FieldEditor label="交通偏好" name="transport_pref" type="select" options={['自行前往', '需要共乘', '搭乘大眾運輸']} value={editingMember.transport_pref} onChange={handleFieldChange} isHighlighted={highlightFields.includes('transport_pref')} />
+                                      <FieldEditor label="住宿偏好" name="stay_pref" type="select" options={['自行處理', '需要代訂']} value={editingMember.stay_pref} onChange={handleFieldChange} isHighlighted={highlightFields.includes('stay_pref')} />
                                   </div>
                               </div>
 
                               <div className="bg-rose-50/50 p-5 rounded-xl border border-rose-100 shadow-sm space-y-4">
                                   <h4 className="font-black text-rose-900 border-b border-rose-200 pb-2 flex items-center gap-2"><AlertCircle size={16} className="text-rose-500"/> 緊急聯絡人</h4>
-                                  <EditInput label="聯絡人姓名" name="emergency_name" />
+                                  <FieldEditor label="聯絡人姓名" name="emergency_name" value={editingMember.emergency_name} onChange={handleFieldChange} isHighlighted={highlightFields.includes('emergency_name')} />
                                   <div className="grid grid-cols-2 gap-4">
-                                      <EditInput label="關係" name="emergency_relation" />
-                                      <EditInput label="緊急電話" name="emergency_phone" />
+                                      <FieldEditor label="關係" name="emergency_relation" value={editingMember.emergency_relation} onChange={handleFieldChange} isHighlighted={highlightFields.includes('emergency_relation')} />
+                                      <FieldEditor label="緊急電話" name="emergency_phone" value={editingMember.emergency_phone} onChange={handleFieldChange} isHighlighted={highlightFields.includes('emergency_phone')} />
                                   </div>
                               </div>
 
@@ -701,7 +725,7 @@ export default function MemberCRM() {
                   {/* Footer Actions */}
                   <div className="p-5 border-t border-slate-200 bg-white flex gap-4 shrink-0 shadow-[0_-10px_15px_rgba(0,0,0,0.03)]">
                       <button onClick={handleSaveMember} disabled={savingMember} className="flex-1 bg-blue-600 text-white font-black py-3.5 rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-600/30 transition-all active:scale-95 flex justify-center items-center gap-2 disabled:opacity-70">
-                          {savingMember ? <Loader2 className="animate-spin" size={18}/> : <Save size={18}/>} 儲存並關閉
+                          {savingMember ? <Loader2 className="animate-spin" size={18}/> : <Save size={18}/>} 儲存會員資料
                       </button>
                       <button onClick={handleCloseEditModal} disabled={savingMember} className="w-1/3 bg-slate-100 text-slate-600 font-bold py-3.5 rounded-xl hover:bg-slate-200 transition-colors active:scale-95 disabled:opacity-50">取消</button>
                   </div>
@@ -709,7 +733,7 @@ export default function MemberCRM() {
           </div>
       )}
 
-      {/* 購物車 Modal (升級為 Excel 匯出提示) */}
+      {/* 購物車 Modal */}
       {isCartModalOpen && (
           <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[110] backdrop-blur-sm animate-fade-in" onClick={() => setIsCartModalOpen(false)}>
              <div className="bg-white p-8 rounded-[2rem] shadow-2xl max-w-sm w-full animate-bounce-in" onClick={e => e.stopPropagation()}>
