@@ -6,7 +6,7 @@ import { Mail, Lock, Loader2, AlertCircle, Fingerprint, ShieldCheck, HelpCircle,
 export default function Login() {
   // 🌟 主畫面登入專用狀態 (日常登入：信箱 + 身分證)
   const [loginEmail, setLoginEmail] = useState('')
-  const [loginPassword, setLoginPassword] = useState('') // 身分證當作密碼
+  const [loginPassword, setLoginPassword] = useState('') 
   const [showLoginId, setShowLoginId] = useState(false) // 👁️ 控制密碼顯示/隱藏
   const [loginLoading, setLoginLoading] = useState(false)
   const [loginMessage, setLoginMessage] = useState({ type: '', text: '' }) 
@@ -17,7 +17,7 @@ export default function Login() {
   const [verifyEmail, setVerifyEmail] = useState('')
   const [verifyNationalId, setVerifyNationalId] = useState('')
   const [showVerifyId, setShowVerifyId] = useState(false) // 👁️ 控制密碼顯示/隱藏
-  const [verifyPhone, setVerifyPhone] = useState('') // 新增：手機號碼核對
+  const [verifyPhone, setVerifyPhone] = useState('') 
   const [verifyLoading, setVerifyLoading] = useState(false)
   const [verifyError, setVerifyError] = useState('')
 
@@ -133,14 +133,16 @@ export default function Login() {
           });
 
           if (error) {
-              // 🌟 優化錯誤訊息：把 Supabase 的真正報錯顯示出來，避免盲猜
+              // 🌟 優化錯誤訊息：精準判斷錯誤原因
               if (error.message.includes('Email not confirmed')) {
                   setLoginMessage({ type: 'error', text: '登入失敗！您的信箱尚未驗證。請聯絡管理員關閉 Supabase 的「Confirm email」功能。' });
+              } else if (error.message.includes('Invalid login credentials')) {
+                  setLoginMessage({ type: 'error', text: '登入失敗！身分證字號不符。若您曾更換身分證或用 Google 登入，請聯繫管理員處理。' });
               } else {
-                  setLoginMessage({ type: 'error', text: `登入失敗！身分證字號錯誤，或尚未開通帳號。(${error.message})` });
+                  setLoginMessage({ type: 'error', text: `登入失敗！請確認資料是否正確。(${error.message})` });
               }
           } 
-          // 成功的話，useEffect 裡的 authListener 會自動抓到 session 並跳轉到 /races
+          // 成功的話，useEffect 裡的 authListener 會自動跳轉到 /races
       } catch (error) {
           setLoginMessage({ type: 'error', text: '系統連線異常，請稍後再試。' })
       } finally {
@@ -161,7 +163,7 @@ export default function Login() {
     try {
       const emailTrimmed = verifyEmail.toLowerCase().trim();
       const idTrimmed = verifyNationalId.toUpperCase().trim(); 
-      const phoneInputClean = verifyPhone.replace(/\D/g, ''); // 只保留數字防呆
+      const phoneInputClean = verifyPhone.replace(/\D/g, ''); 
       
       const { data: oldProfile, error: searchError } = await supabase
           .from('profiles')
@@ -196,7 +198,12 @@ export default function Login() {
               
               if (signUpError) throw new Error(`綁定帳號時發生錯誤: ${signUpError.message}`);
 
-              if (signUpData.user) {
+              // 🌟 核心防禦：偵測 Supabase「假成功」陷阱
+              if (signUpData?.user && signUpData.user.identities && signUpData.user.identities.length === 0) {
+                  throw new Error("此信箱已存在於系統中 (可能曾用 Google 登入)。請直接使用 Google 登入，或請管理員刪除舊帳號！");
+              }
+
+              if (signUpData?.user) {
                   const { error: updateError } = await supabase
                       .from('profiles')
                       .update({ id: signUpData.user.id })
@@ -453,8 +460,8 @@ export default function Login() {
       {/* 🌟 首次認親 Modal (嚴格雙資料：信箱 + 身分證 + 電話) */}
       {/* ========================================================= */}
       {showEmailVerifyModal && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
-              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md p-8 animate-bounce-in relative overflow-hidden">
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in" onClick={() => setShowEmailVerifyModal(false)}>
+              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md p-8 animate-bounce-in relative overflow-hidden" onClick={e => e.stopPropagation()}>
                   <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-500 to-indigo-600"></div>
                   
                   <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-6 mx-auto shadow-inner border bg-blue-50 text-blue-600 border-blue-100">
@@ -469,7 +476,7 @@ export default function Login() {
                   {verifyError && (
                       <div className="mb-5 bg-red-50 text-red-600 p-3 rounded-xl text-sm font-bold flex gap-2 items-start border border-red-100">
                           <AlertCircle size={16} className="shrink-0 mt-0.5"/>
-                          {verifyError}
+                          <div className="flex-1">{verifyError}</div>
                       </div>
                   )}
 
@@ -536,8 +543,8 @@ export default function Login() {
 
       {/* 🌟 Google 魔法認親視窗 (原版保留) */}
       {showIdentityModal && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
-              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md p-8 animate-bounce-in relative overflow-hidden">
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in" onClick={() => setShowIdentityModal(false)}>
+              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md p-8 animate-bounce-in relative overflow-hidden" onClick={e => e.stopPropagation()}>
                   <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-500 to-indigo-600"></div>
                   
                   <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-6 mx-auto shadow-inner border bg-blue-50 text-blue-600 border-blue-100">
@@ -601,8 +608,8 @@ export default function Login() {
 
       {/* 🆘 申請更新帳號連結 (求救表單) */}
       {showHelpModal && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
-              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md p-8 animate-bounce-in relative overflow-hidden">
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in" onClick={() => setShowHelpModal(false)}>
+              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md p-8 animate-bounce-in relative overflow-hidden" onClick={e => e.stopPropagation()}>
                   <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-red-500 to-rose-600"></div>
                   
                   <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-6 mx-auto shadow-inner border bg-red-50 text-red-600 border-red-100">
