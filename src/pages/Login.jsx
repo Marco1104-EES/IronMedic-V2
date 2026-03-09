@@ -1,19 +1,23 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
 import { useNavigate } from 'react-router-dom'
-import { Mail, Lock, Loader2, AlertCircle, Fingerprint, ShieldCheck, HelpCircle, Send, ExternalLink, UserCheck, KeyRound } from 'lucide-react'
+import { Mail, Lock, Loader2, AlertCircle, Fingerprint, ShieldCheck, HelpCircle, Send, ExternalLink, UserCheck, KeyRound, Phone, Eye, EyeOff } from 'lucide-react'
 
 export default function Login() {
-  // 🌟 狀態區分：登入用 vs 認親用
+  // 🌟 主畫面登入專用狀態 (日常登入：信箱 + 身分證)
   const [loginEmail, setLoginEmail] = useState('')
+  const [loginPassword, setLoginPassword] = useState('') // 身分證當作密碼
+  const [showLoginId, setShowLoginId] = useState(false) // 👁️ 控制密碼顯示/隱藏
   const [loginLoading, setLoginLoading] = useState(false)
-  const [loginMessage, setLoginMessage] = useState({ type: '', text: '' }) // type: 'error' 或 'success'
+  const [loginMessage, setLoginMessage] = useState({ type: '', text: '' }) 
   const navigate = useNavigate()
 
-  // 🌟 信箱＋身分證「首次認親」Modal 專用狀態
+  // 🌟 首次認親 Modal 專用狀態 (嚴格雙資料認證：信箱 + 身分證 + 電話)
   const [showEmailVerifyModal, setShowEmailVerifyModal] = useState(false)
   const [verifyEmail, setVerifyEmail] = useState('')
   const [verifyNationalId, setVerifyNationalId] = useState('')
+  const [showVerifyId, setShowVerifyId] = useState(false) // 👁️ 控制密碼顯示/隱藏
+  const [verifyPhone, setVerifyPhone] = useState('') // 新增：手機號碼核對
   const [verifyLoading, setVerifyLoading] = useState(false)
   const [verifyError, setVerifyError] = useState('')
 
@@ -30,14 +34,12 @@ export default function Login() {
   const [helpLoading, setHelpLoading] = useState(false)
   const [helpError, setHelpError] = useState('')
 
-  // 🛡️ 新增：LINE / FB 內建瀏覽器偵測狀態
+  // 🛡️ LINE / FB 內建瀏覽器偵測狀態
   const [isInAppBrowser, setIsInAppBrowser] = useState(false)
 
   useEffect(() => {
-    // 💡 偵測是否為 In-App Browser (LINE, FB, IG 等)
     const checkInAppBrowser = () => {
         const ua = navigator.userAgent || navigator.vendor || window.opera;
-        // 判斷常見的 In-App Browser 關鍵字
         if (ua.indexOf('Line') > -1 || ua.indexOf('FBAV') > -1 || ua.indexOf('Instagram') > -1) {
             setIsInAppBrowser(true);
         }
@@ -45,15 +47,12 @@ export default function Login() {
     checkInAppBrowser();
 
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-        console.log('🔄 Auth Event:', event);
         if (event === 'SIGNED_IN' && session?.user) {
-            console.log('👤 成功接住 Token，開始檢查身分...');
             checkUserIdentity(session.user);
         }
     })
 
     supabase.auth.getSession().then(({ data: { session } }) => {
-        console.log('🏁 Initial Session Check:', session ? 'User exists' : 'No session');
         if (session?.user) {
             checkUserIdentity(session.user);
         }
@@ -70,7 +69,6 @@ export default function Login() {
       setLoginMessage({ type: '', text: '' });
       try {
           const userEmail = user.email.toLowerCase();
-          console.log(`🔍 正在查詢信箱: ${userEmail}`);
           
           const { data: profile, error } = await supabase
               .from('profiles')
@@ -78,16 +76,11 @@ export default function Login() {
               .eq('email', userEmail)
               .maybeSingle();
 
-          if (error) {
-              console.error("❌ 查詢 Profile 發生錯誤:", error);
-              throw error;
-          }
+          if (error) throw error;
 
           if (profile) {
-              console.log("✅ 找到使用者，直接放行進入大廳");
               navigate('/races');
           } else {
-              console.log("⚠️ 找不到使用者信箱，準備彈出認親視窗");
               setPendingGoogleUser(user);
               setShowIdentityModal(true);
               setLoginLoading(false); 
@@ -100,37 +93,30 @@ export default function Login() {
   }
 
   const handleGoogleLogin = async () => {
-    // 🛡️ 如果是內建瀏覽器，阻止點擊並顯示錯誤
     if (isInAppBrowser) {
-        setLoginMessage({ type: 'error', text: '無法在 LINE/FB 內使用 Google 登入，請點擊右上角「以預設瀏覽器開啟」或「在 Safari/Chrome 中開啟」。' });
+        setLoginMessage({ type: 'error', text: '無法在 LINE/FB 內使用 Google 登入，請點擊右上角「以預設瀏覽器開啟」。' });
         return;
     }
 
     setLoginMessage({ type: '', text: '' })
     setLoginLoading(true)
     try {
-      console.log('🚀 開始 Google OAuth 流程, 目標跳轉網址:', window.location.href);
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
-        options: {
-          redirectTo: window.location.href 
-        }
+        options: { redirectTo: window.location.href }
       })
-      if (error) {
-          console.error("❌ Google 授權失敗:", error);
-          throw error;
-      }
+      if (error) throw error;
     } catch (error) {
       setLoginMessage({ type: 'error', text: error.message || 'Google 登入連線異常，請稍後再試。' })
       setLoginLoading(false)
     }
   }
 
-  // 🚀 全新：日常登入通道 (發送 Magic Link)
-  const handleMagicLinkLogin = async (e) => {
+  // 🚀 日常登入通道 (直接輸入信箱+身分證直登系統)
+  const handleEmailLogin = async (e) => {
       e.preventDefault()
-      if (!loginEmail) {
-          setLoginMessage({ type: 'error', text: '請輸入您已綁定的登入信箱。' })
+      if (!loginEmail || !loginPassword) {
+          setLoginMessage({ type: 'error', text: '請輸入完整的信箱與身分證字號。' })
           return
       }
       
@@ -139,46 +125,33 @@ export default function Login() {
 
       try {
           const emailTrimmed = loginEmail.toLowerCase().trim();
+          const idTrimmed = loginPassword.toUpperCase().trim();
           
-          // 先檢查資料庫有沒有這個信箱，避免還沒認親的人誤點
-          const { data: profile, error: searchError } = await supabase
-              .from('profiles')
-              .select('id')
-              .eq('email', emailTrimmed)
-              .maybeSingle();
-              
-          if (searchError) throw searchError;
-          
-          if (!profile) {
-              setLoginMessage({ type: 'error', text: '系統找不到此信箱。如果您是首次登入，請點擊下方「帳號核對」按鈕。' });
-              setLoginLoading(false);
-              return;
-          }
-
-          // 發送無密碼登入信件 (Magic Link)
-          const { error } = await supabase.auth.signInWithOtp({
+          const { error } = await supabase.auth.signInWithPassword({
               email: emailTrimmed,
-              options: {
-                  emailRedirectTo: window.location.origin
-              }
+              password: idTrimmed
           });
 
-          if (error) throw error;
-
-          setLoginMessage({ type: 'success', text: '✨ 登入連結已發送！請去您的信箱收信，點擊信中連結即可直接進入系統！' });
-
+          if (error) {
+              // 🌟 優化錯誤訊息：把 Supabase 的真正報錯顯示出來，避免盲猜
+              if (error.message.includes('Email not confirmed')) {
+                  setLoginMessage({ type: 'error', text: '登入失敗！您的信箱尚未驗證。請聯絡管理員關閉 Supabase 的「Confirm email」功能。' });
+              } else {
+                  setLoginMessage({ type: 'error', text: `登入失敗！身分證字號錯誤，或尚未開通帳號。(${error.message})` });
+              }
+          } 
+          // 成功的話，useEffect 裡的 authListener 會自動抓到 session 並跳轉到 /races
       } catch (error) {
-          console.error("發送 Magic Link 異常:", error);
-          setLoginMessage({ type: 'error', text: error.message || '發送登入信件異常，請稍後再試。' })
+          setLoginMessage({ type: 'error', text: '系統連線異常，請稍後再試。' })
       } finally {
           setLoginLoading(false)
       }
   }
 
-  // 🚀 全新：信箱＋身分證「首次認親」邏輯 (移至 Modal 內執行)
+  // 🚀 首次認親邏輯 (嚴格雙資料核對：信箱 + 身分證 + 電話)
   const handleEmailVerification = async () => {
-    if (!verifyEmail || !verifyNationalId) {
-        setVerifyError('請輸入完整的信箱與身分證字號。')
+    if (!verifyEmail || !verifyNationalId || !verifyPhone) {
+        setVerifyError('請輸入信箱、身分證字號與手機號碼。')
         return
     }
     
@@ -188,38 +161,40 @@ export default function Login() {
     try {
       const emailTrimmed = verifyEmail.toLowerCase().trim();
       const idTrimmed = verifyNationalId.toUpperCase().trim(); 
+      const phoneInputClean = verifyPhone.replace(/\D/g, ''); // 只保留數字防呆
       
-      console.log(`🔍 [認親通道] 正在核對舊會員資料... 信箱: ${emailTrimmed}, 身分證: ${idTrimmed}`);
       const { data: oldProfile, error: searchError } = await supabase
           .from('profiles')
-          .select('id, email, national_id')
+          .select('id, email, national_id, phone')
           .eq('email', emailTrimmed)
           .eq('national_id', idTrimmed)
           .maybeSingle();
 
       if (searchError) throw searchError;
 
-      // 情境 A：完美命中！
       if (oldProfile) {
-          console.log(`🎉 [認親通道] 身分核對成功！準備綁定身分...`);
-          
+          // 🛡️ 雙重防護：比對手機號碼是否吻合
+          const dbPhoneClean = (oldProfile.phone || '').replace(/\D/g, '');
+          if (dbPhoneClean && phoneInputClean !== '' && dbPhoneClean !== phoneInputClean) {
+              setVerifyError('手機號碼核對不符，請確認是否為當初報名的號碼。');
+              setVerifyLoading(false);
+              return;
+          }
+
           // 嘗試登入看看是不是已經綁過了
           const { error: signInError } = await supabase.auth.signInWithPassword({
               email: emailTrimmed,
               password: idTrimmed
           });
 
-          // 如果不能直接登入，代表是全新帳號，幫他註冊
+          // 若尚未建立 Auth 帳號，幫他註冊並綁定
           if (signInError) {
-              console.log(`⚠️ 尚未建立 Auth 帳號，開始背景註冊...`);
               const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
                   email: emailTrimmed,
                   password: idTrimmed
               });
               
-              if (signUpError) {
-                  throw new Error(`背景綁定帳號時發生錯誤: ${signUpError.message}`);
-              }
+              if (signUpError) throw new Error(`綁定帳號時發生錯誤: ${signUpError.message}`);
 
               if (signUpData.user) {
                   const { error: updateError } = await supabase
@@ -231,23 +206,18 @@ export default function Login() {
               }
           }
           
-          // 認親成功，關閉 Modal，回到主畫面 (因為註冊/登入成功，useEffect 的 listener 應該會抓到 session 並跳轉大廳)
-          alert('🎉 帳號核對成功！系統即將為您登入大廳！');
+          alert('🎉 帳號雙重核對成功！系統即將為您登入大廳！');
           setShowEmailVerifyModal(false);
-          // 若沒自動跳轉，手動觸發一下 check
           const { data: { session } } = await supabase.auth.getSession();
           if(session?.user) checkUserIdentity(session.user);
           else window.location.reload();
           
       } else {
-          // 情境 B：比對失敗！彈出求救表單！
-          console.log(`⚠️ [認親通道] 比對失敗：查無此組合。準備彈出求救表單。`);
           setHelpForm({ name: '', nationalId: idTrimmed, email: emailTrimmed });
-          setShowEmailVerifyModal(false); // 關閉認親視窗
-          setShowHelpModal(true); // 打開求救視窗
+          setShowEmailVerifyModal(false); 
+          setShowHelpModal(true); 
       }
     } catch (error) {
-      console.error("認親流程異常:", error);
       setVerifyError(error.message || '系統連線異常，請稍後再試。')
     } finally {
         setVerifyLoading(false)
@@ -303,35 +273,27 @@ export default function Login() {
       }
   }
 
-  // 處理求救表單送出
   const submitHelpRequest = async () => {
       if (!helpForm.name.trim() || !helpForm.nationalId.trim() || !helpForm.email.trim()) {
           setHelpError('請填寫完整資訊，以便管理員協助查核。');
           return;
       }
-
       setHelpLoading(true);
       setHelpError('');
 
       try {
           const messageStr = `【帳號救援申請】\n姓名：${helpForm.name}\n身分證：${helpForm.nationalId.toUpperCase()}\n嘗試登入信箱：${helpForm.email.toLowerCase()}`;
-          
-          const { error } = await supabase
-              .from('admin_notifications')
-              .insert([{
+          const { error } = await supabase.from('admin_notifications').insert([{
                   type: 'PROFILE_UPDATE',
                   user_name: helpForm.name,
                   message: messageStr,
                   is_read: false
               }]);
-
           if (error) throw error;
-
           alert('✅ 申請已送出！超級管理員已收到您的救援請求，請靜候信件通知。');
           setShowHelpModal(false);
-          setVerifyNationalId(''); // 清空原本認親填錯的資料
+          setVerifyNationalId(''); 
       } catch (err) {
-          console.error("求救表單發送失敗:", err);
           setHelpError('發送失敗，請稍後再試或直接聯繫管理員。');
       } finally {
           setHelpLoading(false);
@@ -341,7 +303,6 @@ export default function Login() {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8 font-sans relative">
       
-      {/* 🛡️ 新增：LINE / FB 內建瀏覽器警告橫幅 */}
       {isInAppBrowser && (
           <div className="fixed top-0 left-0 right-0 bg-amber-500 text-white p-3 z-50 shadow-md animate-fade-in-down flex items-start gap-3 justify-center">
               <AlertCircle size={20} className="shrink-0 mt-0.5" />
@@ -376,12 +337,11 @@ export default function Login() {
               </div>
           )}
 
-          {/* 🌟 統一訊息顯示區 (成功/失敗) */}
           {loginMessage.text && (
             <div className={`mb-6 px-4 py-3 rounded-xl flex items-center gap-2 text-sm font-bold animate-fade-in relative z-10
                 ${loginMessage.type === 'error' ? 'bg-red-50 border border-red-200 text-red-600' : 'bg-green-50 border border-green-200 text-green-700'}`}>
-              <AlertCircle size={18} className="shrink-0" />
-              {loginMessage.text}
+              <AlertCircle size={18} className="shrink-0 mt-0.5" />
+              <div className="flex-1">{loginMessage.text}</div>
             </div>
           )}
 
@@ -408,14 +368,14 @@ export default function Login() {
               </div>
               <div className="relative flex justify-center text-sm">
                 <span className="px-3 bg-white text-slate-400 font-bold">
-                  或使用一般信箱登入系統
+                  或使用一般信箱與身分證登入
                 </span>
               </div>
             </div>
           </div>
 
-          {/* 🌟 改造後的主畫面表單：只負責發送 Magic Link */}
-          <form className="space-y-5 relative z-10" onSubmit={handleMagicLinkLogin}>
+          {/* 🌟 日常登入表單 (信箱 + 身分證直登) */}
+          <form className="space-y-5 relative z-10" onSubmit={handleEmailLogin}>
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1" htmlFor="loginEmail">
                 您已綁定的電子郵件 (Email)
@@ -436,22 +396,53 @@ export default function Login() {
               </div>
             </div>
 
+            {/* 🌟 加上「小眼睛」功能的密碼/身分證欄位 */}
+            <div>
+              <div className="flex justify-between items-center mb-1">
+                  <label className="block text-sm font-bold text-slate-700" htmlFor="loginPassword">
+                    身分證字號 (National ID)
+                  </label>
+                  <span className="text-[10px] text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded-full">綁定後直登</span>
+              </div>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Lock className="h-5 w-5 text-slate-400" />
+                </div>
+                <input
+                  type={showLoginId ? "text" : "password"}
+                  id="loginPassword"
+                  required
+                  className="appearance-none block w-full pl-10 pr-10 py-3 border border-slate-300 rounded-xl shadow-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm font-medium transition-colors uppercase"
+                  placeholder="例如：A123456789"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowLoginId(!showLoginId)}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-blue-600 focus:outline-none transition-colors"
+                >
+                  {showLoginId ? <EyeOff size={20} /> : <Eye size={20} />}
+                </button>
+              </div>
+            </div>
+
             <button
               type="submit"
               disabled={loginLoading}
               className="w-full flex justify-center py-3.5 px-4 border border-transparent rounded-xl shadow-md text-sm font-black text-white bg-slate-800 hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-900 transition-colors disabled:opacity-50 active:scale-95 gap-2 items-center"
             >
-              <Send size={20}/> 系統登入串接
+              <Send size={18}/> 系統登入
             </button>
             
-            {/* 🌟 新增的「帳號核對」入口，完美融入排版 */}
-            <div className="pt-2 text-center border-t border-slate-100 mt-4">
+            <div className="pt-4 text-center border-t border-slate-100 mt-4">
                 <button 
                     type="button"
-                    onClick={() => setShowIdentityModal(true)} // 點擊開啟 Modal，請確認您的 Modal 開啟邏輯是否連接到這
-                    className="text-lg font-bold text-blue-600 hover:text-blue-800 transition-colors flex items-center justify-center gap-2 w-full py-3"
+                    onClick={() => setShowEmailVerifyModal(true)}
+                    className="text-lg font-black text-blue-600 hover:text-blue-800 transition-colors flex items-center justify-center gap-2 w-full py-3"
                 >
-                    <UserCheck size={20}/> 非Google帳號，首次使用，請點此進行帳號核對綁定
+                    <UserCheck size={26} className="shrink-0"/> 
+                    <span>非Google帳號，首次使用<br className="sm:hidden"/>請點此進行帳號核對綁定</span>
                 </button>
             </div>
           </form>
@@ -459,7 +450,7 @@ export default function Login() {
       </div>
 
       {/* ========================================================= */}
-      {/* 🌟 全新：信箱＋身分證 首次認親 Modal (不切換頁面) */}
+      {/* 🌟 首次認親 Modal (嚴格雙資料：信箱 + 身分證 + 電話) */}
       {/* ========================================================= */}
       {showEmailVerifyModal && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
@@ -470,9 +461,9 @@ export default function Login() {
                       <KeyRound size={32}/>
                   </div>
                   
-                  <h3 className="text-2xl font-black text-slate-800 mb-2 text-center tracking-tight">一般帳號核對綁定</h3>
+                  <h3 className="text-2xl font-black text-slate-800 mb-2 text-center tracking-tight">首次帳號核對綁定</h3>
                   <p className="text-slate-500 text-sm mb-6 text-center leading-relaxed font-medium">
-                      如果您不想使用 Google 登入，請在此輸入您的信箱與身分證字號進行首次綁定。綁定成功後即可使用無密碼連結登入。
+                      為了保護您的資料安全，首次登入請提供以下三項資料進行嚴格核對。
                   </p>
 
                   {verifyError && (
@@ -485,19 +476,46 @@ export default function Login() {
                   <div className="space-y-4">
                       <div>
                           <label className="block text-sm font-bold text-slate-700 mb-1" htmlFor="vEmail">登入信箱 (Email)</label>
-                          <input 
-                              type="email" id="vEmail"
-                              className="w-full border border-slate-300 p-3 rounded-xl outline-none font-medium text-slate-800 transition-colors shadow-sm focus:ring-2 focus:ring-blue-500"
-                              placeholder="請輸入系統建檔信箱" value={verifyEmail} onChange={e => setVerifyEmail(e.target.value)}
-                          />
+                          <div className="relative">
+                              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Mail className="h-4 w-4 text-slate-400" /></div>
+                              <input 
+                                  type="email" id="vEmail"
+                                  className="w-full pl-9 pr-3 border border-slate-300 p-3 rounded-xl outline-none font-medium text-slate-800 transition-colors shadow-sm focus:ring-2 focus:ring-blue-500"
+                                  placeholder="請輸入系統建檔信箱" value={verifyEmail} onChange={e => setVerifyEmail(e.target.value)}
+                              />
+                          </div>
                       </div>
+                      
+                      {/* 🌟 加上「小眼睛」功能的認親身分證欄位 */}
                       <div>
                           <label className="block text-sm font-bold text-slate-700 mb-1" htmlFor="vId">身分證字號</label>
-                          <input 
-                              type="password" id="vId"
-                              className="w-full border border-slate-300 p-3 rounded-xl outline-none font-medium text-slate-800 transition-colors shadow-sm focus:ring-2 focus:ring-blue-500 uppercase"
-                              placeholder="例如：A123456789" value={verifyNationalId} onChange={e => setVerifyNationalId(e.target.value)}
-                          />
+                          <div className="relative">
+                              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Lock className="h-4 w-4 text-slate-400" /></div>
+                              <input 
+                                  type={showVerifyId ? "text" : "password"} id="vId"
+                                  className="w-full pl-9 pr-10 border border-slate-300 p-3 rounded-xl outline-none font-medium text-slate-800 transition-colors shadow-sm focus:ring-2 focus:ring-blue-500 uppercase"
+                                  placeholder="例如：A123456789" value={verifyNationalId} onChange={e => setVerifyNationalId(e.target.value)}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setShowVerifyId(!showVerifyId)}
+                                className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-blue-600 focus:outline-none transition-colors"
+                              >
+                                {showVerifyId ? <EyeOff size={18} /> : <Eye size={18} />}
+                              </button>
+                          </div>
+                      </div>
+                      
+                      <div>
+                          <label className="block text-sm font-bold text-slate-700 mb-1" htmlFor="vPhone">手機號碼 (雙重驗證)</label>
+                          <div className="relative">
+                              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Phone className="h-4 w-4 text-slate-400" /></div>
+                              <input 
+                                  type="tel" id="vPhone"
+                                  className="w-full pl-9 pr-3 border border-slate-300 p-3 rounded-xl outline-none font-medium text-slate-800 transition-colors shadow-sm focus:ring-2 focus:ring-blue-500"
+                                  placeholder="例如：0912345678" value={verifyPhone} onChange={e => setVerifyPhone(e.target.value)}
+                              />
+                          </div>
                       </div>
                       
                       <button 
@@ -593,7 +611,7 @@ export default function Login() {
                   
                   <h3 className="text-2xl font-black text-slate-800 mb-2 text-center tracking-tight">查無符合的紀錄</h3>
                   <p className="text-slate-500 text-sm mb-6 text-center leading-relaxed font-medium">
-                      系統找不到與您輸入相符的「信箱＋身分證」。<br/>如果您曾經更改過信箱，請填寫下方表單，超級管理員將為您更新帳號連結。
+                      系統找不到與您輸入相符的紀錄。<br/>如果您曾經更改過信箱或電話，請填寫下方表單，超級管理員將為您更新帳號連結。
                   </p>
 
                   {helpError && (
