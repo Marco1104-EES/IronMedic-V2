@@ -33,7 +33,8 @@ export default function RaceDetail() {
           if (user && user.email) {
               const { data: profile } = await supabase.from('profiles').select('*').eq('email', user.email).maybeSingle()
               if (profile) {
-                  fetchedUser = profile;
+                  // 🌟 核心修復：強制把官方 auth.users 的 UUID 綁定到 auth_user_id 屬性上，專供通知寫入使用
+                  fetchedUser = { ...profile, auth_user_id: user.id };
                   const role = profile.role?.toUpperCase() || 'USER';
                   if (role === 'SUPER_ADMIN' || role === 'TOURNAMENT_DIRECTOR') {
                       godModeCheck = true;
@@ -229,18 +230,22 @@ export default function RaceDetail() {
               const { error } = await supabase.from('races').update({ slots_data: updatedSlots }).eq('id', activeRace.id);
               if (error) throw error;
               
-              // 🌟 核心防護 2：保證通知寫入與除錯回報
+              // 🌟 核心防護 2：保證通知寫入與除錯回報 (使用 auth_user_id)
               try {
-                  const { error: notifError } = await supabase.from('user_notifications').insert([{
-                      user_id: currentUser.id,
-                      tab: 'personal', 
-                      category: 'race',
-                      message: `您已成功報名【${activeRace.title}】的「${targetSlotData.name}」賽段。`,
-                      is_read: false
-                  }]);
-                  if (notifError) {
-                      console.error("發送報名通知失敗", notifError);
-                      alert(`⚠️ 系統提示：賽事報名成功，但個人通知寫入失敗 (${notifError.message})。這不影響您的參賽資格，請聯繫管理員檢查系統權限。`);
+                  if (currentUser.auth_user_id) {
+                      const { error: notifError } = await supabase.from('user_notifications').insert([{
+                          user_id: currentUser.auth_user_id,
+                          tab: 'personal', 
+                          category: 'race',
+                          message: `您已成功報名【${activeRace.title}】的「${targetSlotData.name}」賽段。`,
+                          is_read: false
+                      }]);
+                      if (notifError) {
+                          console.error("發送報名通知失敗", notifError);
+                          alert(`⚠️ 系統提示：賽事報名成功，但個人通知寫入失敗 (${notifError.message})。這不影響您的參賽資格，請聯繫管理員檢查系統權限。`);
+                      }
+                  } else {
+                      console.log("未抓取到 auth_user_id，跳過發送通知");
                   }
               } catch(e) { console.error("發送報名通知異常", e) }
 
@@ -257,18 +262,20 @@ export default function RaceDetail() {
               const { error } = await supabase.from('races').update({ waitlist_data: newWaitlist }).eq('id', activeRace.id);
               if (error) throw error;
               
-              // 🌟 核心防護 2：候補通知寫入與除錯回報
+              // 🌟 核心防護 2：候補通知寫入與除錯回報 (使用 auth_user_id)
               try {
-                  const { error: notifError } = await supabase.from('user_notifications').insert([{
-                      user_id: currentUser.id,
-                      tab: 'personal',
-                      category: 'race',
-                      message: `您已進入【${activeRace.title}】的候補名單，請靜候系統或總監通知。`,
-                      is_read: false
-                  }]);
-                  if (notifError) {
-                      console.error("發送候補通知失敗", notifError);
-                      alert(`⚠️ 系統提示：已登記候補，但個人通知寫入失敗 (${notifError.message})。這不影響您的候補順位。`);
+                  if (currentUser.auth_user_id) {
+                      const { error: notifError } = await supabase.from('user_notifications').insert([{
+                          user_id: currentUser.auth_user_id,
+                          tab: 'personal',
+                          category: 'race',
+                          message: `您已進入【${activeRace.title}】的候補名單，請靜候系統或總監通知。`,
+                          is_read: false
+                      }]);
+                      if (notifError) {
+                          console.error("發送候補通知失敗", notifError);
+                          alert(`⚠️ 系統提示：已登記候補，但個人通知寫入失敗 (${notifError.message})。這不影響您的候補順位。`);
+                      }
                   }
               } catch(e) { console.error("發送候補通知異常", e) }
 

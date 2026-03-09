@@ -1,14 +1,21 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
 import { useNavigate } from 'react-router-dom'
-import { Mail, Lock, Loader2, AlertCircle, Fingerprint, ShieldCheck, HelpCircle, Send, ExternalLink } from 'lucide-react'
+import { Mail, Lock, Loader2, AlertCircle, Fingerprint, ShieldCheck, HelpCircle, Send, ExternalLink, UserCheck, KeyRound } from 'lucide-react'
 
 export default function Login() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('') // 這裡的 password 現在代表身分證字號
-  const [loading, setLoading] = useState(false)
-  const [errorMsg, setErrorMsg] = useState('')
+  // 🌟 狀態區分：登入用 vs 認親用
+  const [loginEmail, setLoginEmail] = useState('')
+  const [loginLoading, setLoginLoading] = useState(false)
+  const [loginMessage, setLoginMessage] = useState({ type: '', text: '' }) // type: 'error' 或 'success'
   const navigate = useNavigate()
+
+  // 🌟 信箱＋身分證「首次認親」Modal 專用狀態
+  const [showEmailVerifyModal, setShowEmailVerifyModal] = useState(false)
+  const [verifyEmail, setVerifyEmail] = useState('')
+  const [verifyNationalId, setVerifyNationalId] = useState('')
+  const [verifyLoading, setVerifyLoading] = useState(false)
+  const [verifyError, setVerifyError] = useState('')
 
   // 🌟 Google 魔法認親專用狀態
   const [showIdentityModal, setShowIdentityModal] = useState(false)
@@ -59,8 +66,8 @@ export default function Login() {
   }, [])
 
   const checkUserIdentity = async (user) => {
-      setLoading(true);
-      setErrorMsg('');
+      setLoginLoading(true);
+      setLoginMessage({ type: '', text: '' });
       try {
           const userEmail = user.email.toLowerCase();
           console.log(`🔍 正在查詢信箱: ${userEmail}`);
@@ -83,24 +90,24 @@ export default function Login() {
               console.log("⚠️ 找不到使用者信箱，準備彈出認親視窗");
               setPendingGoogleUser(user);
               setShowIdentityModal(true);
-              setLoading(false); 
+              setLoginLoading(false); 
           }
       } catch (err) {
           console.error("🚨 身分檢查異常:", err);
-          setErrorMsg('身分驗證過程發生異常，請聯絡管理員。');
-          setLoading(false);
+          setLoginMessage({ type: 'error', text: '身分驗證過程發生異常，請聯絡管理員。' });
+          setLoginLoading(false);
       }
   }
 
   const handleGoogleLogin = async () => {
     // 🛡️ 如果是內建瀏覽器，阻止點擊並顯示錯誤
     if (isInAppBrowser) {
-        setErrorMsg('無法在 LINE/FB 內使用 Google 登入，請點擊右上角「以預設瀏覽器開啟」或「在 Safari/Chrome 中開啟」。');
+        setLoginMessage({ type: 'error', text: '無法在 LINE/FB 內使用 Google 登入，請點擊右上角「以預設瀏覽器開啟」或「在 Safari/Chrome 中開啟」。' });
         return;
     }
 
-    setErrorMsg('')
-    setLoading(true)
+    setLoginMessage({ type: '', text: '' })
+    setLoginLoading(true)
     try {
       console.log('🚀 開始 Google OAuth 流程, 目標跳轉網址:', window.location.href);
       const { error } = await supabase.auth.signInWithOAuth({
@@ -114,53 +121,100 @@ export default function Login() {
           throw error;
       }
     } catch (error) {
-      setErrorMsg(error.message || 'Google 登入連線異常，請稍後再試。')
-      setLoading(false)
+      setLoginMessage({ type: 'error', text: error.message || 'Google 登入連線異常，請稍後再試。' })
+      setLoginLoading(false)
     }
   }
 
-  // 🚀 核心升級：信箱＋身分證 智慧登入邏輯
-  const handleEmailLogin = async (e) => {
-    e.preventDefault()
-    if (!email || !password) {
-        setErrorMsg('請輸入完整的信箱與身分證字號。')
+  // 🚀 全新：日常登入通道 (發送 Magic Link)
+  const handleMagicLinkLogin = async (e) => {
+      e.preventDefault()
+      if (!loginEmail) {
+          setLoginMessage({ type: 'error', text: '請輸入您已綁定的登入信箱。' })
+          return
+      }
+      
+      setLoginMessage({ type: '', text: '' })
+      setLoginLoading(true)
+
+      try {
+          const emailTrimmed = loginEmail.toLowerCase().trim();
+          
+          // 先檢查資料庫有沒有這個信箱，避免還沒認親的人誤點
+          const { data: profile, error: searchError } = await supabase
+              .from('profiles')
+              .select('id')
+              .eq('email', emailTrimmed)
+              .maybeSingle();
+              
+          if (searchError) throw searchError;
+          
+          if (!profile) {
+              setLoginMessage({ type: 'error', text: '系統找不到此信箱。如果您是首次登入，請點擊下方「帳號核對」按鈕。' });
+              setLoginLoading(false);
+              return;
+          }
+
+          // 發送無密碼登入信件 (Magic Link)
+          const { error } = await supabase.auth.signInWithOtp({
+              email: emailTrimmed,
+              options: {
+                  emailRedirectTo: window.location.origin
+              }
+          });
+
+          if (error) throw error;
+
+          setLoginMessage({ type: 'success', text: '✨ 登入連結已發送！請去您的信箱收信，點擊信中連結即可直接進入系統！' });
+
+      } catch (error) {
+          console.error("發送 Magic Link 異常:", error);
+          setLoginMessage({ type: 'error', text: error.message || '發送登入信件異常，請稍後再試。' })
+      } finally {
+          setLoginLoading(false)
+      }
+  }
+
+  // 🚀 全新：信箱＋身分證「首次認親」邏輯 (移至 Modal 內執行)
+  const handleEmailVerification = async () => {
+    if (!verifyEmail || !verifyNationalId) {
+        setVerifyError('請輸入完整的信箱與身分證字號。')
         return
     }
     
-    setErrorMsg('')
-    setLoading(true)
+    setVerifyError('')
+    setVerifyLoading(true)
     
     try {
-      const loginEmail = email.toLowerCase().trim();
-      const inputNationalId = password.toUpperCase().trim(); 
+      const emailTrimmed = verifyEmail.toLowerCase().trim();
+      const idTrimmed = verifyNationalId.toUpperCase().trim(); 
       
-      // 1. 先去 Profiles 表「嚴格比對」信箱與身分證
-      console.log(`🔍 正在核對舊會員資料... 信箱: ${loginEmail}, 身分證: ${inputNationalId}`);
+      console.log(`🔍 [認親通道] 正在核對舊會員資料... 信箱: ${emailTrimmed}, 身分證: ${idTrimmed}`);
       const { data: oldProfile, error: searchError } = await supabase
           .from('profiles')
           .select('id, email, national_id')
-          .eq('email', loginEmail)
-          .eq('national_id', inputNationalId)
+          .eq('email', emailTrimmed)
+          .eq('national_id', idTrimmed)
           .maybeSingle();
 
       if (searchError) throw searchError;
 
-      // 情境 A：完美命中！他是舊會員而且身分證打對了！
+      // 情境 A：完美命中！
       if (oldProfile) {
-          console.log(`🎉 身分核對成功！準備為 ${loginEmail} 註冊並綁定身分...`);
+          console.log(`🎉 [認親通道] 身分核對成功！準備綁定身分...`);
           
-          let authError = null;
-          
+          // 嘗試登入看看是不是已經綁過了
           const { error: signInError } = await supabase.auth.signInWithPassword({
-              email: loginEmail,
-              password: inputNationalId
+              email: emailTrimmed,
+              password: idTrimmed
           });
 
+          // 如果不能直接登入，代表是全新帳號，幫他註冊
           if (signInError) {
               console.log(`⚠️ 尚未建立 Auth 帳號，開始背景註冊...`);
               const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-                  email: loginEmail,
-                  password: inputNationalId
+                  email: emailTrimmed,
+                  password: idTrimmed
               });
               
               if (signUpError) {
@@ -175,23 +229,28 @@ export default function Login() {
                       
                   if(updateError) throw new Error("資料庫橋接失敗");
               }
-              
-              alert('🎉 帳號啟用成功！未來請繼續使用「信箱＋身分證字號」登入即可！');
-              window.location.reload();
-              return;
           }
           
+          // 認親成功，關閉 Modal，回到主畫面 (因為註冊/登入成功，useEffect 的 listener 應該會抓到 session 並跳轉大廳)
+          alert('🎉 帳號核對成功！系統即將為您登入大廳！');
+          setShowEmailVerifyModal(false);
+          // 若沒自動跳轉，手動觸發一下 check
+          const { data: { session } } = await supabase.auth.getSession();
+          if(session?.user) checkUserIdentity(session.user);
+          else window.location.reload();
+          
       } else {
-          // 情境 B：比對失敗！可能是信箱換了，或是身分證打錯。彈出求救表單！
-          console.log(`⚠️ 比對失敗：查無此信箱與身分證的組合。準備彈出求救表單。`);
-          setHelpForm({ name: '', nationalId: inputNationalId, email: loginEmail });
-          setShowHelpModal(true);
-          setLoading(false);
+          // 情境 B：比對失敗！彈出求救表單！
+          console.log(`⚠️ [認親通道] 比對失敗：查無此組合。準備彈出求救表單。`);
+          setHelpForm({ name: '', nationalId: idTrimmed, email: emailTrimmed });
+          setShowEmailVerifyModal(false); // 關閉認親視窗
+          setShowHelpModal(true); // 打開求救視窗
       }
     } catch (error) {
-      console.error("登入流程異常:", error);
-      setErrorMsg(error.message || '系統連線異常，請稍後再試。')
-      setLoading(false)
+      console.error("認親流程異常:", error);
+      setVerifyError(error.message || '系統連線異常，請稍後再試。')
+    } finally {
+        setVerifyLoading(false)
     }
   }
 
@@ -270,7 +329,7 @@ export default function Login() {
 
           alert('✅ 申請已送出！超級管理員已收到您的救援請求，請靜候信件通知。');
           setShowHelpModal(false);
-          setPassword('');
+          setVerifyNationalId(''); // 清空原本認親填錯的資料
       } catch (err) {
           console.error("求救表單發送失敗:", err);
           setHelpError('發送失敗，請稍後再試或直接聯繫管理員。');
@@ -310,24 +369,26 @@ export default function Login() {
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md relative z-10">
         <div className="bg-white py-8 px-4 shadow-xl sm:rounded-2xl sm:px-10 border border-slate-100 relative overflow-hidden">
           
-          {loading && !showIdentityModal && !showHelpModal && (
+          {loginLoading && !showIdentityModal && !showHelpModal && !showEmailVerifyModal && (
               <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-20 flex flex-col items-center justify-center">
                   <Loader2 className="animate-spin text-blue-600 mb-2" size={32} />
-                  <span className="text-sm font-bold text-slate-600 animate-pulse">系統登入中...</span>
+                  <span className="text-sm font-bold text-slate-600 animate-pulse">系統處理中...</span>
               </div>
           )}
 
-          {errorMsg && (
-            <div className="mb-6 bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-xl flex items-center gap-2 text-sm font-bold animate-fade-in relative z-10">
+          {/* 🌟 統一訊息顯示區 (成功/失敗) */}
+          {loginMessage.text && (
+            <div className={`mb-6 px-4 py-3 rounded-xl flex items-center gap-2 text-sm font-bold animate-fade-in relative z-10
+                ${loginMessage.type === 'error' ? 'bg-red-50 border border-red-200 text-red-600' : 'bg-green-50 border border-green-200 text-green-700'}`}>
               <AlertCircle size={18} className="shrink-0" />
-              {errorMsg}
+              {loginMessage.text}
             </div>
           )}
 
           <div className="mb-6 relative z-10">
             <button
               onClick={handleGoogleLogin}
-              disabled={loading || isInAppBrowser} // 🛡️ 如果是 LINE，按鈕反灰
+              disabled={loginLoading || isInAppBrowser}
               className={`w-full flex justify-center items-center gap-3 py-3.5 px-4 border rounded-xl shadow-sm text-sm font-bold transition-all active:scale-95 ${isInAppBrowser ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed opacity-70' : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500'}`}
             >
                 <svg className="w-5 h-5" viewBox="0 0 24 24" style={{ filter: isInAppBrowser ? 'grayscale(100%) opacity(50%)' : 'none' }}>
@@ -347,16 +408,17 @@ export default function Login() {
               </div>
               <div className="relative flex justify-center text-sm">
                 <span className="px-3 bg-white text-slate-400 font-bold">
-                  或使用其他信箱登入 (Yahoo, 公司信箱等)
+                  或使用一般信箱登入系統
                 </span>
               </div>
             </div>
           </div>
 
-          <form className="space-y-5 relative z-10" onSubmit={handleEmailLogin}>
+          {/* 🌟 改造後的主畫面表單：只負責發送 Magic Link */}
+          <form className="space-y-5 relative z-10" onSubmit={handleMagicLinkLogin}>
             <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1" htmlFor="email">
-                電子郵件 (Email)
+              <label className="block text-sm font-bold text-slate-700 mb-1" htmlFor="loginEmail">
+                您已綁定的電子郵件 (Email)
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -364,51 +426,95 @@ export default function Login() {
                 </div>
                 <input
                   type="email"
-                  id="email"
-                  name="email"
+                  id="loginEmail"
                   required
                   className="appearance-none block w-full pl-10 pr-3 py-3 border border-slate-300 rounded-xl shadow-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm font-medium transition-colors"
                   placeholder="name@yahoo.com.tw"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex justify-between items-center mb-1">
-                  <label className="block text-sm font-bold text-slate-700" htmlFor="password">
-                    身分證字號 (National ID)
-                  </label>
-                  <span className="text-[10px] text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded-full">綁定-快速登入</span>
-              </div>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Lock className="h-5 w-5 text-slate-400" />
-                </div>
-                <input
-                  type="password"
-                  id="password"
-                  name="password"
-                  required
-                  className="appearance-none block w-full pl-10 pr-3 py-3 border border-slate-300 rounded-xl shadow-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm font-medium transition-colors"
-                  placeholder="例如：A123456789"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
                 />
               </div>
             </div>
 
             <button
               type="submit"
-              disabled={loading}
-              className="w-full flex justify-center py-3.5 px-4 border border-transparent rounded-xl shadow-md text-sm font-black text-white bg-slate-800 hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-900 transition-colors disabled:opacity-50 active:scale-95"
+              disabled={loginLoading}
+              className="w-full flex justify-center py-3.5 px-4 border border-transparent rounded-xl shadow-md text-sm font-black text-white bg-slate-800 hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-900 transition-colors disabled:opacity-50 active:scale-95 gap-2 items-center"
             >
-              系統登入 / 帳號核對
+              <Send size={20}/> 系統登入串接
             </button>
+            
+            {/* 🌟 新增的「帳號核對」入口，完美融入排版 */}
+            <div className="pt-2 text-center border-t border-slate-100 mt-4">
+                <button 
+                    type="button"
+                    onClick={() => setShowIdentityModal(true)} // 點擊開啟 Modal，請確認您的 Modal 開啟邏輯是否連接到這
+                    className="text-lg font-bold text-blue-600 hover:text-blue-800 transition-colors flex items-center justify-center gap-2 w-full py-3"
+                >
+                    <UserCheck size={20}/> 非Google帳號，首次使用，請點此進行帳號核對綁定
+                </button>
+            </div>
           </form>
         </div>
       </div>
+
+      {/* ========================================================= */}
+      {/* 🌟 全新：信箱＋身分證 首次認親 Modal (不切換頁面) */}
+      {/* ========================================================= */}
+      {showEmailVerifyModal && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
+              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md p-8 animate-bounce-in relative overflow-hidden">
+                  <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-500 to-indigo-600"></div>
+                  
+                  <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-6 mx-auto shadow-inner border bg-blue-50 text-blue-600 border-blue-100">
+                      <KeyRound size={32}/>
+                  </div>
+                  
+                  <h3 className="text-2xl font-black text-slate-800 mb-2 text-center tracking-tight">一般帳號核對綁定</h3>
+                  <p className="text-slate-500 text-sm mb-6 text-center leading-relaxed font-medium">
+                      如果您不想使用 Google 登入，請在此輸入您的信箱與身分證字號進行首次綁定。綁定成功後即可使用無密碼連結登入。
+                  </p>
+
+                  {verifyError && (
+                      <div className="mb-5 bg-red-50 text-red-600 p-3 rounded-xl text-sm font-bold flex gap-2 items-start border border-red-100">
+                          <AlertCircle size={16} className="shrink-0 mt-0.5"/>
+                          {verifyError}
+                      </div>
+                  )}
+
+                  <div className="space-y-4">
+                      <div>
+                          <label className="block text-sm font-bold text-slate-700 mb-1" htmlFor="vEmail">登入信箱 (Email)</label>
+                          <input 
+                              type="email" id="vEmail"
+                              className="w-full border border-slate-300 p-3 rounded-xl outline-none font-medium text-slate-800 transition-colors shadow-sm focus:ring-2 focus:ring-blue-500"
+                              placeholder="請輸入系統建檔信箱" value={verifyEmail} onChange={e => setVerifyEmail(e.target.value)}
+                          />
+                      </div>
+                      <div>
+                          <label className="block text-sm font-bold text-slate-700 mb-1" htmlFor="vId">身分證字號</label>
+                          <input 
+                              type="password" id="vId"
+                              className="w-full border border-slate-300 p-3 rounded-xl outline-none font-medium text-slate-800 transition-colors shadow-sm focus:ring-2 focus:ring-blue-500 uppercase"
+                              placeholder="例如：A123456789" value={verifyNationalId} onChange={e => setVerifyNationalId(e.target.value)}
+                          />
+                      </div>
+                      
+                      <button 
+                          onClick={handleEmailVerification} disabled={verifyLoading}
+                          className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-xl shadow-lg transition-all active:scale-95 disabled:opacity-50 flex justify-center items-center gap-2 mt-4"
+                      >
+                          {verifyLoading ? <Loader2 className="animate-spin" size={20}/> : <ShieldCheck size={20}/>}
+                          驗證並開通帳號
+                      </button>
+                      
+                      <div className="pt-4 text-center">
+                          <button onClick={() => setShowEmailVerifyModal(false)} className="text-xs font-bold text-slate-400 hover:text-slate-600 transition-colors">取消並返回</button>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )}
 
       {/* 🌟 Google 魔法認親視窗 (原版保留) */}
       {showIdentityModal && (
@@ -462,7 +568,7 @@ export default function Login() {
                               onClick={async () => {
                                   await supabase.auth.signOut();
                                   setShowIdentityModal(false);
-                                  setLoading(false);
+                                  setLoginLoading(false);
                                   setPendingGoogleUser(null);
                               }}
                               className="text-xs font-bold text-slate-400 hover:text-slate-600 transition-colors"
