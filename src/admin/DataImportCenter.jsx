@@ -29,7 +29,7 @@ export default function DataImportCenter() {
   const [fieldMapping, setFieldMapping] = useState({}) 
   const [memoryFlags, setMemoryFlags] = useState({}) 
   const [patchAnchorExcel, setPatchAnchorExcel] = useState('') 
-  const [patchAnchorDB, setPatchAnchorDB] = useState('full_name') 
+  const [patchAnchorDB, setPatchAnchorDB] = useState('national_id') // 預設改為更精準的身分證
   const [previewData, setPreviewData] = useState([]) 
   const [viewFilter, setViewFilter] = useState('all') 
   
@@ -210,7 +210,22 @@ export default function DataImportCenter() {
             finalRows = await readExcel(fileMaster)
             if (finalRows.length === 0) throw new Error("檔案為空")
             headers = Object.keys(finalRows[0])
-            setPatchAnchorExcel(headers.find(h => h.includes('姓名') || h.toLowerCase().includes('name')) || headers[0])
+            
+            // 💡 智慧猜測 Excel 裡哪個欄位最像比對基準 (身分證優先，再來是信箱，最後才是姓名)
+            let bestAnchor = headers.find(h => h.toLowerCase().includes('id') || h.includes('身分證'));
+            if (!bestAnchor) bestAnchor = headers.find(h => h.toLowerCase().includes('mail') || h.includes('信箱'));
+            if (!bestAnchor) bestAnchor = headers.find(h => h.includes('姓名') || h.toLowerCase().includes('name'));
+            
+            setPatchAnchorExcel(bestAnchor || headers[0]);
+            
+            // 💡 根據猜測到的 Excel 欄位，自動選擇對應的 DB 欄位
+            if (bestAnchor) {
+                const lowerH = bestAnchor.toLowerCase().replace(/\s+/g, '');
+                if (lowerH.includes('id') || lowerH.includes('身分證')) setPatchAnchorDB('national_id');
+                else if (lowerH.includes('mail') || lowerH.includes('信箱')) setPatchAnchorDB('email');
+                else if (lowerH.includes('姓名') || lowerH.includes('name')) setPatchAnchorDB('full_name');
+            }
+
         } else {
             const masterRows = await readExcel(fileMaster)
             finalRows = masterRows.map(row => ({...row, _source: '主名單'}))
@@ -220,7 +235,6 @@ export default function DataImportCenter() {
                 const wixMapByEmail = {}
                 const wixMapByName = {}
                 
-                // 🌟 Wix 輔助配對升級：優先建立 Email 對照表 (解決 "陳霖毅" 與 "霖毅 陳" 的名字亂配對問題)
                 wixRows.forEach(row => {
                     const wEmailKey = Object.keys(row).find(k => k.toLowerCase().includes('mail') || k.toLowerCase().includes('email'))
                     if (wEmailKey && row[wEmailKey]) {
@@ -237,13 +251,11 @@ export default function DataImportCenter() {
                     
                     let match = null;
                     
-                    // 1. 優先用 Email 配對 (絕對精準，不怕名字有空格或倒裝)
                     if (mEmailKey && mRow[mEmailKey]) {
                         const mEmail = String(mRow[mEmailKey]).trim().toLowerCase();
                         match = wixMapByEmail[mEmail];
                     }
 
-                    // 2. 如果沒有 Email，退而求其次用名字配對
                     if (!match && mNameKey && mRow[mNameKey]) {
                         const mName = String(mRow[mNameKey]).replace(/\s+/g, '')
                         match = wixMapByName[mName] || wixMapByName[Object.keys(wixMapByName).find(k => mName.includes(k) || k.includes(mName))]
@@ -333,7 +345,9 @@ export default function DataImportCenter() {
       if (mode === 'patch') {
           if (!patchAnchorExcel) { alert("請選擇 Excel 的比對基準欄位！"); setProcessing(false); return; }
           try {
-              const { data: dbUsers, error } = await supabase.from('profiles').select('id, full_name, email, phone, national_id, contact_email')
+              // 🌟 核心防護解鎖：既然 DB Anchor 開放了，我們必須保證從 DB 拉出來的資料有包含這個欄位
+              // 最暴力有效的方法：直接把整個 profiles 撈出來，這樣不管你選什麼欄位當 Anchor 都有得比對！
+              const { data: dbUsers, error } = await supabase.from('profiles').select('*')
               if (error) throw error
 
               let perfect = 0, duplicate = 0, notFound = 0;
@@ -443,7 +457,6 @@ export default function DataImportCenter() {
           const groupedMap = new Map();
           const finalPreview = [];
           transformed.forEach(row => {
-              // 用 email 或 contact_email 當作檢查衝突的 key
               const key = row.email || row.contact_email;
               if (!key || key === '') finalPreview.push(row);
               else {
@@ -1064,11 +1077,13 @@ export default function DataImportCenter() {
                             <ArrowRight className="text-slate-300 md:mt-5 shrink-0 rotate-90 md:rotate-0"/>
                             <div className="flex-1 w-full">
                                 <label className="text-xs font-bold text-slate-500 block mb-1">對應至系統識別欄位</label>
+                                {/* 🌟 核心升級：解鎖 patchAnchorDB，導入全欄位 TARGET_FIELDS */}
                                 <select className="w-full p-2.5 rounded-lg border focus:ring-2 border-slate-300 font-medium text-slate-700" value={patchAnchorDB} onChange={e=>setPatchAnchorDB(e.target.value)}>
-                                    <option value="full_name">中文姓名(A)</option>
-                                    <option value="national_id">身分證字號(C) (建議，最精準)</option>
-                                    <option value="contact_email">聯絡信箱(E)</option>
-                                    <option value="email">報名系統登入帳號(Y)</option>
+                                    {TARGET_FIELDS.map(group => (
+                                        <optgroup key={group.group} label={group.group}>
+                                            {group.options.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
+                                        </optgroup>
+                                    ))}
                                 </select>
                             </div>
                         </div>
@@ -1147,7 +1162,7 @@ export default function DataImportCenter() {
                                 <div className="text-xs text-slate-500 font-bold flex items-center justify-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-400"></span>查無此人</div>
                                 <div className="text-2xl font-black text-slate-600 mt-1">{previewData.filter(r=>r._status==='not_found').length}</div>
                             </div>
-                            <div className="bg-purple-50/50 px-4 py-2 rounded-lg border border-purple-200 text-center min-w-[100px] cursor-help" title="Excel 內發現有重複的 Email指向同一個人">
+                            <div className="bg-purple-50/50 px-4 py-2 rounded-lg border border-purple-200 text-center min-w-[100px] cursor-help" title="Excel 內發現有重複的資料指向同一個比對基準">
                                 <div className="text-xs text-purple-700 font-bold flex items-center justify-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse"></span>內部衝突</div>
                                 <div className="text-2xl font-black text-purple-800 mt-1">{previewData.filter(r=>r._status==='internal_conflict').length}</div>
                             </div>
@@ -1365,7 +1380,7 @@ export default function DataImportCenter() {
                             <GitMerge className="text-purple-600" size={24}/> 內部資料衝突：比對與合體
                         </h3>
                         <p className="text-sm text-purple-600 font-medium mt-1">
-                            系統發現表單中有 <span className="font-black px-1.5 py-0.5 bg-purple-200 rounded">{conflictModalData._conflictRows.length}</span> 筆資料指向同一個目標（Email相同）。
+                            系統發現表單中有 <span className="font-black px-1.5 py-0.5 bg-purple-200 rounded">{conflictModalData._conflictRows.length}</span> 筆資料指向同一個目標（比對基準相同）。
                         </p>
                     </div>
                     <button onClick={() => setConflictModalData(null)} className="text-slate-400 hover:bg-white rounded-full p-2 transition-colors"><X size={24}/></button>
