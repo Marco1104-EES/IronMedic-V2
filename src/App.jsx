@@ -1,7 +1,10 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { supabase } from './supabaseClient'
-import { Loader2 } from 'lucide-react'
+import { Loader2, X } from 'lucide-react'
+
+// 🌟 引入 PWA 註冊與自動更新監聽模組 (Service Worker)
+import { useRegisterSW } from 'virtual:pwa-register/react'
 
 import Login from "./pages/Login";
 import AdminLayout from './layouts/AdminLayout'
@@ -65,8 +68,40 @@ const AdminRoute = ({ children, requiredRole = 'ANY_ADMIN' }) => {
 }
 
 function App() {
+  // 🌟 PWA 版本更新監聽邏輯
+  const {
+    needRefresh: [needRefresh, setNeedRefresh],
+    updateServiceWorker,
+  } = useRegisterSW({
+    onRegistered(r) {
+      console.log('🚀 PWA Service Worker 已成功註冊:', r)
+    },
+    onRegisterError(error) {
+      console.error('❌ PWA Service Worker 註冊失敗:', error)
+    },
+  })
+
   return (
     <BrowserRouter>
+      {/* 🌟 PWA 更新提示橫幅 (絕對定位，不影響排版，平時隱藏，有新版本才會跳出) */}
+      {needRefresh && (
+        <div className="fixed bottom-6 right-6 z-[9999] bg-slate-900 text-white p-4 rounded-2xl shadow-2xl border border-slate-700 flex items-center gap-4 animate-bounce-in">
+            <div>
+                <h4 className="font-black text-sm mb-0.5">系統已發布新版本！</h4>
+                <p className="text-[10px] text-slate-400 font-medium">點擊更新以獲取最順暢的系統體驗。</p>
+            </div>
+            <button 
+                onClick={() => updateServiceWorker(true)}
+                className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-black px-4 py-2 rounded-xl transition-colors shadow-md active:scale-95"
+            >
+                立即更新
+            </button>
+            <button onClick={() => setNeedRefresh(false)} className="text-slate-400 hover:text-white p-1 ml-1 transition-colors">
+                <X size={16}/>
+            </button>
+        </div>
+      )}
+
       <Routes>
         <Route path="/login" element={<Login />} />
         
