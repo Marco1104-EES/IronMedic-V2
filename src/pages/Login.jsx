@@ -6,7 +6,7 @@ import { Mail, Lock, Loader2, AlertCircle, Fingerprint, ShieldCheck, HelpCircle,
 export default function Login() {
   // 🌟 主畫面登入專用狀態 (日常登入：信箱 + 身分證)
   const [loginEmail, setLoginEmail] = useState('')
-  const [loginPassword, setLoginPassword] = useState('') 
+  const [loginPassword, setLoginPassword] = useState('') // 身分證當作密碼
   const [showLoginId, setShowLoginId] = useState(false) // 👁️ 控制密碼顯示/隱藏
   const [loginLoading, setLoginLoading] = useState(false)
   const [loginMessage, setLoginMessage] = useState({ type: '', text: '' }) 
@@ -17,7 +17,7 @@ export default function Login() {
   const [verifyEmail, setVerifyEmail] = useState('')
   const [verifyNationalId, setVerifyNationalId] = useState('')
   const [showVerifyId, setShowVerifyId] = useState(false) // 👁️ 控制密碼顯示/隱藏
-  const [verifyPhone, setVerifyPhone] = useState('') 
+  const [verifyPhone, setVerifyPhone] = useState('') // 新增：手機號碼核對
   const [verifyLoading, setVerifyLoading] = useState(false)
   const [verifyError, setVerifyError] = useState('')
 
@@ -133,16 +133,16 @@ export default function Login() {
           });
 
           if (error) {
-              // 🌟 優化錯誤訊息：精準判斷錯誤原因
+              // 🌟 優化錯誤訊息：精準判斷錯誤原因，說人話！
               if (error.message.includes('Email not confirmed')) {
-                  setLoginMessage({ type: 'error', text: '登入失敗！您的信箱尚未驗證。請聯絡管理員關閉 Supabase 的「Confirm email」功能。' });
+                  setLoginMessage({ type: 'error', text: '系統提示：您的信箱尚未驗證。請聯絡管理員關閉 Supabase 的「Confirm email」功能。' });
               } else if (error.message.includes('Invalid login credentials')) {
-                  setLoginMessage({ type: 'error', text: '登入失敗！身分證字號不符。若您曾更換身分證或用 Google 登入，請聯繫管理員處理。' });
+                  setLoginMessage({ type: 'error', text: '登入失敗！身分證字號核對不符。如果您是首次登入，請務必點擊下方按鈕進行「首次帳號核對綁定」。' });
               } else {
-                  setLoginMessage({ type: 'error', text: `登入失敗！請確認資料是否正確。(${error.message})` });
+                  setLoginMessage({ type: 'error', text: `登入異常！請確認資料是否正確，或聯繫管理員。(${error.message})` });
               }
           } 
-          // 成功的話，useEffect 裡的 authListener 會自動跳轉到 /races
+          // 成功的話，useEffect 裡的 authListener 會自動抓到 session 並跳轉到 /races
       } catch (error) {
           setLoginMessage({ type: 'error', text: '系統連線異常，請稍後再試。' })
       } finally {
@@ -200,7 +200,7 @@ export default function Login() {
 
               // 🌟 核心防禦：偵測 Supabase「假成功」陷阱
               if (signUpData?.user && signUpData.user.identities && signUpData.user.identities.length === 0) {
-                  throw new Error("此信箱已存在於系統中 (可能曾用 Google 登入)。請直接使用 Google 登入，或請管理員刪除舊帳號！");
+                  throw new Error("此信箱已存在於系統中 (可能曾用 Google 登入)。請直接使用 Google 登入，或請管理員重設密碼！");
               }
 
               if (signUpData?.user) {
