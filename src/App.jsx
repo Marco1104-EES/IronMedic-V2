@@ -135,12 +135,25 @@ function App() {
     };
   }, []);
 
-  // 觸發請求通知權限
+  // 🌟 升級版：觸發請求通知權限 (加入蘋果 iOS 防呆引導)
   const requestNotificationPermission = async () => {
-    if (!('Notification' in window)) {
-      alert('抱歉，您的裝置或瀏覽器不支援桌面通知功能。');
-      return;
+    // 判斷是否為 iOS 裝置 (iPhone, iPad, iPod 或 Mac Safari)
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    
+    // 判斷是否已經在「獨立 App 模式」下運行 (是否已加入主畫面)
+    const isStandalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
+
+    // 如果是蘋果手機，且還沒加入主畫面，強制引導他安裝！
+    if (isIOS && !isStandalone) {
+        alert('🍎 蘋果 iOS 系統安全限制：\n\n要開啟推播通知，請先點擊瀏覽器下方分享按鈕 [↑]，選擇「加入主畫面」。\n\n然後回到桌面，點開專屬的「醫護鐵人 App」即可順利開啟通知！');
+        return;
     }
+
+    if (!('Notification' in window)) {
+        alert('抱歉，您的裝置或瀏覽器不支援桌面通知功能，或需更新系統版本。');
+        return;
+    }
+
     try {
         const permission = await Notification.requestPermission();
         setNotificationPermission(permission);
@@ -149,9 +162,12 @@ function App() {
             body: '未來有新的賽事候補或重要異動，將會即時推播給您！',
             icon: '/pwa-192x192.png'
           });
+        } else {
+            alert('⚠️ 您已拒絕通知權限。如果改變心意，請至系統設定中允許通知。');
         }
     } catch (e) {
         console.error("請求通知權限失敗", e);
+        alert('請求通知發生異常，請確認系統是否允許網頁推播。');
     }
   };
 
