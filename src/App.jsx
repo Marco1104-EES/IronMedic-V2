@@ -1,9 +1,9 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { supabase } from './supabaseClient'
-import { Loader2, X } from 'lucide-react'
+import { Loader2, X, BellRing } from 'lucide-react'
 
-// 🌟 引入 PWA 註冊與自動更新監聽模組 (Service Worker)
+// 🌟 引入 PWA 註冊與自動更新監聽模組
 import { useRegisterSW } from 'virtual:pwa-register/react'
 
 import Login from "./pages/Login";
@@ -73,17 +73,91 @@ function App() {
     needRefresh: [needRefresh, setNeedRefresh],
     updateServiceWorker,
   } = useRegisterSW({
-    onRegistered(r) {
-      console.log('🚀 PWA Service Worker 已成功註冊:', r)
-    },
-    onRegisterError(error) {
-      console.error('❌ PWA Service Worker 註冊失敗:', error)
-    },
+    onRegistered(r) { console.log('🚀 PWA Service Worker 已成功註冊') },
+    onRegisterError(error) { console.error('❌ PWA Service Worker 註冊失敗:', error) },
   })
+
+  // 🌟 PWA 推播通知權限與即時監聽邏輯
+  const [notificationPermission, setNotificationPermission] = useState('default');
+
+  useEffect(() => {
+    // 1. 檢查瀏覽器是否支援通知，並讀取目前權限
+    if ('Notification' in window) {
+      setNotificationPermission(Notification.permission);
+    }
+
+    let subscription = null;
+
+    // 2. 建立 Supabase 全域順風耳
+    const setupRealtime = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      subscription = supabase.channel('user_notifications_channel')
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'user_notifications',
+            filter: `user_id=eq.${user.id}` // 🎯 關鍵防護：只攔截屬於自己的通知
+          },
+          (payload) => {
+            console.log('🔔 攔截到新通知！', payload);
+            const newNotif = payload.new;
+            
+            // 如果使用者已同意通知，立刻發射原生推播！
+            if ('Notification' in window && Notification.permission === 'granted') {
+              new Notification('醫護鐵人賽事大廳', {
+                body: newNotif.message,
+                icon: '/pwa-192x192.png', // 顯示桌面專屬 Logo
+                badge: '/pwa-192x192.png',
+                tag: 'iron-medic-notify'
+              });
+            }
+          }
+        )
+        .subscribe();
+    };
+
+    setupRealtime();
+
+    // 確保登入登出切換時，順風耳能跟著重置
+    const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN') {
+         setupRealtime();
+      }
+    });
+
+    return () => {
+      if (subscription) supabase.removeChannel(subscription);
+      authListener?.subscription.unsubscribe();
+    };
+  }, []);
+
+  // 觸發請求通知權限
+  const requestNotificationPermission = async () => {
+    if (!('Notification' in window)) {
+      alert('抱歉，您的裝置或瀏覽器不支援桌面通知功能。');
+      return;
+    }
+    try {
+        const permission = await Notification.requestPermission();
+        setNotificationPermission(permission);
+        if (permission === 'granted') {
+          new Notification('✅ 授權成功', {
+            body: '未來有新的賽事候補或重要異動，將會即時推播給您！',
+            icon: '/pwa-192x192.png'
+          });
+        }
+    } catch (e) {
+        console.error("請求通知權限失敗", e);
+    }
+  };
 
   return (
     <BrowserRouter>
-      {/* 🌟 PWA 更新提示橫幅 (絕對定位，不影響排版，平時隱藏，有新版本才會跳出) */}
+      {/* 🌟 PWA 更新提示橫幅 (右下角深色浮窗) */}
       {needRefresh && (
         <div className="fixed bottom-6 right-6 z-[9999] bg-slate-900 text-white p-4 rounded-2xl shadow-2xl border border-slate-700 flex items-center gap-4 animate-bounce-in">
             <div>
@@ -97,6 +171,32 @@ function App() {
                 立即更新
             </button>
             <button onClick={() => setNeedRefresh(false)} className="text-slate-400 hover:text-white p-1 ml-1 transition-colors">
+                <X size={16}/>
+            </button>
+        </div>
+      )}
+
+      {/* 🌟 請求推播授權橫幅 (正上方高質感白底滑出) */}
+      {notificationPermission === 'default' && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] bg-white text-slate-800 p-4 rounded-2xl shadow-2xl border border-slate-200 flex items-center gap-4 animate-fade-in-down w-[95%] max-w-md">
+            <div className="bg-blue-100 text-blue-600 p-2.5 rounded-xl shrink-0 shadow-inner">
+                <BellRing size={24} className="animate-pulse" />
+            </div>
+            <div className="flex-1 min-w-0">
+                <h4 className="font-black text-sm mb-1 text-slate-800 truncate">開啟賽事即時通知</h4>
+                <p className="text-xs text-slate-500 font-medium leading-tight">候補成功、神之手安插等重要訊息，將第一時間推播給您！</p>
+            </div>
+            <button 
+                onClick={requestNotificationPermission}
+                className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-black px-4 py-2.5 rounded-xl transition-colors shadow-[0_0_15px_rgba(37,99,235,0.3)] active:scale-95 shrink-0"
+            >
+                開啟
+            </button>
+            <button 
+                onClick={() => setNotificationPermission('denied')} 
+                className="text-slate-400 hover:text-slate-600 p-1.5 transition-colors shrink-0 bg-slate-50 rounded-lg"
+                title="暫時不要"
+            >
                 <X size={16}/>
             </button>
         </div>
