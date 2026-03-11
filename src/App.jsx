@@ -154,9 +154,9 @@ function App() {
                 const registration = await navigator.serviceWorker.ready;
                 // ⚠️ 注意：這裡的 VAPID KEY 必須等後台寄件機制準備好後，替換為您生成的真實公鑰。
                 // 為了不讓系統報錯中斷，如果還是預設文字，會先優雅跳過金鑰儲存。
-                const VAPID_PUBLIC_KEY = '請替換為真實VAPID公鑰'; 
+                const VAPID_PUBLIC_KEY = 'BLcSYfjSIdYX_rnN7YVeTo_OrXSDkIXoqLAz59I_2AxP_w-tAWZID3iZFVzCTFxogTibrL7-LiiirNcLslRf5b8'; 
                 
-                if (VAPID_PUBLIC_KEY !== '請替換為真實VAPID公鑰') {
+                if (VAPID_PUBLIC_KEY !== 'BLcSYfjSIdYX_rnN7YVeTo_OrXSDkIXoqLAz59I_2AxP_w-tAWZID3iZFVzCTFxogTibrL7-LiiirNcLslRf5b8') {
                     const subscription = await registration.pushManager.subscribe({
                         userVisibleOnly: true,
                         applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
@@ -212,7 +212,7 @@ function App() {
             <div className="bg-blue-100 text-blue-600 p-2.5 rounded-xl shrink-0 shadow-inner"><BellRing size={24} className="animate-pulse" /></div>
             <div className="flex-1 min-w-0">
                 <h4 className="font-black text-sm mb-1 text-slate-800 truncate">開啟賽事即時通知</h4>
-                <p className="text-xs text-slate-500 font-medium leading-tight">候補成功、神之手安插等重要訊息，將第一時間推播給您！</p>
+                <p className="text-xs text-slate-500 font-medium leading-tight">候補成功、安插等重要訊息，將第一時間推播給您！</p>
             </div>
             <button onClick={requestNotificationPermission} className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-black px-4 py-2.5 rounded-xl transition-colors shadow-[0_0_15px_rgba(37,99,235,0.3)] active:scale-95 shrink-0">開啟</button>
             <button onClick={() => setNotificationPermission('denied')} className="text-slate-400 hover:text-slate-600 p-1.5 transition-colors shrink-0 bg-slate-50 rounded-lg" title="暫時不要"><X size={16}/></button>

@@ -164,7 +164,7 @@ export default function RaceDetail() {
       let isAlreadyInRace = false;
       let existingSlotName = "";
 
-      if (!isGodMode) { // 神之手可無視分身限制
+      if (!isGodMode) { // 賽事總監可無視分身限制
           // 檢查所有正取名單
           for (const slot of activeRace.slots) {
               if (slot.assignee) {
@@ -242,7 +242,7 @@ export default function RaceDetail() {
                       }]);
                       if (notifError) {
                           console.error("發送報名通知失敗", notifError);
-                          alert(`⚠️ 系統提示：賽事報名成功，但個人通知寫入失敗 (${notifError.message})。這不影響您的參賽資格，請聯繫管理員檢查系統權限。`);
+                          alert(`⚠️ 系統提示：賽事報名成功，但個人通知寫入失敗 (${notifError.message})。這不影響您的參賽資格，請聯繫系統管理員檢查系統權限。`);
                       }
                   } else {
                       console.log("未抓取到 auth_user_id，跳過發送通知");
@@ -283,10 +283,10 @@ export default function RaceDetail() {
       }
   }
 
-  // ================= 神之手功能 =================
+  // ================= 賽事總監功能 =================
   const handleKickUser = async (slotId, userIdToKick, userName) => {
       if(!isGodMode) return;
-      if(!window.confirm(`⚠️ 神之手警告 ⚠️\n確定要強制將【${userName}】從此賽段踢除嗎？`)) return;
+      if(!window.confirm(`⚠️ 賽事總監警告 ⚠️\n確定要強制將【${userName}】從此賽段踢除嗎？`)) return;
 
       const updatedSlots = activeRace.slots.map(s => {
           if (s.id === slotId && s.assignee) {
@@ -319,7 +319,7 @@ export default function RaceDetail() {
                       user_id: userIdToKick,
                       tab: 'personal',
                       category: 'alert',
-                      message: `您在【${activeRace.title}】的名額已被管理員異動，如有疑問請聯繫總監。`,
+                      message: `您在【${activeRace.title}】的名額已被賽事總監異動，如有疑問請聯繫賽事總監。`,
                       is_read: false
                   }]);
               } catch(e) { console.error("發送踢除通知失敗", e) }
@@ -502,13 +502,13 @@ export default function RaceDetail() {
                                                   : isFull ? 'bg-slate-50/80 border-slate-200 hover:border-slate-300' 
                                                   : 'bg-white border-slate-200 hover:border-blue-400 hover:shadow-md'}`}>
                                               
-                                              {/* 🌟 神之手：強制安插按鈕 */}
+                                              {/* 🌟 賽事總監：強制安插按鈕 */}
                                               {isGodMode && (
                                                   <div className="absolute top-4 right-4 xl:static xl:ml-auto z-10">
                                                       <button 
                                                           onClick={(e) => openInsertModal(e, slot.id)}
                                                           className="bg-amber-100 hover:bg-amber-200 text-amber-700 p-1.5 rounded-lg border border-amber-300 shadow-sm transition-colors flex items-center gap-1 text-xs font-bold"
-                                                          title="神之手：強制安插人員"
+                                                          title="賽事總監：強制安插人員"
                                                       >
                                                           <Plus size={14}/> 安插
                                                       </button>
@@ -653,7 +653,7 @@ export default function RaceDetail() {
                               <div className="bg-amber-500/10 border border-amber-500/30 text-amber-400 p-4 rounded-xl text-sm font-bold flex items-start gap-3 mb-8 shadow-inner">
                                   <Zap size={20} className="shrink-0 text-amber-400 mt-0.5"/> 
                                   <div>
-                                      <div className="mb-1 text-amber-300">神之手模式啟用</div>
+                                      <div className="mb-1 text-amber-300">賽事總監模式啟用</div>
                                       <div className="text-xs font-normal opacity-80 leading-relaxed">無視所有防呆限制，可任意強制安插或踢除人員。</div>
                                   </div>
                               </div>
@@ -746,7 +746,7 @@ export default function RaceDetail() {
                               </div>
                               
                               {isGodMode ? (
-                                  <button onClick={() => handleKickUser(previewSlot.id, participant.id || participant.name, participant.name)} className="shrink-0 p-2 text-red-500 hover:bg-red-100 rounded-lg transition-colors border border-transparent hover:border-red-200" title="神之手踢除">
+                                  <button onClick={() => handleKickUser(previewSlot.id, participant.id || participant.name, participant.name)} className="shrink-0 p-2 text-red-500 hover:bg-red-100 rounded-lg transition-colors border border-transparent hover:border-red-200" title="賽事總監踢除">
                                       <Trash2 size={18}/>
                                   </button>
                               ) : (
@@ -764,7 +764,7 @@ export default function RaceDetail() {
       {insertModalOpen && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[110] p-4 animate-fade-in" onClick={() => setInsertModalOpen(false)}>
               <div className="bg-white rounded-[2rem] shadow-2xl max-w-sm w-full p-6 animate-bounce-in" onClick={e => e.stopPropagation()}>
-                  <h3 className="font-black text-xl text-slate-800 mb-4 flex items-center gap-2"><Zap className="text-amber-500"/> 神之手：強制安插人員</h3>
+                  <h3 className="font-black text-xl text-slate-800 mb-4 flex items-center gap-2"><Zap className="text-amber-500"/> 賽事總監：強制安插人員</h3>
                   <div className="space-y-4">
                       <div>
                           <label className="block text-sm font-bold text-slate-700 mb-1">人員姓名</label>
