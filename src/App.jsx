@@ -85,6 +85,35 @@ function App() {
 
   const [notificationPermission, setNotificationPermission] = useState('default');
 
+  // 🚀 核心武器：自動向瀏覽器要推播金鑰並存入資料庫
+  const subscribeToPushAndSave = async () => {
+    try {
+        const registration = await navigator.serviceWorker.ready;
+        // 已為您填入真實公鑰，拔除所有防呆干擾！
+        const VAPID_PUBLIC_KEY = 'BLcSYfjSIdYX_rnN7YVeTo_OrXSDkIXoqLAz59I_2AxP_w-tAWZID3iZFVzCTFxogTibrL7-LiiirNcLslRf5b8'; 
+        
+        const subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+        });
+        
+        const subJSON = subscription.toJSON();
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (user) {
+            await supabase.from('push_subscriptions').upsert({
+               user_id: user.id,
+               endpoint: subJSON.endpoint,
+               p256dh: subJSON.keys.p256dh,
+               auth: subJSON.keys.auth
+            }, { onConflict: 'user_id, endpoint' });
+            console.log("✅ 離線推播金鑰已成功存入基地台！");
+        }
+    } catch (subError) {
+        console.warn("離線推播訂閱異常：", subError);
+    }
+  };
+
   useEffect(() => {
     if ('Notification' in window) {
       setNotificationPermission(Notification.permission);
@@ -92,10 +121,14 @@ function App() {
 
     let subscription = null;
 
-    // 🌟 保留原有的「線上」廣播，確保 App 打開時依然能即時反應
     const setupRealtime = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+
+      // 🟢 關鍵修補：如果使用者以前就允許過通知，一登入就直接把金鑰送進資料庫！
+      if ('Notification' in window && Notification.permission === 'granted') {
+          subscribeToPushAndSave();
+      }
 
       subscription = supabase.channel('user_notifications_channel')
         .on(
@@ -128,7 +161,6 @@ function App() {
     };
   }, []);
 
-  // 🌟 終極升級版：請求通知權限並將金鑰存入資料庫
   const requestNotificationPermission = async () => {
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     const isStandalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
@@ -148,36 +180,8 @@ function App() {
         setNotificationPermission(permission);
         
         if (permission === 'granted') {
-            
-            // 🚀 核心邏輯：向瀏覽器要推播金鑰並存入資料庫
-            try {
-                const registration = await navigator.serviceWorker.ready;
-                // ⚠️ 注意：這裡的 VAPID KEY 必須等後台寄件機制準備好後，替換為您生成的真實公鑰。
-                // 為了不讓系統報錯中斷，如果還是預設文字，會先優雅跳過金鑰儲存。
-                const VAPID_PUBLIC_KEY = 'BLcSYfjSIdYX_rnN7YVeTo_OrXSDkIXoqLAz59I_2AxP_w-tAWZID3iZFVzCTFxogTibrL7-LiiirNcLslRf5b8'; 
-                
-                if (VAPID_PUBLIC_KEY !== 'BLcSYfjSIdYX_rnN7YVeTo_OrXSDkIXoqLAz59I_2AxP_w-tAWZID3iZFVzCTFxogTibrL7-LiiirNcLslRf5b8') {
-                    const subscription = await registration.pushManager.subscribe({
-                        userVisibleOnly: true,
-                        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
-                    });
-                    
-                    const subJSON = subscription.toJSON();
-                    const { data: { user } } = await supabase.auth.getUser();
-                    
-                    if (user) {
-                        await supabase.from('push_subscriptions').upsert({
-                           user_id: user.id,
-                           endpoint: subJSON.endpoint,
-                           p256dh: subJSON.keys.p256dh,
-                           auth: subJSON.keys.auth
-                        }, { onConflict: 'user_id, endpoint' });
-                        console.log("✅ 離線推播金鑰已存入基地台！");
-                    }
-                }
-            } catch (subError) {
-                console.warn("離線推播訂閱暫緩 (需等待 VAPID Key)：", subError);
-            }
+            // 🚀 按下允許的瞬間，立刻抓金鑰存檔！
+            await subscribeToPushAndSave();
 
             new Notification('✅ 授權成功', {
                 body: '未來有新的賽事候補或重要異動，將會即時推播給您！',
