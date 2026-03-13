@@ -223,6 +223,54 @@ function App() {
         </div>
       )}
 
+      {/* 🚨 終極除錯按鈕：強制解除舊約並重新綁定 (測試完可刪除) */}
+      <div className="fixed bottom-24 left-6 z-[9999]">
+          <button 
+              onClick={async () => {
+                  try {
+                      alert('📡 正在連線伺服器，請稍候...');
+                      const registration = await navigator.serviceWorker.ready;
+                      
+                      // 1. 殺死舊的幽靈訂閱
+                      const oldSubscription = await registration.pushManager.getSubscription();
+                      if (oldSubscription) {
+                          await oldSubscription.unsubscribe();
+                      }
+                      
+                      // 2. 重新申請新訂閱
+                      const VAPID_PUBLIC_KEY = 'BLcSYfjSIdYX_rnN7YVeTo_OrXSDkIXoqLAz59I_2AxP_w-tAWZID3iZFVzCTFxogTibrL7-LiiirNcLslRf5b8'; 
+                      const subscription = await registration.pushManager.subscribe({
+                          userVisibleOnly: true,
+                          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+                      });
+                      
+                      // 3. 存入資料庫
+                      const subJSON = subscription.toJSON();
+                      const { data: { user } } = await supabase.auth.getUser();
+                      
+                      if (user) {
+                          const { error } = await supabase.from('push_subscriptions').upsert({
+                             user_id: user.id,
+                             endpoint: subJSON.endpoint,
+                             p256dh: subJSON.keys.p256dh,
+                             auth: subJSON.keys.auth
+                          }, { onConflict: 'user_id, endpoint' });
+                          
+                          if (error) throw error;
+                          alert('✅ 報告長官：金鑰已成功存入基地台！快去發射！');
+                      } else {
+                          alert('⚠️ 請先登入會員！');
+                      }
+                  } catch (e) {
+                      alert('❌ 發生錯誤，兇手抓到了：\n' + e.message);
+                  }
+              }}
+              className="bg-red-600 hover:bg-red-500 text-white text-sm font-black px-4 py-3 rounded-full shadow-2xl border-2 border-white animate-pulse"
+          >
+              🚨 強制更新推播金鑰
+          </button>
+      </div>
+
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/races" element={<RaceEvents />} />
