@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Calendar, MapPin, Clock, ImagePlus, Flag, Plus, Trash2, Save, ShieldAlert, Activity, Users, Settings, Flame, ExternalLink, Loader2, Edit3, Handshake, Send, Wand2, UsersRound, Crown, Sprout, XCircle, AlertCircle, CheckCircle } from 'lucide-react'
+import { Calendar, MapPin, Clock, ImagePlus, Flag, Plus, Trash2, Save, ShieldAlert, Activity, Users, Settings, Flame, ExternalLink, Loader2, Edit3, Handshake, Send, Wand2, UsersRound, Crown, Sprout, XCircle, AlertCircle, CheckCircle, BellRing } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 import { useLocation, useNavigate } from 'react-router-dom'
 
@@ -11,7 +11,7 @@ export default function RaceBuilder() {
   const editId = searchParams.get('id')
 
   const [raceData, setRaceData] = useState({
-      title: '', date: '', startTime: '', location: '', type: '馬拉松', status: 'OPEN', imageUrl: '', isHot: false, openTime: ''
+      title: '', date: '', startTime: '', location: '', type: '馬拉松', status: 'OPEN', imageUrl: '', isHot: false, openTime: '', announceTime: ''
   })
   const [slots, setSlots] = useState([])
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -39,8 +39,9 @@ export default function RaceBuilder() {
                   status: data.status || 'OPEN',
                   imageUrl: data.image_url || '',
                   isHot: data.is_hot || false,
-                  // 防呆：確保如果有資料才轉換時間格式
-                  openTime: data.open_time ? new Date(data.open_time).toISOString().slice(0, 16) : ''
+                  openTime: data.open_time ? new Date(data.open_time).toISOString().slice(0, 16) : '',
+                  // 🌟 讀取預定公告時間
+                  announceTime: data.announce_time ? new Date(data.announce_time).toISOString().slice(0, 16) : ''
               })
               setSlots(data.slots_data || [])
           }
@@ -51,6 +52,22 @@ export default function RaceBuilder() {
           setLoading(false)
       }
   }
+
+  // 🌟 自動推算前兩天的智慧邏輯
+  const handleOpenTimeChange = (e) => {
+      const val = e.target.value;
+      let updatedData = { ...raceData, openTime: val };
+      
+      if (val) {
+          const openDate = new Date(val);
+          // 往前推算 2 天
+          openDate.setDate(openDate.getDate() - 2);
+          updatedData.announceTime = openDate.toISOString().slice(0, 16);
+      } else {
+          updatedData.announceTime = '';
+      }
+      setRaceData(updatedData);
+  };
 
   const handleAddSlot = () => {
       if (!newSlot.name) return alert('請輸入賽段名稱')
@@ -117,7 +134,6 @@ export default function RaceBuilder() {
       
       setIsSubmitting(true)
       
-      // 🌟 移除 city 欄位，避免 schema error
       const payload = {
           name: raceData.title,
           date: raceData.date,
@@ -132,19 +148,27 @@ export default function RaceBuilder() {
           medic_registered: slots.reduce((acc, curr) => acc + Number(curr.filled || 0), 0),
       }
 
-      // 💡 防呆：如果使用者有設定 openTime，我們才嘗試送出 open_time 欄位。
-      // 如果您的資料庫還沒建這個欄位，這裡會被 Supabase 擋下，所以請務必先去後台建立！
       if (raceData.openTime) {
           payload.open_time = new Date(raceData.openTime).toISOString();
+      }
+      
+      // 🌟 寫入預定公告時間，並將廣播狀態重置為 false (代表還沒廣播過)
+      if (raceData.announceTime) {
+          payload.announce_time = new Date(raceData.announceTime).toISOString();
+          payload.is_announced = false; 
+      } else {
+          payload.announce_time = null;
       }
 
       try {
           if (editId) {
               const { error } = await supabase.from('races').update(payload).eq('id', editId)
               if (error) {
-                  // 特別攔截 open_time 找不到的錯誤
                   if (error.message.includes('Could not find the \'open_time\' column')) {
-                      throw new Error('儲存失敗：您尚未在資料庫(races)中建立「open_time」欄位！請先建立，或者清除開放時間後再儲存。');
+                      throw new Error('儲存失敗：您尚未在資料庫(races)中建立「open_time」欄位！');
+                  }
+                  if (error.message.includes('Could not find the \'announce_time\' column')) {
+                      throw new Error('儲存失敗：您尚未在資料庫執行新增 announce_time 的 SQL 指令！');
                   }
                   throw error;
               }
@@ -153,7 +177,7 @@ export default function RaceBuilder() {
               const { error } = await supabase.from('races').insert([payload])
               if (error) {
                   if (error.message.includes('Could not find the \'open_time\' column')) {
-                      throw new Error('建立失敗：您尚未在資料庫(races)中建立「open_time」欄位！請先建立，或者清除開放時間後再儲存。');
+                      throw new Error('建立失敗：您尚未在資料庫(races)中建立「open_time」欄位！');
                   }
                   throw error;
               }
@@ -214,21 +238,29 @@ export default function RaceBuilder() {
 
                       <div>
                           <label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-1"><MapPin size={16} className="text-slate-400"/> 詳細地點</label>
-                          {/* 🌟 拔除原本的「縣市分類」，這裡直接讓管理員填寫地點 */}
                           <input type="text" className="w-full border-2 border-slate-200 p-3 rounded-xl outline-none focus:border-blue-500 transition-colors font-medium text-slate-700" placeholder="例如：台北市政府廣場" value={raceData.location} onChange={e => setRaceData({...raceData, location: e.target.value})}/>
                       </div>
 
-                      <div>
-                          <label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-1"><Clock size={16} className="text-purple-500"/> 預計開放報名時間 (Time-Gated)</label>
-                          <input type="datetime-local" className="w-full border-2 border-purple-200 p-3 rounded-xl outline-none focus:border-purple-500 transition-colors font-black text-purple-900 bg-purple-50" value={raceData.openTime} onChange={e => setRaceData({...raceData, openTime: e.target.value})}/>
-                          <p className="text-xs text-slate-500 mt-1.5 font-medium leading-relaxed">
-                              設定後將啟動梯次分流：<br/>
-                              🔹 Day 0 (開放當日至午夜)：僅限 <span className="text-blue-600 font-bold">帶隊教官</span><br/>
-                              🔹 Day 1 (隔日 00:00 起)：開放 <span className="text-emerald-600 font-bold">新人、當屆訓練</span><br/>
-                              🔹 Day 2 (第三日 00:00 起)：全面開放 <span className="text-slate-700 font-bold">所有當屆會員</span><br/>
-                              (VIP 無視天數隨時可報，未設定則視為全面開放)
-                          </p>
+                      {/* 🌟 核心修改區塊：開放報名時間 & 全域廣播時間 */}
+                      <div className="p-5 bg-slate-50 rounded-xl border border-slate-200 space-y-5">
+                          <div>
+                              <label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-1"><Clock size={16} className="text-purple-500"/> 預計開放報名時間 (Time-Gated)</label>
+                              <input type="datetime-local" className="w-full border-2 border-purple-200 p-3 rounded-xl outline-none focus:border-purple-500 transition-colors font-black text-purple-900 bg-purple-50" value={raceData.openTime} onChange={handleOpenTimeChange}/>
+                              <p className="text-xs text-slate-500 mt-1.5 font-medium leading-relaxed">
+                                  設定後將啟動梯次分流：<br/>
+                                  🔹 Day 0 (開放當日至午夜)：僅限 <span className="text-blue-600 font-bold">帶隊教官</span><br/>
+                                  🔹 Day 1 (隔日 00:00 起)：開放 <span className="text-emerald-600 font-bold">新人、當屆訓練</span><br/>
+                                  🔹 Day 2 (第三日 00:00 起)：全面開放 <span className="text-slate-700 font-bold">所有當屆會員</span>
+                              </p>
+                          </div>
+
+                          <div className="border-t border-slate-200 pt-5">
+                              <label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-1"><BellRing size={16} className="text-blue-500"/> 預定全域廣播時間 (自動推播)</label>
+                              <input type="datetime-local" className="w-full border-2 border-blue-200 p-3 rounded-xl outline-none focus:border-blue-500 transition-colors font-black text-blue-900 bg-blue-50" value={raceData.announceTime} onChange={e => setRaceData({...raceData, announceTime: e.target.value})}/>
+                              <p className="text-xs text-slate-500 mt-1.5 font-medium">系統會自動推算<span className="text-blue-600 font-bold">前兩天</span>發出廣播，您也可以手動修改。時間一到，系統將自動喚醒全體會員手機發送通知！</p>
+                          </div>
                       </div>
+
                   </div>
               </div>
 
@@ -271,7 +303,6 @@ export default function RaceBuilder() {
                       </label>
                   </div>
 
-                  {/* 🌟 圖片區塊瘦身：拔除輸入網址，統一使用系統預設圖 */}
                   <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                       <div className="flex items-center gap-2 mb-2">
                           <ImagePlus className="text-slate-400" size={18}/>

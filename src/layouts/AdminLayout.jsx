@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Outlet, useNavigate, useLocation, Link } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
-import { LayoutDashboard, Users, LogOut, Loader2, ShieldAlert, ShieldCheck, UserPlus, AlertTriangle, Ban, ServerCog, UploadCloud, Flag, History, CalendarClock, Menu, X, Crown, Home, Bell } from 'lucide-react'
+import { LayoutDashboard, Users, LogOut, Loader2, ShieldAlert, ShieldCheck, UserPlus, AlertTriangle, Ban, ServerCog, UploadCloud, Flag, History, CalendarClock, Menu, X, Crown, Home, Bell, Radio } from 'lucide-react'
 
 // 🌟 定義四大後台通行權限
 const VALID_ADMIN_ROLES = ['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN'];
@@ -124,7 +124,9 @@ export default function AdminLayout() {
               { path: '/admin/races', icon: <Flag size={18}/>, label: '🚩 賽事任務總覽' },
               { path: '/admin/races', view: 'HISTORY', icon: <History size={18}/>, label: '📜 歷史任務結算' },
               { path: '/admin/races', view: 'FUTURE', icon: <CalendarClock size={18}/>, label: '📅 未來任務規劃' },
-              { path: '/admin/race-builder', icon: <Flag size={18}/>, label: '➕ 建立新賽事' }
+              { path: '/admin/race-builder', icon: <Flag size={18}/>, label: '➕ 建立新賽事' },
+              // 🌟 新增群體廣播選單
+              { path: '/admin/race-broadcast', icon: <Radio size={18}/>, label: '📡 賽事任務群體廣播' }
           ]
       },
       {
@@ -146,6 +148,7 @@ export default function AdminLayout() {
     if (pathname === '/admin/system-status') return '系統伺服器監控';
     if (pathname === '/admin/import') return '資料整合匯入中心';
     if (pathname === '/admin/race-builder') return '建立新賽事';
+    if (pathname === '/admin/race-broadcast') return '賽事任務群體廣播';
     
     if (pathname === '/admin/dashboard' && currentView === 'NOTIFICATIONS') return '醫鐵通知中心';
 
@@ -153,7 +156,7 @@ export default function AdminLayout() {
       i.path === pathname && (i.view ? currentView === i.view : !searchParams.get('view'))
     );
     
-    return matchedItem ? matchedItem.label.replace(/🚩 |📜 |📅 |➕ |🅰️ |🅱️ |🆎 |⚠️ |⛔ |📥 /g, '') : '系統總覽'; 
+    return matchedItem ? matchedItem.label.replace(/🚩 |📜 |📅 |➕ |📡 |🅰️ |🅱️ |🆎 |⚠️ |⛔ |📥 /g, '') : '系統總覽'; 
   }
 
   return (
@@ -191,17 +194,18 @@ export default function AdminLayout() {
                       <div className="text-xs font-bold text-slate-500 px-3 mb-2 uppercase tracking-widest">{group.title}</div>
                       <div className="space-y-1">
                           {group.items.map((item, i) => {
-                              // 🌟 核心修復：精準的 Active 判斷邏輯，防同步發光
                               const isPathMatch = location.pathname === item.path;
                               let isActive = false;
                               
                               if (item.path === '/admin/races' && !item.view && location.pathname === '/admin/race-builder') {
-                                  isActive = true;
+                                  isActive = false; // 修正邏輯
+                              } else if (item.path === '/admin/races' && !item.view && location.pathname === '/admin/race-broadcast') {
+                                  isActive = false; // 修正邏輯
                               } else if (isPathMatch) {
                                   if (item.view) {
                                       isActive = searchParams.get('view') === item.view;
                                   } else {
-                                      isActive = !searchParams.get('view'); // 如果沒有指定 view，只有在 URL 真的沒有 view 時才亮
+                                      isActive = !searchParams.get('view'); 
                                   }
                               }
                               

@@ -17,6 +17,8 @@ import RaceDetail from './pages/RaceDetail'
 import RaceBuilder from './admin/RaceBuilder' 
 import RaceManager from './admin/RaceManager' 
 import DigitalID from './pages/DigitalID'
+// 🌟 引入全新的賽事任務群體廣播頁面
+import RaceBroadcast from './admin/RaceBroadcast'
 
 // 🌟 推播金鑰轉換工具函數
 function urlBase64ToUint8Array(base64String) {
@@ -89,7 +91,6 @@ function App() {
   const subscribeToPushAndSave = async () => {
     try {
         const registration = await navigator.serviceWorker.ready;
-        // 已為您填入真實公鑰，拔除所有防呆干擾！
         const VAPID_PUBLIC_KEY = 'BLcSYfjSIdYX_rnN7YVeTo_OrXSDkIXoqLAz59I_2AxP_w-tAWZID3iZFVzCTFxogTibrL7-LiiirNcLslRf5b8'; 
         
         const subscription = await registration.pushManager.subscribe({
@@ -107,7 +108,7 @@ function App() {
                p256dh: subJSON.keys.p256dh,
                auth: subJSON.keys.auth
             }, { onConflict: 'user_id, endpoint' });
-            console.log("✅ 離線推播金鑰已成功存入基地台！");
+            console.log("✅ 離線推播金鑰已成功存入後端資料庫！");
         }
     } catch (subError) {
         console.warn("離線推播訂閱異常：", subError);
@@ -125,7 +126,6 @@ function App() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // 🟢 關鍵修補：如果使用者以前就允許過通知，一登入就直接把金鑰送進資料庫！
       if ('Notification' in window && Notification.permission === 'granted') {
           subscribeToPushAndSave();
       }
@@ -180,7 +180,6 @@ function App() {
         setNotificationPermission(permission);
         
         if (permission === 'granted') {
-            // 🚀 按下允許的瞬間，立刻抓金鑰存檔！
             await subscribeToPushAndSave();
 
             new Notification('✅ 授權成功', {
@@ -223,54 +222,6 @@ function App() {
         </div>
       )}
 
-      {/* 🚨 終極除錯按鈕：強制解除舊約並重新綁定 (測試完可刪除) */}
-      <div className="fixed bottom-24 left-6 z-[9999]">
-          <button 
-              onClick={async () => {
-                  try {
-                      alert('📡 正在連線伺服器，請稍候...');
-                      const registration = await navigator.serviceWorker.ready;
-                      
-                      // 1. 殺死舊的幽靈訂閱
-                      const oldSubscription = await registration.pushManager.getSubscription();
-                      if (oldSubscription) {
-                          await oldSubscription.unsubscribe();
-                      }
-                      
-                      // 2. 重新申請新訂閱
-                      const VAPID_PUBLIC_KEY = 'BLcSYfjSIdYX_rnN7YVeTo_OrXSDkIXoqLAz59I_2AxP_w-tAWZID3iZFVzCTFxogTibrL7-LiiirNcLslRf5b8'; 
-                      const subscription = await registration.pushManager.subscribe({
-                          userVisibleOnly: true,
-                          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
-                      });
-                      
-                      // 3. 存入資料庫
-                      const subJSON = subscription.toJSON();
-                      const { data: { user } } = await supabase.auth.getUser();
-                      
-                      if (user) {
-                          const { error } = await supabase.from('push_subscriptions').upsert({
-                             user_id: user.id,
-                             endpoint: subJSON.endpoint,
-                             p256dh: subJSON.keys.p256dh,
-                             auth: subJSON.keys.auth
-                          }, { onConflict: 'user_id, endpoint' });
-                          
-                          if (error) throw error;
-                          alert('✅ 報告長官：金鑰已成功存入基地台！快去發射！');
-                      } else {
-                          alert('⚠️ 請先登入會員！');
-                      }
-                  } catch (e) {
-                      alert('❌ 發生錯誤，兇手抓到了：\n' + e.message);
-                  }
-              }}
-              className="bg-red-600 hover:bg-red-500 text-white text-sm font-black px-4 py-3 rounded-full shadow-2xl border-2 border-white animate-pulse"
-          >
-              🚨 強制更新推播金鑰
-          </button>
-      </div>
-
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/races" element={<RaceEvents />} />
@@ -284,6 +235,8 @@ function App() {
           <Route path="races" element={<RaceManager />} />        
           <Route path="race-builder" element={<RaceBuilder />} /> 
           <Route path="import" element={<DataImportCenter />} />
+          {/* 🌟 新增：賽事任務群體廣播頁面 */}
+          <Route path="race-broadcast" element={<RaceBroadcast />} />
           <Route path="system-status" element={<AdminRoute requiredRole="SUPER_ADMIN"><SystemStatus /></AdminRoute>} />
         </Route>
 
