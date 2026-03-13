@@ -30,42 +30,30 @@ export default function RaceBroadcast() {
         }
     }
 
-    // 🚨 終極手動核彈發射按鈕
+    // 🚨 終極手動推播按鈕 (包含再次廣播)
     const handleManualFire = async (race) => {
-        const confirmFire = window.confirm(`🚨 警告：即將發射全域推播！\n\n確定要強制對所有會員手機發送【${race.name}】的賽事廣播嗎？\n(這將無視原本的排程時間)`);
+        const confirmFire = window.confirm(`🚨 警告：即將全域推播！\n\n確定要強制對所有會員手機發送【${race.name}】的賽事廣播嗎？\n(這將無視原本的排程時間，並同步推播小鈴鐺)`);
         
         if (!confirmFire) return;
 
         setFiringId(race.id);
         
         try {
-            // 呼叫 Edge Function
-            const { data, error } = await supabase.functions.invoke('broadcast-push', {
-                // 我們可以帶參數進去，或者直接讓 Edge Function 去抓 (目前 Edge Function 是自己抓資料庫的)
-                // 為了強制發送特定一場，這裡我們假設您之後可以升級 Edge Function 接收指定 ID，
-                // 但現行版本我們直接更新資料庫讓它假裝「時間到了」，然後等一分鐘讓機器人去發。
-                // 為了「即時手動」，我們直接在前端觸發！
-            });
-
-            // ⚠️ 注意：因為我們原本寫的 Edge Function 是無差別去抓「時間到了」的賽事。
-            // 這裡的「手動發射」，最簡單的做法是：強制把這場賽事的 announce_time 改成「現在」，
-            // 然後手動呼叫一次 Edge Function 去執行。
-
-            // 1. 強制修改時間為現在，並設定為未廣播
+            // 1. 強制修改時間為現在，並將狀態「重置」為未廣播
             await supabase.from('races')
                 .update({ announce_time: new Date().toISOString(), is_announced: false })
                 .eq('id', race.id);
 
-            // 2. 呼叫發射站
+            // 2. 呼叫全域推播站
             const res = await supabase.functions.invoke('broadcast-push');
             
             if (res.error) throw res.error;
 
-            alert('✅ 強制發射成功！信號已送出！');
+            alert('✅ 報告長官：強制推播成功！信號與小鈴鐺皆已送出！');
             fetchRaces(); // 刷新清單
         } catch (error) {
-            console.error('發射失敗:', error);
-            alert(`發射發生異常：${error.message}`);
+            console.error('推播失敗:', error);
+            alert(`推播發生異常：${error.message}`);
         } finally {
             setFiringId(null);
         }
@@ -80,7 +68,7 @@ export default function RaceBroadcast() {
                             <Radio className="text-blue-600"/> 賽事任務群體廣播清單
                         </h2>
                         <p className="text-slate-500 font-medium text-sm mt-1">
-                            監控系統排定的自動廣播任務。如有突發狀況，可使用緊急按鈕手動強制發射推播。
+                            監控系統排定的自動廣播任務。如有突發狀況，可使用緊急按鈕手動強制推播推播。
                         </p>
                     </div>
                     <button 
@@ -96,7 +84,7 @@ export default function RaceBroadcast() {
                 {loading ? (
                     <div className="py-20 flex flex-col items-center justify-center text-slate-400">
                         <Loader2 className="animate-spin mb-4" size={32}/>
-                        <span className="font-bold tracking-widest">掃描發射排程中...</span>
+                        <span className="font-bold tracking-widest">掃描推播排程中...</span>
                     </div>
                 ) : races.length === 0 ? (
                     <div className="py-20 flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-200 rounded-2xl">
@@ -143,8 +131,8 @@ export default function RaceBroadcast() {
                                         </div>
                                     </div>
                                     
-                                    <div className="shrink-0 flex items-center justify-end">
-                                        {/* 如果還沒發送，顯示緊急發送按鈕 */}
+                                    <div className="shrink-0 flex items-center justify-end gap-3">
+                                        {/* 如果還沒發送，顯示紅色緊急發送按鈕 */}
                                         {!isAnnounced && (
                                             <button 
                                                 onClick={() => handleManualFire(race)}
@@ -155,11 +143,23 @@ export default function RaceBroadcast() {
                                                 強制手動廣播
                                             </button>
                                         )}
-                                        {/* 如果已發送，顯示已完成標記 */}
+                                        
+                                        {/* 如果已發送，顯示綠色已完成標記 + 深色「再次廣播」按鈕 */}
                                         {isAnnounced && (
-                                            <div className="flex items-center gap-2 text-emerald-600 bg-emerald-100 px-4 py-2.5 rounded-xl font-black border border-emerald-200">
-                                                <CheckCircle2 size={18}/> 任務已完成
-                                            </div>
+                                            <>
+                                                <div className="hidden sm:flex items-center gap-2 text-emerald-600 bg-emerald-100 px-4 py-2.5 rounded-xl font-black border border-emerald-200">
+                                                    <CheckCircle2 size={18}/> 任務已完成
+                                                </div>
+                                                <button 
+                                                    onClick={() => handleManualFire(race)}
+                                                    disabled={firingId === race.id}
+                                                    className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2.5 rounded-xl font-black shadow-md transition-colors disabled:opacity-50"
+                                                    title="重新發送推播與小鈴鐺通知"
+                                                >
+                                                    {firingId === race.id ? <Loader2 size={18} className="animate-spin"/> : <Send size={18}/>}
+                                                    再次廣播
+                                                </button>
+                                            </>
                                         )}
                                     </div>
                                 </div>
