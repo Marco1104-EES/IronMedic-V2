@@ -14,6 +14,7 @@ export default function RaceBroadcast() {
     const fetchRaces = async () => {
         setLoading(true)
         try {
+            // 抓出所有有設定「預定廣播時間(announce_time)」的賽事
             const { data, error } = await supabase
                 .from('races')
                 .select('id, name, date, announce_time, is_announced, status')
@@ -29,38 +30,40 @@ export default function RaceBroadcast() {
         }
     }
 
+// 🚨 手動推播按鈕 (包含再次廣播)
     const handleManualFire = async (race) => {
-        const confirmFire = window.confirm(`🚨 警告：即將發射全域推播！\n\n確定要強制對所有會員手機發送【${race.name}】的賽事廣播嗎？\n(這將無視原本的排程時間，並同步推播小鈴鐺)`);
+        const confirmFire = window.confirm(`⚠️ 系統確認：\n\n確定要對所有有效會員發送【${race.name}】的賽事通知嗎？\n(這將立即發送手機推播並同步更新小鈴鐺)`);
         
         if (!confirmFire) return;
 
         setFiringId(race.id);
         
         try {
-            // 🌟 終極修正：把時間設定為「過去 1 分鐘」，消滅電腦與伺服器的毫秒時差！
+            // 把時間設定為過去 1 分鐘，避免電腦與伺服器的毫秒時差
             const pastTime = new Date(Date.now() - 60000).toISOString();
 
+            // 1. 修改時間為過去一分鐘，並將狀態重置為未廣播
             await supabase.from('races')
                 .update({ announce_time: pastTime, is_announced: false })
                 .eq('id', race.id);
 
-            // 呼叫全域發射站
+            // 2. 呼叫全域推播 API
             const res = await supabase.functions.invoke('broadcast-push');
             
             if (res.error) throw res.error;
 
-            // 🌟 終極防呆：如果伺服器因為時差沒抓到資料，直接擋下來並警告！
+            // 防呆：如果伺服器因為時差沒抓到資料，擋下來並提示
             if (res.data && res.data.message && res.data.message.includes('無賽事')) {
-                alert('⚠️ 系統提示：伺服器正在同步時間中，請等待 3 秒後再按一次「再次廣播」！');
+                alert('⚠️ 系統提示：伺服器正在同步資料，請等待 3 秒後再試一次。');
                 setFiringId(null);
                 return;
             }
 
-            alert('✅ 報告長官：強制發射成功！信號與小鈴鐺皆已精準送出！');
-            fetchRaces(); 
+            alert('✅ 推播發送成功！手機通知與小鈴鐺皆已同步。');
+            fetchRaces(); // 刷新清單
         } catch (error) {
-            console.error('發射失敗:', error);
-            alert(`發射發生異常：${error.message}`);
+            console.error('推播失敗:', error);
+            alert(`推播發送異常：${error.message}`);
         } finally {
             setFiringId(null);
         }
@@ -75,7 +78,7 @@ export default function RaceBroadcast() {
                             <Radio className="text-blue-600"/> 賽事任務群體廣播清單
                         </h2>
                         <p className="text-slate-500 font-medium text-sm mt-1">
-                            監控系統排定的自動廣播任務。如有突發狀況，可使用緊急按鈕手動強制發射推播。
+                            監控系統排定的自動廣播任務。如有突發狀況，可使用緊急按鈕手動強制推播推播。
                         </p>
                     </div>
                     <button 
@@ -91,7 +94,7 @@ export default function RaceBroadcast() {
                 {loading ? (
                     <div className="py-20 flex flex-col items-center justify-center text-slate-400">
                         <Loader2 className="animate-spin mb-4" size={32}/>
-                        <span className="font-bold tracking-widest">掃描發射排程中...</span>
+                        <span className="font-bold tracking-widest">掃描推播排程中...</span>
                     </div>
                 ) : races.length === 0 ? (
                     <div className="py-20 flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-200 rounded-2xl">
@@ -105,6 +108,7 @@ export default function RaceBroadcast() {
                             const isPast = new Date(race.announce_time) <= new Date();
                             const isAnnounced = race.is_announced;
                             
+                            // 狀態卡片樣式判斷
                             let statusClass = "border-slate-200 bg-white";
                             let statusText = "等待排程中";
                             let statusIcon = <CalendarClock size={20} className="text-slate-400"/>;
@@ -138,6 +142,7 @@ export default function RaceBroadcast() {
                                     </div>
                                     
                                     <div className="shrink-0 flex items-center justify-end gap-3">
+                                        {/* 如果還沒發送，顯示紅色緊急發送按鈕 */}
                                         {!isAnnounced && (
                                             <button 
                                                 onClick={() => handleManualFire(race)}
@@ -149,6 +154,7 @@ export default function RaceBroadcast() {
                                             </button>
                                         )}
                                         
+                                        {/* 如果已發送，顯示綠色已完成標記 + 深色「再次廣播」按鈕 */}
                                         {isAnnounced && (
                                             <>
                                                 <div className="hidden sm:flex items-center gap-2 text-emerald-600 bg-emerald-100 px-4 py-2.5 rounded-xl font-black border border-emerald-200">
