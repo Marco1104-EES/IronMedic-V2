@@ -13,97 +13,127 @@ export default function SystemStatus() {
   })
   const [loading, setLoading] = useState(true)
   
-  // 戰情室資料狀態
   const [modRequests, setModRequests] = useState([])
-  
-  // 🌟 新增：虛擬機器人監控狀態
   const [cronJobStatus, setCronJobStatus] = useState(null)
 
   useEffect(() => { 
-      runSystemDiagnostics() 
-      fetchWarRoomData()
-      fetchCronJobStatus() // 🌟 啟動時撈取機器人狀態
+      // 🏎️ 引擎啟動：初始彈射起步 (只執行一次)
+      fetchAllSystemData();
+
+      // 🏎️ 第三顆馬達：靜默心跳 (每 30 秒自動測量延遲與機器人，不顯示轉圈圈)
+      const heartbeat = setInterval(() => {
+          fetchSilentHeartbeat();
+      }, 30000);
+
+      // 🏎️ 第二 & 第四顆馬達：Rimac 全時四驅 Websocket 即時雷達！
+      const radarChannel = supabase.channel('rimac_system_radar')
+          // 監聽會員增減
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'profiles' }, () => {
+              setMetrics(prev => ({ ...prev, totalMembers: prev.totalMembers + 1 }))
+          })
+          .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'profiles' }, () => {
+              setMetrics(prev => ({ ...prev, totalMembers: Math.max(0, prev.totalMembers - 1) }))
+          })
+          // 監聽賽事增減
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'races' }, () => {
+              setMetrics(prev => ({ ...prev, totalRaces: prev.totalRaces + 1 }))
+          })
+          .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'races' }, () => {
+              setMetrics(prev => ({ ...prev, totalRaces: Math.max(0, prev.totalRaces - 1) }))
+          })
+          // 監聽全域小鈴鐺推播量
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'user_notifications' }, () => {
+              setMetrics(prev => ({ ...prev, totalNotifications: prev.totalNotifications + 1 }))
+          })
+          // 監聽戰情室：即時攔截新的變更申請單！
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'admin_notifications' }, (payload) => {
+              if (payload.new.type === 'MODIFICATION_REQUEST') {
+                  setModRequests(prev => [payload.new, ...prev].slice(0, 5));
+              }
+          })
+          .subscribe();
+
+      return () => {
+          clearInterval(heartbeat);
+          supabase.removeChannel(radarChannel);
+      }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const runSystemDiagnostics = async () => {
-    setLoading(true)
-    const start = performance.now()
-    try {
-      const { error } = await supabase.from('profiles').select('id').limit(1)
-      const end = performance.now()
-      const latency = Math.round(end - start)
-      
-      let size = 15.5; // 模擬基礎資料庫大小 (MB)
-      let mCount = 0, rCount = 0, nCount = 0;
+  // 🏎️ 第一顆馬達：極速並發引擎 (僅供手動刷新或初次載入使用)
+  const fetchAllSystemData = async () => {
+      setLoading(true)
+      const start = performance.now()
 
-      // 1. 抓取總會員數
       try {
-          const { count } = await supabase.from('profiles').select('*', { count: 'exact', head: true })
-          mCount = count || 0
-      } catch (e) { mCount = 0 }
+          const [
+              pingRes,
+              mCountRes,
+              rCountRes,
+              nCountRes,
+              notifsRes,
+              cronRes
+          ] = await Promise.all([
+              supabase.from('profiles').select('id', { count: 'exact', head: true }).limit(1),
+              supabase.from('profiles').select('*', { count: 'exact', head: true }),
+              supabase.from('races').select('*', { count: 'exact', head: true }),
+              supabase.from('user_notifications').select('*', { count: 'exact', head: true }),
+              supabase.from('admin_notifications').select('*').order('created_at', { ascending: false }).limit(20),
+              supabase.from('vw_system_cron_jobs').select('*').eq('jobname', 'auto-broadcast-job').maybeSingle()
+          ]);
 
-      // 2. 抓取總賽事數
-      try {
-          const { count } = await supabase.from('races').select('*', { count: 'exact', head: true })
-          rCount = count || 0
-      } catch (e) { rCount = 0 }
+          const end = performance.now()
+          const latency = Math.round(end - start)
 
-      // 3. 抓取總通知發送量
-      try {
-          const { count } = await supabase.from('user_notifications').select('*', { count: 'exact', head: true })
-          nCount = count || 0
-      } catch (e) { nCount = 0 }
+          setMetrics({
+              dbSizeMB: 15.5,
+              totalMembers: mCountRes.count || 0,
+              totalRaces: rCountRes.count || 0,
+              totalNotifications: nCountRes.count || 0,
+              latency,
+              status: pingRes.error ? 'error' : (latency > 500 ? 'warning' : 'healthy')
+          })
 
-      setMetrics({
-        dbSizeMB: size,
-        totalMembers: mCount,
-        totalRaces: rCount,
-        totalNotifications: nCount,
-        latency,
-        status: error ? 'error' : (latency > 500 ? 'warning' : 'healthy')
-      })
-    } catch (error) {
-      setMetrics(prev => ({ ...prev, status: 'error' }))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const fetchWarRoomData = async () => {
-      try {
-          const { data: notifs } = await supabase
-              .from('admin_notifications')
-              .select('*')
-              .order('created_at', { ascending: false })
-              .limit(20)
-          
-          if (notifs) {
-              setModRequests(notifs.filter(n => n.type === 'MODIFICATION_REQUEST').slice(0, 5))
+          if (notifsRes.data) {
+              setModRequests(notifsRes.data.filter(n => n.type === 'MODIFICATION_REQUEST').slice(0, 5))
+          } else {
+              setModRequests([])
           }
-      } catch (e) {
-          console.error("無法載入戰情室資料", e)
+
+          if (cronRes.data) {
+              setCronJobStatus(cronRes.data);
+          } else {
+              if (cronRes.error) console.warn("機器人雷達讀取異常:", cronRes.error.message);
+              setCronJobStatus(null);
+          }
+      } catch (error) {
+          console.error("系統監控讀取異常:", error);
+          setMetrics(prev => ({ ...prev, status: 'error' }))
+      } finally {
+          setLoading(false)
       }
   }
 
-  // 🌟 透過 SQL 建立的 View，安全地監控 pg_cron 機器人
-  const fetchCronJobStatus = async () => {
+  // 🏎️ 第三顆馬達的核心：無感靜默更新延遲與機器人狀態
+  const fetchSilentHeartbeat = async () => {
+      const start = performance.now()
       try {
-          const { data, error } = await supabase
-              .from('vw_system_cron_jobs')
-              .select('*')
-              .eq('jobname', 'auto-broadcast-job')
-              .maybeSingle();
-
-          if (error) throw error;
+          const [pingRes, cronRes] = await Promise.all([
+              supabase.from('profiles').select('id').limit(1),
+              supabase.from('vw_system_cron_jobs').select('*').eq('jobname', 'auto-broadcast-job').maybeSingle()
+          ]);
           
-          if (data) {
-              setCronJobStatus(data);
-          } else {
-              setCronJobStatus(null);
-          }
+          const latency = Math.round(performance.now() - start)
+          
+          setMetrics(prev => ({
+              ...prev,
+              latency,
+              status: pingRes.error ? 'error' : (latency > 500 ? 'warning' : 'healthy')
+          }))
+
+          if (cronRes.data) setCronJobStatus(cronRes.data);
       } catch (e) {
-          console.warn("尚未建立機器人 View 或查無排程", e.message);
-          setCronJobStatus(null);
+          console.warn('靜默心跳異常', e);
       }
   }
 
@@ -122,28 +152,28 @@ export default function SystemStatus() {
   return (
     <div className="space-y-6 md:space-y-8 animate-fade-in pb-20">
       
-      {/* 🌟 頂部：系統核心伺服器監控 (上帝視角黑盒子數據) */}
+      {/* 🌟 頂部：系統核心伺服器監控 */}
       <div className="bg-white p-6 md:p-8 rounded-[2rem] shadow-sm border border-slate-200 relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
               <div>
                   <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
                       <Cpu className="text-blue-600"/> 系統伺服器監控中心
                   </h2>
-                  <p className="text-slate-500 font-medium text-sm mt-1">Super Admin War Room - 內部即時數據庫</p>
+                  <p className="text-slate-500 font-medium text-sm mt-1">Super Admin War Room - Rimac 全時四驅即時版</p>
               </div>
               <button 
-                  onClick={() => { runSystemDiagnostics(); fetchWarRoomData(); fetchCronJobStatus(); }}
+                  onClick={fetchAllSystemData}
                   disabled={loading}
                   className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-xl font-bold transition-colors"
+                  title="系統已開啟自動即時同步，您無須手動刷新"
               >
                   <RefreshCw size={16} className={loading ? 'animate-spin' : ''}/>
-                  {loading ? '偵測中...' : '重新整理'}
+                  {loading ? '全域掃描中...' : '強制手動同步'}
               </button>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 md:gap-6">
-              {/* 1. 狀態指示 */}
-              <div className={`p-5 rounded-2xl border flex flex-col justify-center gap-2 ${getStatusColor(metrics.status)}`}>
+              <div className={`p-5 rounded-2xl border flex flex-col justify-center gap-2 ${getStatusColor(metrics.status)} transition-colors duration-500`}>
                   <div className="flex justify-between items-center">
                       <span className="text-xs font-black uppercase tracking-wider opacity-70">伺服器狀態</span>
                       {getStatusIcon(metrics.status)}
@@ -153,18 +183,16 @@ export default function SystemStatus() {
                   </div>
               </div>
 
-              {/* 2. 資料庫延遲 */}
-              <div className="p-5 rounded-2xl border border-slate-100 bg-slate-50 flex flex-col justify-center gap-2">
+              <div className="p-5 rounded-2xl border border-slate-100 bg-slate-50 flex flex-col justify-center gap-2 transition-all duration-300">
                   <div className="flex justify-between items-center text-slate-500">
                       <span className="text-xs font-black uppercase tracking-wider">資料庫延遲</span>
-                      <Activity size={20} />
+                      <Activity size={20} className={metrics.latency > 0 ? "text-blue-500 animate-pulse" : ""} />
                   </div>
                   <div className="text-2xl font-black text-slate-800 mt-1 flex items-baseline gap-1">
                       {metrics.latency} <span className="text-sm text-slate-500 font-bold">ms</span>
                   </div>
               </div>
 
-              {/* 3. 資料庫用量 */}
               <div className="p-5 rounded-2xl border border-slate-100 bg-slate-50 flex flex-col justify-center gap-2">
                   <div className="flex justify-between items-center text-slate-500">
                       <span className="text-xs font-black uppercase tracking-wider">資料庫用量 (DB)</span>
@@ -178,35 +206,35 @@ export default function SystemStatus() {
                   </div>
               </div>
 
-              {/* 4. 總會員數 */}
-              <div className="p-5 rounded-2xl border border-slate-100 bg-slate-50 flex flex-col justify-center gap-2">
-                  <div className="flex justify-between items-center text-slate-500">
+              <div className="p-5 rounded-2xl border border-slate-100 bg-slate-50 flex flex-col justify-center gap-2 relative overflow-hidden group">
+                  <div className="absolute inset-0 bg-blue-500/0 group-hover:bg-blue-500/5 transition-colors"></div>
+                  <div className="flex justify-between items-center text-slate-500 relative z-10">
                       <span className="text-xs font-black uppercase tracking-wider">建檔總會員數</span>
                       <Users size={20} className="text-blue-500" />
                   </div>
-                  <div className="text-2xl font-black text-slate-800 mt-1 flex items-baseline gap-1">
+                  <div className="text-2xl font-black text-slate-800 mt-1 flex items-baseline gap-1 relative z-10">
                       {metrics.totalMembers} <span className="text-sm text-slate-500 font-bold">人</span>
                   </div>
               </div>
 
-              {/* 5. 總賽事數 */}
-              <div className="p-5 rounded-2xl border border-slate-100 bg-slate-50 flex flex-col justify-center gap-2">
-                  <div className="flex justify-between items-center text-slate-500">
+              <div className="p-5 rounded-2xl border border-slate-100 bg-slate-50 flex flex-col justify-center gap-2 relative overflow-hidden group">
+                  <div className="absolute inset-0 bg-amber-500/0 group-hover:bg-amber-500/5 transition-colors"></div>
+                  <div className="flex justify-between items-center text-slate-500 relative z-10">
                       <span className="text-xs font-black uppercase tracking-wider">系統表單/賽事數</span>
                       <Flag size={20} className="text-amber-500" />
                   </div>
-                  <div className="text-2xl font-black text-slate-800 mt-1 flex items-baseline gap-1">
+                  <div className="text-2xl font-black text-slate-800 mt-1 flex items-baseline gap-1 relative z-10">
                       {metrics.totalRaces} <span className="text-sm text-slate-500 font-bold">場</span>
                   </div>
               </div>
 
-              {/* 6. 總通知量 */}
-              <div className="p-5 rounded-2xl border border-slate-100 bg-slate-50 flex flex-col justify-center gap-2">
-                  <div className="flex justify-between items-center text-slate-500">
+              <div className="p-5 rounded-2xl border border-slate-100 bg-slate-50 flex flex-col justify-center gap-2 relative overflow-hidden group">
+                  <div className="absolute inset-0 bg-rose-500/0 group-hover:bg-rose-500/5 transition-colors"></div>
+                  <div className="flex justify-between items-center text-slate-500 relative z-10">
                       <span className="text-xs font-black uppercase tracking-wider">總通知發送數</span>
                       <Bell size={20} className="text-rose-500" />
                   </div>
-                  <div className="text-2xl font-black text-slate-800 mt-1 flex items-baseline gap-1">
+                  <div className="text-2xl font-black text-slate-800 mt-1 flex items-baseline gap-1 relative z-10">
                       {metrics.totalNotifications} <span className="text-sm text-slate-500 font-bold">次</span>
                   </div>
               </div>
@@ -215,16 +243,15 @@ export default function SystemStatus() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
-          {/* 資料變更申請單 */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
               <div className="bg-amber-50/50 p-4 border-b border-amber-100 flex items-center gap-2">
                   <div className="p-1.5 bg-amber-100 text-amber-600 rounded-lg"><FileSignature size={18}/></div>
                   <h3 className="font-black text-amber-900">資料變更申請單</h3>
-                  <span className="ml-auto bg-amber-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full">{modRequests.length} 件待審</span>
+                  <span className="ml-auto bg-amber-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm">{modRequests.length} 件待審</span>
               </div>
               <div className="p-4 flex-1 overflow-y-auto max-h-[350px] custom-scrollbar space-y-3">
                   {modRequests.length > 0 ? modRequests.map((req, i) => (
-                      <div key={i} className="flex flex-col gap-2 p-3 rounded-xl border border-amber-100 bg-amber-50/30 hover:bg-amber-50 transition-colors cursor-pointer group">
+                      <div key={i} className="flex flex-col gap-2 p-3 rounded-xl border border-amber-100 bg-amber-50/30 hover:bg-amber-50 transition-colors cursor-pointer group animate-fade-in">
                           <div className="flex justify-between items-center">
                               <span className="text-sm font-black text-slate-800">{req.user_name}</span>
                               <ChevronRight size={14} className="text-amber-400 group-hover:translate-x-1 transition-transform"/>
@@ -241,12 +268,12 @@ export default function SystemStatus() {
               </div>
           </div>
           
-          {/* 🌟 新增：虛擬機器人 (pg_cron) 運作雷達 */}
-          <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-800 overflow-hidden lg:col-span-2 relative">
+          {/* 🌟 虛擬機器人 (pg_cron) 運作雷達 */}
+          <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-800 overflow-hidden lg:col-span-2 relative transition-all duration-500">
               <div className="absolute top-0 right-0 w-48 h-48 bg-emerald-500/10 rounded-bl-full blur-2xl"></div>
               
               <div className="p-5 border-b border-slate-800 flex items-center gap-3 relative z-10">
-                  <div className={`p-2 rounded-lg ${cronJobStatus && cronJobStatus.active ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
+                  <div className={`p-2 rounded-lg transition-colors duration-500 ${cronJobStatus && cronJobStatus.active ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
                       <Bot size={20}/>
                   </div>
                   <div>
@@ -259,13 +286,13 @@ export default function SystemStatus() {
                               </span>
                           )}
                       </h3>
-                      <p className="text-xs text-slate-400 font-medium">監控底層自動排程任務的存活與執行狀態，無須進入 Supabase。</p>
+                      <p className="text-xs text-slate-400 font-medium">系統已開啟靜默即時監控，無須手動刷新頁面。</p>
                   </div>
               </div>
               
               <div className="p-6 relative z-10 flex flex-col items-center justify-center min-h-[250px]">
                   {cronJobStatus ? (
-                      <div className="w-full max-w-lg bg-slate-800/80 backdrop-blur-sm border border-slate-700 rounded-xl p-5 shadow-inner">
+                      <div className="w-full max-w-lg bg-slate-800/80 backdrop-blur-sm border border-slate-700 rounded-xl p-5 shadow-inner animate-fade-in">
                           <div className="flex justify-between items-center mb-4 pb-4 border-b border-slate-700/50">
                               <span className="text-sm font-bold text-slate-400">任務名稱</span>
                               <span className="text-sm font-black text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-md tracking-wider">
@@ -289,20 +316,20 @@ export default function SystemStatus() {
                                   </div>
                               </div>
                           </div>
-                          <p className="text-[10px] text-slate-500 mt-5 text-center bg-slate-900/50 py-2 rounded-lg font-medium">系統正在背景每分鐘自動偵測「預定全域廣播時間」是否到達。</p>
+                          <p className="text-[10px] text-slate-500 mt-5 text-center bg-slate-900/50 py-2 rounded-lg font-medium">機器人每分鐘自動掃描廣播排程，確保推播精準發射。</p>
                       </div>
                   ) : (
                       <div className="flex flex-col items-center text-slate-500">
                           <AlertTriangle size={32} className="mb-2 opacity-50"/>
                           <p className="font-bold text-sm">未能取得機器人狀態</p>
-                          <p className="text-xs mt-1">請確認是否已在 Supabase 執行建立 View 的 SQL 指令。</p>
+                          <p className="text-xs mt-1">請確認是否已在 Supabase 執行更新 View 的 SQL 指令。</p>
                       </div>
                   )}
               </div>
           </div>
       </div>
 
-      {/* 🌟 外部基礎設施矩陣面板 (無金鑰深層連結) */}
+      {/* 🌟 外部基礎設施矩陣面板 */}
       <div className="bg-slate-900 p-6 md:p-8 rounded-[2rem] shadow-xl border border-slate-800 relative overflow-hidden mt-6">
           <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/4 pointer-events-none"></div>
           
@@ -326,7 +353,9 @@ export default function SystemStatus() {
                   </div>
                   <div>
                       <h4 className="text-white font-black text-lg mb-1 flex items-center gap-1 group-hover:text-green-400 transition-colors">Supabase 總部 <ExternalLink size={14}/></h4>
-                      <p className="text-slate-400 text-xs font-medium leading-relaxed">監控 Database 容量<br/>Storage 圖片儲存空間<br/>API 請求總量上限</p>
+                      <p className="text-slate-400 text-xs font-medium leading-relaxed">
+                          監控 Database 容量 (500MB)<br/>Storage 圖片儲存空間 (1GB)<br/>API 請求總量上限
+                      </p>
                   </div>
               </a>
 
@@ -340,7 +369,9 @@ export default function SystemStatus() {
                   </div>
                   <div>
                       <h4 className="text-white font-black text-lg mb-1 flex items-center gap-1 group-hover:text-slate-300 transition-colors">Vercel 網頁主機 <ExternalLink size={14}/></h4>
-                      <p className="text-slate-400 text-xs font-medium leading-relaxed">監控 Bandwidth 網站總流量<br/>Serverless 函式運算時間<br/>網域 SSL 憑證狀態</p>
+                      <p className="text-slate-400 text-xs font-medium leading-relaxed">
+                          監控 Bandwidth 網站總流量<br/>Serverless 函式運算時間<br/>網域 SSL 憑證狀態
+                      </p>
                   </div>
               </a>
 
@@ -354,7 +385,9 @@ export default function SystemStatus() {
                   </div>
                   <div>
                       <h4 className="text-white font-black text-lg mb-1 flex items-center gap-1 group-hover:text-blue-400 transition-colors">Google Cloud <ExternalLink size={14}/></h4>
-                      <p className="text-slate-400 text-xs font-medium leading-relaxed">監控 OAuth 登入請求數<br/>Google API 額度與金流<br/>身分認證憑證管理</p>
+                      <p className="text-slate-400 text-xs font-medium leading-relaxed">
+                          監控 Google OAuth 登入請求數<br/>Google API 額度與信用卡金流<br/>身分認證憑證管理
+                      </p>
                   </div>
               </a>
 
@@ -368,7 +401,9 @@ export default function SystemStatus() {
                   </div>
                   <div>
                       <h4 className="text-white font-black text-lg mb-1 flex items-center gap-1 group-hover:text-purple-400 transition-colors">GitHub 原始碼庫 <ExternalLink size={14}/></h4>
-                      <p className="text-slate-400 text-xs font-medium leading-relaxed">監控 Repository 容量限制<br/>Actions 自動部署分鐘數<br/>程式碼版本庫安全</p>
+                      <p className="text-slate-400 text-xs font-medium leading-relaxed">
+                          監控 Repository 容量限制<br/>GitHub Actions 自動部署分鐘數<br/>程式碼版本庫安全
+                      </p>
                   </div>
               </a>
           </div>
