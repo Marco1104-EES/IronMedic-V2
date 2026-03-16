@@ -17,7 +17,6 @@ import RaceDetail from './pages/RaceDetail'
 import RaceBuilder from './admin/RaceBuilder' 
 import RaceManager from './admin/RaceManager' 
 import DigitalID from './pages/DigitalID'
-// 引入賽事任務群體廣播頁面
 import RaceBroadcast from './admin/RaceBroadcast'
 
 // 推播金鑰轉換工具函數
@@ -222,54 +221,6 @@ function App() {
             <button onClick={() => setNotificationPermission('denied')} className="text-slate-400 hover:text-slate-600 p-1.5 transition-colors shrink-0 bg-slate-50 rounded-lg" title="稍後再說"><X size={16}/></button>
         </div>
       )}
-
-      {/* 系統除錯按鈕 (測試用) */}
-      <div className="fixed bottom-24 left-6 z-[9999]">
-          <button 
-              onClick={async () => {
-                  try {
-                      alert('系統處理中，請稍候...');
-                      const registration = await navigator.serviceWorker.ready;
-                      
-                      // 移除舊訂閱
-                      const oldSubscription = await registration.pushManager.getSubscription();
-                      if (oldSubscription) {
-                          await oldSubscription.unsubscribe();
-                      }
-                      
-                      // 重新申請訂閱
-                      const VAPID_PUBLIC_KEY = 'BLcSYfjSIdYX_rnN7YVeTo_OrXSDkIXoqLAz59I_2AxP_w-tAWZID3iZFVzCTFxogTibrL7-LiiirNcLslRf5b8'; 
-                      const subscription = await registration.pushManager.subscribe({
-                          userVisibleOnly: true,
-                          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
-                      });
-                      
-                      // 寫入資料庫
-                      const subJSON = subscription.toJSON();
-                      const { data: { user } } = await supabase.auth.getUser();
-                      
-                      if (user) {
-                          const { error } = await supabase.from('push_subscriptions').upsert({
-                             user_id: user.id,
-                             endpoint: subJSON.endpoint,
-                             p256dh: subJSON.keys.p256dh,
-                             auth: subJSON.keys.auth
-                          }, { onConflict: 'user_id, endpoint' });
-                          
-                          if (error) throw error;
-                          alert('系統訊息：推播金鑰已成功更新。');
-                      } else {
-                          alert('請先登入系統。');
-                      }
-                  } catch (e) {
-                      alert('系統更新異常：\n' + e.message);
-                  }
-              }}
-              className="bg-slate-700 hover:bg-slate-600 text-white text-sm font-bold px-4 py-3 rounded-full shadow-lg border border-slate-500 transition-colors"
-          >
-              更新推播金鑰
-          </button>
-      </div>
 
       <Routes>
         <Route path="/login" element={<Login />} />

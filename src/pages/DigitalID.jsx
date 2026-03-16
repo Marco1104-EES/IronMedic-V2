@@ -231,16 +231,20 @@ export default function DigitalID() {
           setMyRaces(myRaces.filter(r => r.id !== raceId))
           
           try {
-              const { error: notifError } = await supabase.from('user_notifications').insert({
-                  user_id: profile.id,
-                  tab: 'personal',
-                  category: 'race',
-                  message: `您已成功取消報名【${raceName}】，名額已釋出。`,
-                  is_read: false
-              })
-              if (notifError) {
-                  console.error("Supabase 通知寫入失敗:", notifError);
-                  alert(`⚠️ 退賽成功，但通知發送失敗：${notifError.message} (請檢查 RLS 政策)`);
+              // 確保 profile.id 有效才寫入通知，避免外鍵報錯
+              if (profile && profile.id && profile.id !== 'unknown') {
+                  const { error: notifError } = await supabase.from('user_notifications').insert({
+                      user_id: profile.id,
+                      tab: 'personal',
+                      category: 'race',
+                      message: `您已成功取消報名【${raceName}】，名額已釋出。`,
+                      is_read: false
+                  })
+                  if (notifError) {
+                      console.error("Supabase 通知寫入失敗:", notifError);
+                  }
+              } else {
+                  console.warn("會員 ID 未知，略過通知寫入。");
               }
           } catch(e) { 
               console.error("發送退賽通知異常", e);
@@ -367,7 +371,6 @@ export default function DigitalID() {
   
   const unreadCountReal = notifications.filter(n => !(n.isRead || n.is_read)).length;
 
-  // 💡 極限包容判定法：不管資料庫存的是 Y, y, true, "true", 1, "1"，通通判定為有訓練資格！
   const hasTrainingStatus = ['Y', 'y', 'true', true, '1', 1].includes(displayUser.training_status);
 
   return (
@@ -421,7 +424,6 @@ export default function DigitalID() {
                   </button>
               </div>
 
-              {/* 🌟 核心修改點：五大護法徽章排序與強化顯示防呆 */}
               <div className="flex flex-wrap gap-2 relative z-10">
                   {displayUser.is_vip === 'Y' && <span className="bg-amber-400 text-amber-900 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1 shadow-lg shadow-amber-400/20"><Crown size={12}/> VIP</span>}
                   
@@ -429,7 +431,6 @@ export default function DigitalID() {
                   
                   {displayUser.is_new_member === 'Y' && <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/50 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><Sprout size={12}/> 新人</span>}
                   
-                  {/* ⚡ 終極防呆版「當屆訓練」徽章 */}
                   {hasTrainingStatus && (
                       <span className="bg-purple-500 text-white text-xs font-black px-3 py-1 rounded-full flex items-center gap-1 shadow-lg shadow-purple-500/30">
                           <Zap size={12} className="text-purple-100"/> 當屆訓練
