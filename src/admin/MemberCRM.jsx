@@ -4,7 +4,7 @@ import { supabase } from '../supabaseClient'
 import * as XLSX from 'xlsx' 
 import { Search, Trash2, Edit, User, X, Shield, CheckSquare, Square, FileSpreadsheet, Upload, Download, Save, AlertCircle, Settings, ExternalLink, Zap, Crown, Flame, Cloud, Loader2, Ban, ShieldAlert, ShoppingCart, PlusCircle, ArrowUpDown, ChevronUp, ChevronDown, Users, Award, CheckCircle, XCircle, HeartPulse, Activity, UserCheck } from 'lucide-react'
 
-// 🌟 微型 AI 字典：將中文通知翻譯成系統欄位 Key
+// 微型 AI 字典：將中文通知翻譯成系統欄位 Key
 const FIELD_TRANSLATION_MAP = {
     '姓名': 'full_name',
     '英文姓名': 'english_name',
@@ -26,11 +26,10 @@ const FIELD_TRANSLATION_MAP = {
     '緊急電話': 'emergency_phone'
 };
 
-// 🚀 終極防跳動解法：獨立在外的 FieldEditor 元件
+// 終極防跳動解法：獨立在外的 FieldEditor 元件
 const FieldEditor = ({ label, name, type = "text", options = [], value, onChange, isHighlighted }) => {
     const [localValue, setLocalValue] = useState(value || '');
 
-    // 當外部傳入的值改變時（例如換人編輯），同步更新內部值
     useEffect(() => {
         setLocalValue(value || '');
     }, [value]);
@@ -41,7 +40,6 @@ const FieldEditor = ({ label, name, type = "text", options = [], value, onChange
     const combinedClass = `${baseClass} ${isHighlighted ? highlightClass : normalClass}`;
 
     const handleBlur = () => {
-        // 只有在失去焦點時，才把資料送回主程式
         onChange(name, localValue);
     };
 
@@ -57,7 +55,7 @@ const FieldEditor = ({ label, name, type = "text", options = [], value, onChange
                     value={localValue} 
                     onChange={e => {
                         setLocalValue(e.target.value);
-                        onChange(name, e.target.value); // Select 可以即時更新，因為點擊就收起了
+                        onChange(name, e.target.value); 
                     }}
                 >
                     <option value="">請選擇</option>
@@ -68,8 +66,8 @@ const FieldEditor = ({ label, name, type = "text", options = [], value, onChange
                     type={type} 
                     className={combinedClass} 
                     value={localValue} 
-                    onChange={e => setLocalValue(e.target.value)} // 打字時只更新自己
-                    onBlur={handleBlur} // 離開時才更新主程式
+                    onChange={e => setLocalValue(e.target.value)} 
+                    onBlur={handleBlur} 
                 />
             )}
         </div>
@@ -85,7 +83,7 @@ export default function MemberCRM() {
   const [totalPages, setTotalPages] = useState(1)
   const ITEMS_PER_PAGE = 20 
   
-  const [roleStats, setRoleStats] = useState({ SUPER_ADMIN: 0, TOURNAMENT_DIRECTOR: 0, VERIFIED_MEDIC: 0, USER: 0 })
+  const [roleStats, setRoleStats] = useState({ SUPER_ADMIN: 0, TOURNAMENT_DIRECTOR: 0, VERIFIED_MEDIC: 0, USER: 0, BLACKLISTED: 0 })
 
   const [exportCart, setExportCart] = useState(new Set())
   const [isCartModalOpen, setIsCartModalOpen] = useState(false)
@@ -111,7 +109,6 @@ export default function MemberCRM() {
       group4_ext: false       
   })
 
-  // 🌟 高亮狀態
   const [highlightFields, setHighlightFields] = useState([])
 
   const fileInputRef = useRef(null)
@@ -137,55 +134,6 @@ export default function MemberCRM() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, searchTerm, currentView])
 
-  // 🚀 閱後即焚的「全庫狙擊系統」
-  useEffect(() => {
-      const payload = location.state;
-      
-      // 如果沒有包裹，或是沒有使用者 ID，就直接跳過
-      if (!payload || !payload.autoEditUserId) return;
-
-      const targetId = payload.autoEditUserId;
-      const changesMsg = payload.changes || '';
-
-      // 💥 閱後即焚：立刻把路由上的 state 清空！完美避開嚴格模式的重複觸發陷阱
-      navigate(location.pathname + location.search, { replace: true, state: {} });
-
-      const executeSniperFetch = async () => {
-          try {
-              // 無視分頁，強制去資料庫把這個人抓出來
-              const { data: targetMember, error } = await supabase
-                  .from('profiles')
-                  .select('*')
-                  .eq('id', targetId)
-                  .maybeSingle();
-
-              if (targetMember && !error) {
-                  // 1. 設定會員資料並開窗
-                  setEditingMember({ ...targetMember });
-                  setIsEditModalOpen(true);
-
-                  // 2. 啟動微型 AI 字典，找出該亮的欄位
-                  let fieldsToHighlight = [];
-                  Object.keys(FIELD_TRANSLATION_MAP).forEach(chiKey => {
-                      if (changesMsg.includes(chiKey)) {
-                          fieldsToHighlight.push(FIELD_TRANSLATION_MAP[chiKey]);
-                      }
-                  });
-                  setHighlightFields(fieldsToHighlight);
-                  
-              } else {
-                  // 防呆機制：萬一這個人被刪掉了
-                  alert(`🚨 自動開窗失敗：資料庫中找不到該名會員的資料。`);
-              }
-          } catch (err) {
-              console.error("自動開窗異常:", err);
-          }
-      };
-
-      executeSniperFetch();
-
-  }, [location.state, location.pathname, location.search, navigate]);
-
   const handleCloseEditModal = () => {
       setIsEditModalOpen(false);
       setHighlightFields([]);
@@ -196,25 +144,29 @@ export default function MemberCRM() {
       navigate(`/admin/members?view=${targetView}`)
   }
 
+  // 🌟 終極修復：使用 or('is_blacklisted.is.null,is_blacklisted.eq.N') 避開 SQL 的 NULL 陷阱
   const fetchGlobalStats = async () => {
       try {
           const [
               { count: superAdminCount },
               { count: directorCount },
               { count: medicCount },
-              { count: userCount }
+              { count: userCount },
+              { count: blacklistedCount }
           ] = await Promise.all([
-              supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'SUPER_ADMIN'),
-              supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'TOURNAMENT_DIRECTOR'),
-              supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'VERIFIED_MEDIC'), 
-              supabase.from('profiles').select('*', { count: 'exact', head: true }).or('role.eq.USER,role.is.null') 
+              supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'SUPER_ADMIN').or('is_blacklisted.is.null,is_blacklisted.eq.N'),
+              supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'TOURNAMENT_DIRECTOR').or('is_blacklisted.is.null,is_blacklisted.eq.N'),
+              supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'VERIFIED_MEDIC').or('is_blacklisted.is.null,is_blacklisted.eq.N'), 
+              supabase.from('profiles').select('*', { count: 'exact', head: true }).or('role.eq.USER,role.is.null').or('is_blacklisted.is.null,is_blacklisted.eq.N'),
+              supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_blacklisted', 'Y')
           ])
 
           setRoleStats({
               SUPER_ADMIN: superAdminCount || 0,
               TOURNAMENT_DIRECTOR: directorCount || 0,
               VERIFIED_MEDIC: medicCount || 0,
-              USER: userCount || 0
+              USER: userCount || 0,
+              BLACKLISTED: blacklistedCount || 0 
           })
       } catch (err) {
           console.error("統計資料更新失敗:", err)
@@ -226,6 +178,11 @@ export default function MemberCRM() {
       setLoading(true)
       let query = supabase.from('profiles').select('*', { count: 'exact' }).order('created_at', { ascending: false })
       
+      // 🌟 終極修復：確保其他分頁不會撈出黑名單人員，同時安全包容 NULL
+      if (currentView !== 'BLACKLIST') {
+          query = query.or('is_blacklisted.is.null,is_blacklisted.eq.N');
+      }
+
       if (currentView === 'COMMAND') query = query.or('role.eq.SUPER_ADMIN,role.eq.TOURNAMENT_DIRECTOR,is_vip.eq.Y')
       else if (currentView === 'ACTIVE') query = query.eq('role', 'VERIFIED_MEDIC') 
       else if (currentView === 'RESERVE') query = query.or('role.eq.USER,role.is.null')
@@ -277,23 +234,21 @@ export default function MemberCRM() {
           handleCloseEditModal()
           await fetchGlobalStats() 
           await fetchMembers()
-          alert("✅ 會員資料更新成功！")
+          alert("系統提示：會員資料更新成功。")
       } catch (err) { 
-          alert("更新失敗: " + err.message) 
+          alert("資料更新失敗: " + err.message) 
       } finally {
           setSavingMember(false)
       }
   }
 
-  // 🌟 核心戰略修改：五大護法優先權神級配分！
-  // VIP > 帶隊教官 > 新人 > 訓練 > 當屆
   function getPriorityScore(m) {
       let score = 0
-      if (m.is_vip === 'Y') score += 9999              // 絕對霸主
-      if (m.is_team_leader === 'Y') score += 40        // 帶隊教官 第二大
-      if (m.is_new_member === 'Y') score += 30         // 新人標記 第三大
-      if (m.training_status === 'Y') score += 20       // 當屆訓練 第四大
-      if (m.is_current_member === 'Y') score += 10     // 當屆會員 基本盤
+      if (m.is_vip === 'Y') score += 9999              
+      if (m.is_team_leader === 'Y') score += 40        
+      if (m.is_new_member === 'Y') score += 30         
+      if (m.training_status === 'Y') score += 20       
+      if (m.is_current_member === 'Y') score += 10     
       return score
   }
 
@@ -308,16 +263,49 @@ export default function MemberCRM() {
   }
 
   const addToCart = () => {
-      const newCart = new Set(exportCart); selectedIds.forEach(id => newCart.add(id)); setExportCart(newCart); setSelectedIds(new Set()); alert(`已將 ${selectedIds.size} 人加入購物車！目前共 ${newCart.size} 人。`)
+      const newCart = new Set(exportCart); selectedIds.forEach(id => newCart.add(id)); setExportCart(newCart); setSelectedIds(new Set()); alert(`已加入 ${selectedIds.size} 人。目前共 ${newCart.size} 人待匯出。`)
   }
   const toggleSelection = (id) => { const newSet = new Set(selectedIds); if (newSet.has(id)) newSet.delete(id); else newSet.add(id); setSelectedIds(newSet) }
   const toggleSelectAll = () => { if (selectedIds.size === members.length) setSelectedIds(new Set()); else setSelectedIds(new Set(members.map(m => m.id))) }
-  const handleDelete = async (id) => { if(window.confirm('確定刪除此會員? (此操作無法復原)')) { await supabase.from('profiles').delete().eq('id', id); setMembers(prev => prev.filter(m => m.id !== id)); fetchGlobalStats() } }
+  
+  const handleDelete = async (id) => { 
+      if(window.confirm('系統確認：確定要停權/刪除此會員嗎？\n\n(此操作將會把會員移至停權黑名單，並在系統備註中留下刪除紀錄，以確保資料安全性)')) { 
+          
+          const memberToDelete = members.find(m => m.id === id);
+          if (!memberToDelete) return;
+
+          const today = new Date().toISOString().split('T')[0];
+          const currentNote = memberToDelete.admin_note || '';
+          const newNote = currentNote ? `${currentNote}\n[系統紀錄] 人員已於 ${today} 刪除/停權` : `[系統紀錄] 人員已於 ${today} 刪除/停權`;
+
+          try {
+              const { error } = await supabase.from('profiles').update({
+                  is_blacklisted: 'Y',
+                  admin_note: newNote
+              }).eq('id', id);
+
+              if (error) throw error;
+
+              if (currentView !== 'BLACKLIST') {
+                  setMembers(prev => prev.filter(m => m.id !== id));
+              } else {
+                  fetchMembers(); 
+              }
+              
+              fetchGlobalStats(); 
+              alert('系統訊息：人員已成功標記為停權/刪除，並保留歷史紀錄。');
+
+          } catch (err) {
+              console.error('刪除作業失敗:', err);
+              alert('刪除作業發生異常：' + err.message);
+          }
+      } 
+  }
   
   const handleFileUpload = async(e) => {  }
   
   const handleExportCart = async() => { 
-    if (exportCart.size === 0) return alert("購物車是空的！")
+    if (exportCart.size === 0) return alert("匯出清單為空。")
     setExporting(true)
     try {
         const { data: cartData, error } = await supabase.from('profiles').select('*').in('id', Array.from(exportCart)).order('created_at', { ascending: false })
@@ -394,10 +382,9 @@ export default function MemberCRM() {
 
         setIsCartModalOpen(false)
         setExportCart(new Set())
-    } catch (err) { alert('匯出失敗: ' + err.message) } finally { setExporting(false) }
+    } catch (err) { alert('系統匯出失敗: ' + err.message) } finally { setExporting(false) }
   }
 
-  // 🌟 用 useCallback 包裝更新邏輯，供 FieldEditor 使用
   const handleFieldChange = useCallback((name, value) => {
       setEditingMember(prev => ({ ...prev, [name]: value }));
   }, []);
@@ -414,19 +401,19 @@ export default function MemberCRM() {
                     全部人員總表 
                     <span className="text-xs px-2 py-1 rounded text-white bg-blue-600">{currentView}</span>
                 </h1>
-                <p className="text-sm text-slate-500">自動配對/欄位配置可選擇版 V10.8</p>
+                <p className="text-sm text-slate-500">系統資料庫檢視模式 V10.9.1</p>
             </div>
             <div className="flex gap-2">
                  <button onClick={() => navigate('/admin/import')} className="px-4 py-2 bg-slate-100 text-slate-600 rounded-lg font-bold hover:bg-slate-200 shadow-sm flex items-center gap-1"><FileSpreadsheet size={16}/> 前往匯入中心</button>
                  <button onClick={() => setIsColumnConfigOpen(!isColumnConfigOpen)} className={`px-4 py-2 rounded-lg font-bold transition-all ${isColumnConfigOpen ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'}`}>欄位配置</button>
                  <button onClick={() => setIsCartModalOpen(true)} className={`px-4 py-2 rounded-lg font-bold shadow transition-all ${exportCart.size > 0 ? 'bg-green-600 text-white animate-pulse' : 'bg-slate-800 text-slate-400'}`}>
-                     匯出購物車 ({exportCart.size})
+                     匯出作業 ({exportCart.size})
                  </button>
             </div>
         </div>
         
-        {/* 🔥 戰情統計卡 */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 animate-fade-in-down">
+        {/* 狀態統計卡 */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 animate-fade-in-down">
             <div onClick={() => handleCardClick('COMMAND')} className={`border p-3 rounded-xl flex items-center gap-3 cursor-pointer transition-all group ${currentView==='COMMAND'?'bg-red-100 border-red-300 ring-2 ring-red-400':'bg-red-50 border-red-100 hover:bg-red-100'}`}>
                 <div className="bg-red-500 text-white p-2 rounded-lg group-hover:scale-110 transition-transform"><ShieldAlert size={20}/></div>
                 <div><div className="text-xs text-red-400 font-bold uppercase">Super Admin</div><div className="text-xl font-black text-red-600 transition-all">{roleStats.SUPER_ADMIN}</div></div>
@@ -445,6 +432,11 @@ export default function MemberCRM() {
             <div onClick={() => handleCardClick('RESERVE')} className={`border p-3 rounded-xl flex items-center gap-3 cursor-pointer transition-all group ${currentView==='RESERVE'?'bg-slate-200 border-slate-300 ring-2 ring-slate-400':'bg-slate-50 border-slate-100 hover:bg-slate-100'}`}>
                 <div className="bg-slate-400 text-white p-2 rounded-lg group-hover:scale-110 transition-transform"><Users size={20}/></div>
                 <div><div className="text-xs text-slate-400 font-bold uppercase">User / Other</div><div className="text-xl font-black text-slate-600 transition-all">{roleStats.USER}</div></div>
+            </div>
+
+            <div onClick={() => handleCardClick('BLACKLIST')} className={`border p-3 rounded-xl flex items-center gap-3 cursor-pointer transition-all group ${currentView==='BLACKLIST'?'bg-slate-800 border-slate-900 ring-2 ring-slate-500':'bg-white border-slate-200 hover:bg-slate-100'}`}>
+                <div className={`${currentView==='BLACKLIST'?'bg-slate-700':'bg-slate-800'} text-white p-2 rounded-lg group-hover:scale-110 transition-transform`}><Ban size={20}/></div>
+                <div><div className={`text-xs font-bold uppercase ${currentView==='BLACKLIST'?'text-slate-400':'text-slate-500'}`}>停權人員</div><div className={`text-xl font-black transition-all ${currentView==='BLACKLIST'?'text-white':'text-slate-800'}`}>{roleStats.BLACKLISTED}</div></div>
             </div>
         </div>
       </div>
@@ -472,11 +464,11 @@ export default function MemberCRM() {
           <input type="text" placeholder="搜尋姓名、Email、電話..." className="w-full pl-4 pr-4 py-2 bg-slate-50 border rounded-lg outline-none focus:bg-white focus:ring-2 focus:ring-blue-100 transition-all" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}/>
       </div>
 
-      {/* 購物車操作列 */}
+      {/* 批次操作列 */}
       {selectedIds.size > 0 && (
           <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl z-50 flex items-center gap-4 animate-bounce-in">
-              <span className="font-bold text-sm">已選 {selectedIds.size} 人</span>
-              <button onClick={addToCart} className="font-bold text-sm flex items-center hover:text-green-400"><PlusCircle size={16} className="mr-1"/> 加入購物車</button>
+              <span className="font-bold text-sm">已選擇 {selectedIds.size} 筆</span>
+              <button onClick={addToCart} className="font-bold text-sm flex items-center hover:text-green-400"><PlusCircle size={16} className="mr-1"/> 加入匯出清單</button>
               <button onClick={() => setSelectedIds(new Set())}><X size={18}/></button>
           </div>
       )}
@@ -497,57 +489,65 @@ export default function MemberCRM() {
                     </th>}
                     
                     {columnGroups.group2_event && <th className="p-4 bg-red-50 text-red-700 hover:bg-red-100" onClick={() => handleSort('priority')}>
-                        <div className="flex items-center gap-1">狀態與優先權 {sortConfig.key==='priority' && <ArrowUpDown size={14}/>}</div>
+                        <div className="flex items-center gap-1">狀態與優先順序 {sortConfig.key==='priority' && <ArrowUpDown size={14}/>}</div>
                     </th>}
                     
                     {columnGroups.group3_logistics && <th className="p-4 bg-amber-50 text-amber-700 hover:bg-amber-100">後勤資訊 (尺寸/交通/住宿/緊急聯絡人)</th>}
                     {columnGroups.group4_ext && <th className="p-4 bg-purple-50 text-purple-700">擴充註記 (Admin Note)</th>}
                     
-                    <th className="p-4 text-right bg-slate-50">操作</th>
+                    <th className="p-4 text-right bg-slate-50">管理作業</th>
                 </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
                 {sortedMembers.map((member) => {
                     const isSelected = selectedIds.has(member.id)
                     const isInCart = exportCart.has(member.id)
+                    const isBlacklisted = member.is_blacklisted === 'Y'
+
                     return (
-                    <tr key={member.id} className={`group transition-colors ${isSelected ? 'bg-blue-50' : isInCart ? 'bg-green-50/50' : 'hover:bg-slate-50'}`}>
+                    <tr key={member.id} className={`group transition-colors ${isBlacklisted ? 'bg-slate-50 opacity-60 hover:opacity-100' : isSelected ? 'bg-blue-50' : isInCart ? 'bg-green-50/50' : 'hover:bg-slate-50'}`}>
                          <td className="p-4 text-center"><button onClick={() => toggleSelection(member.id)}><CheckSquare size={20} className={isSelected ? 'text-blue-600' : 'text-slate-300 hover:text-blue-400'}/></button></td>
                          
                          <td className="p-4">
                              <div className="font-bold text-slate-800 flex items-center gap-2">
                                  {member.full_name}
-                                 {member.is_vip === 'Y' && <Crown size={14} className="text-amber-500" title="VIP"/>}
-                                 {isInCart && <ShoppingCart size={14} className="text-green-600" title="已在購物車"/>}
+                                 {isBlacklisted && <Ban size={14} className="text-slate-500" title="已停權"/>}
+                                 {member.is_vip === 'Y' && !isBlacklisted && <Crown size={14} className="text-amber-500" title="VIP"/>}
+                                 {isInCart && <ShoppingCart size={14} className="text-green-600" title="待匯出"/>}
                              </div>
                              <div className="text-xs text-slate-400 font-mono">{member.email}</div>
-                             <div className="text-[10px] text-slate-500 mt-1">{member.phone || '無電話'}</div>
+                             <div className="text-[10px] text-slate-500 mt-1">{member.phone || '無聯絡電話'}</div>
                          </td>
 
                          {columnGroups.group1_general && <td className="p-4 text-sm text-slate-600">
                              <div className="flex items-center gap-2 mb-1">
-                                 <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-bold">{member.medical_license || '無證照資料'}</span>
+                                 <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-bold">{member.medical_license || '未提供證照資料'}</span>
                                  {member.blood_type && <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold">{member.blood_type}</span>}
                              </div>
                              <div className="text-xs text-slate-500">ID: {member.national_id || '-'}</div>
                          </td>}
 
                          {columnGroups.group2_event && <td className="p-4">
-                             <div className="mb-1">{renderPriorityIcon(member)}</div>
-                             <div className="flex gap-2 items-center mt-1 flex-wrap">
-                                 {member.is_current_member === 'Y' ? (
-                                     <span className="text-[10px] text-green-700 bg-green-100 px-1.5 py-0.5 rounded flex items-center gap-0.5 font-bold"><CheckCircle size={10}/>當屆</span>
-                                 ) : (
-                                     <span className="text-[10px] text-slate-500 bg-slate-200 px-1.5 py-0.5 rounded flex items-center gap-0.5 font-medium"><XCircle size={10}/>非當屆</span>
-                                 )}
-                                 {/* 🌟 在列表顯示當屆訓練小標籤 */}
-                                 {member.training_status === 'Y' && (
-                                     <span className="text-[10px] text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded flex items-center gap-0.5 font-bold"><Activity size={10}/>訓練</span>
-                                 )}
-                                 <span className="text-[10px] font-bold text-slate-500 bg-white border border-slate-200 px-1.5 py-0.5 rounded">
-                                     {member.role === 'VERIFIED_MEDIC' ? '醫護鐵人' : member.role === 'USER' ? '一般會員' : member.role}
-                                 </span>
-                             </div>
+                             {isBlacklisted ? (
+                                 <span className="flex items-center text-slate-500 font-bold bg-slate-200 px-2 py-1 rounded w-max"><Ban size={16} className="mr-1"/> 帳號已停權</span>
+                             ) : (
+                                 <>
+                                     <div className="mb-1">{renderPriorityIcon(member)}</div>
+                                     <div className="flex gap-2 items-center mt-1 flex-wrap">
+                                         {member.is_current_member === 'Y' ? (
+                                             <span className="text-[10px] text-green-700 bg-green-100 px-1.5 py-0.5 rounded flex items-center gap-0.5 font-bold"><CheckCircle size={10}/>當屆</span>
+                                         ) : (
+                                             <span className="text-[10px] text-slate-500 bg-slate-200 px-1.5 py-0.5 rounded flex items-center gap-0.5 font-medium"><XCircle size={10}/>非當屆</span>
+                                         )}
+                                         {member.training_status === 'Y' && (
+                                             <span className="text-[10px] text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded flex items-center gap-0.5 font-bold"><Activity size={10}/>訓練</span>
+                                         )}
+                                         <span className="text-[10px] font-bold text-slate-500 bg-white border border-slate-200 px-1.5 py-0.5 rounded">
+                                             {member.role === 'VERIFIED_MEDIC' ? '醫護鐵人' : member.role === 'USER' ? '一般會員' : member.role}
+                                         </span>
+                                     </div>
+                                 </>
+                             )}
                          </td>}
 
                          {columnGroups.group3_logistics && <td className="p-4 text-sm">
@@ -560,17 +560,19 @@ export default function MemberCRM() {
                                      <ShieldAlert size={10}/> {member.emergency_name} ({member.emergency_phone})
                                  </div>
                              )}
-                             <div className="text-[10px] text-slate-400 truncate w-40 mt-1" title={member.address}>{member.address || '無地址'}</div>
+                             <div className="text-[10px] text-slate-400 truncate w-40 mt-1" title={member.address}>{member.address || '無聯絡地址'}</div>
                          </td>}
 
                          {columnGroups.group4_ext && <td className="p-4 text-xs text-purple-600 font-medium">
-                             <div className="bg-purple-50 p-2 rounded-lg line-clamp-2" title={member.admin_note}>{member.admin_note || '無註記'}</div>
+                             <div className="bg-purple-50 p-2 rounded-lg line-clamp-2" title={member.admin_note}>{member.admin_note || '無註記資訊'}</div>
                          </td>}
 
                          <td className="p-4 text-right">
                              <div className="flex justify-end gap-2">
-                                 <button onClick={() => handleEditClick(member)} className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors border border-transparent hover:border-blue-200 shadow-sm bg-white" title="編輯會員完整資料"><Edit size={16}/></button>
-                                 <button onClick={() => handleDelete(member.id)} className="p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-lg transition-colors border border-transparent hover:border-red-200 shadow-sm bg-white" title="刪除此會員"><Trash2 size={16}/></button>
+                                 <button onClick={() => handleEditClick(member)} className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors border border-transparent hover:border-blue-200 shadow-sm bg-white" title="編輯會員紀錄"><Edit size={16}/></button>
+                                 {!isBlacklisted && (
+                                     <button onClick={() => handleDelete(member.id)} className="p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-lg transition-colors border border-transparent hover:border-red-200 shadow-sm bg-white" title="刪除並加入停權名單"><Trash2 size={16}/></button>
+                                 )}
                              </div>
                          </td>
                     </tr>
@@ -582,11 +584,11 @@ export default function MemberCRM() {
       {/* 分頁控制 */}
       <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-200 mt-4">
           <button disabled={page === 1} onClick={() => setPage(p => p - 1)} className="px-4 py-2 bg-slate-100 rounded-lg hover:bg-slate-200 disabled:opacity-50 font-bold text-slate-600 transition-colors">上一頁</button>
-          <span className="font-bold text-slate-600 bg-slate-50 px-4 py-1.5 rounded-lg border border-slate-200">第 {page} / {totalPages || 1} 頁</span>
+          <span className="font-bold text-slate-600 bg-slate-50 px-4 py-1.5 rounded-lg border border-slate-200">第 {page} 頁，共 {totalPages || 1} 頁</span>
           <button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)} className="px-4 py-2 bg-slate-100 rounded-lg hover:bg-slate-200 disabled:opacity-50 font-bold text-slate-600 transition-colors">下一頁</button>
       </div>
 
-      {/* 🌟 CRM 專業編輯面板 (徹底解決手機版失焦跳動) */}
+      {/* CRM 編輯面板 */}
       {isEditModalOpen && editingMember && (
           <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[100] p-4 animate-fade-in backdrop-blur-sm" onClick={handleCloseEditModal}>
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col max-h-[90vh] overflow-hidden" onClick={e => e.stopPropagation()}>
@@ -594,95 +596,91 @@ export default function MemberCRM() {
                   {/* Header */}
                   <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
                       <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
-                          <UserCheck className="text-blue-600"/> 會員資料管理 (CRM)
-                          <span className="text-xs font-bold text-slate-500 bg-white px-2 py-1 rounded border shadow-sm ml-2">ID: {editingMember.id.substring(0,8)}</span>
+                          <UserCheck className="text-blue-600"/> 會員資料管理中心
+                          <span className="text-xs font-bold text-slate-500 bg-white px-2 py-1 rounded border shadow-sm ml-2">系統 ID: {editingMember.id.substring(0,8)}</span>
                       </h3>
                       <button onClick={handleCloseEditModal} className="p-2 text-slate-400 hover:bg-slate-200 rounded-full transition-colors"><X size={20}/></button>
                   </div>
 
-                  {/* Body (雙欄設計) */}
+                  {/* Body */}
                   <div className="p-6 overflow-y-auto custom-scrollbar bg-slate-50 flex-1">
                       
-                      {/* 如果有高亮欄位，顯示系統提示 */}
                       {highlightFields.length > 0 && (
                           <div className="mb-6 bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-start gap-3 shadow-sm animate-bounce-in">
                               <Zap size={20} className="text-amber-500 shrink-0 mt-0.5"/>
                               <div>
-                                  <div className="text-sm font-black text-amber-800">智慧高亮審查啟動</div>
+                                  <div className="text-sm font-black text-amber-800">智慧異動高亮提醒</div>
                                   <div className="text-xs font-bold text-amber-600/80 mt-1">
-                                      系統已自動為您標記出該會員最新修改的資料欄位 (橘黃色發光外框)。請確認無誤後點擊儲存。
+                                      系統已將該會員近期變更的資料欄位特別標示 (橘黃色高亮)。請審核後點擊儲存以完成更新。
                                   </div>
                               </div>
                           </div>
                       )}
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                          {/* 左欄：核心基本資料 */}
+                          {/* 左欄：核心資料 */}
                           <div className="space-y-6">
                               <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
                                   <h4 className="font-black text-slate-800 border-b pb-2 flex items-center gap-2"><User size={16} className="text-indigo-500"/> 核心基本資料</h4>
                                   
                                   <div className="grid grid-cols-2 gap-4">
-                                      {/* 🌟 替換為獨立的 FieldEditor */}
                                       <FieldEditor label="中文姓名" name="full_name" value={editingMember.full_name} onChange={handleFieldChange} isHighlighted={highlightFields.includes('full_name')} />
                                       <FieldEditor label="英文姓名" name="english_name" value={editingMember.english_name} onChange={handleFieldChange} isHighlighted={highlightFields.includes('english_name')} />
                                   </div>
                                   
                                   <div>
-                                      <label className="block text-xs font-bold text-slate-500 mb-1">系統登入 Email (唯讀)</label>
+                                      <label className="block text-xs font-bold text-slate-500 mb-1">登入帳號 Email (無法修改)</label>
                                       <input className="w-full border border-slate-200 p-2.5 rounded-lg bg-slate-100 text-slate-500 font-mono text-sm cursor-not-allowed" disabled value={editingMember.email || ''}/>
                                   </div>
 
                                   <div className="grid grid-cols-2 gap-4">
                                       <FieldEditor label="身分證字號" name="national_id" value={editingMember.national_id} onChange={handleFieldChange} isHighlighted={highlightFields.includes('national_id')} />
-                                      <FieldEditor label="生理性別" name="gender" type="select" options={['男', '女']} value={editingMember.gender} onChange={handleFieldChange} isHighlighted={highlightFields.includes('gender')} />
+                                      <FieldEditor label="性別" name="gender" type="select" options={['男', '女']} value={editingMember.gender} onChange={handleFieldChange} isHighlighted={highlightFields.includes('gender')} />
                                   </div>
 
                                   <div className="grid grid-cols-2 gap-4">
                                       <FieldEditor label="出生年月日" name="birthday" type="date" value={editingMember.birthday} onChange={handleFieldChange} isHighlighted={highlightFields.includes('birthday')} />
-                                      <FieldEditor label="手機號碼" name="phone" value={editingMember.phone} onChange={handleFieldChange} isHighlighted={highlightFields.includes('phone')} />
+                                      <FieldEditor label="連絡電話" name="phone" value={editingMember.phone} onChange={handleFieldChange} isHighlighted={highlightFields.includes('phone')} />
                                   </div>
-                                  <FieldEditor label="聯絡信箱 (可收信)" name="contact_email" type="email" value={editingMember.contact_email} onChange={handleFieldChange} isHighlighted={highlightFields.includes('contact_email')} />
+                                  <FieldEditor label="聯絡信箱" name="contact_email" type="email" value={editingMember.contact_email} onChange={handleFieldChange} isHighlighted={highlightFields.includes('contact_email')} />
                                   <FieldEditor label="通訊地址" name="address" value={editingMember.address} onChange={handleFieldChange} isHighlighted={highlightFields.includes('address')} />
                               </div>
 
-                              {/* 權限與狀態 */}
                               <div className="bg-blue-50/50 p-5 rounded-xl border border-blue-100 shadow-sm space-y-4">
-                                  <h4 className="font-black text-blue-900 border-b border-blue-200 pb-2 flex items-center gap-2"><Shield size={16} className="text-blue-500"/> 系統權限與狀態</h4>
+                                  <h4 className="font-black text-blue-900 border-b border-blue-200 pb-2 flex items-center gap-2"><Shield size={16} className="text-blue-500"/> 系統權限狀態</h4>
                                   
                                   <div>
-                                      <label className="block text-xs font-bold text-slate-500 mb-1">系統角色 (Role)</label>
+                                      <label className="block text-xs font-bold text-slate-500 mb-1">身分配置 (Role)</label>
                                       <select className="w-full border border-slate-300 p-2.5 rounded-lg outline-none font-bold bg-white focus:ring-2 focus:ring-blue-500" 
                                           value={editingMember.role || 'USER'} 
                                           onChange={e => setEditingMember({...editingMember, role: e.target.value})}>
-                                          <option value="USER">⚪ 一般會員 (USER)</option>
+                                          <option value="USER">⚪ 一般人員 (USER)</option>
                                           <option value="VERIFIED_MEDIC">🟢 醫護鐵人 (VERIFIED_MEDIC)</option>
                                           <option value="TOURNAMENT_DIRECTOR">🔵 賽事總監 (DIRECTOR)</option>
-                                          <option value="SUPER_ADMIN">🔴 超級管理員 (ADMIN)</option>
+                                          <option value="SUPER_ADMIN">🔴 系統管理員 (ADMIN)</option>
                                       </select>
                                   </div>
 
-                                  {/* 🌟 核心戰略 UI 修改：補上當屆會員訓練 */}
                                   <div className="grid grid-cols-2 gap-3 bg-white p-3 rounded-lg border border-slate-200">
                                       <label className="flex items-center gap-2 cursor-pointer p-1 hover:bg-slate-50 rounded">
                                           <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={editingMember.is_current_member === 'Y'} onChange={e => setEditingMember({...editingMember, is_current_member: e.target.checked ? 'Y' : 'N'})}/>
-                                          <span className="font-bold text-sm text-slate-700">當屆會員</span>
+                                          <span className="font-bold text-sm text-slate-700">當屆會籍資格</span>
                                       </label>
                                       <label className="flex items-center gap-2 cursor-pointer p-1 hover:bg-amber-50 rounded">
                                           <input type="checkbox" className="w-4 h-4 accent-amber-500" checked={editingMember.is_vip === 'Y'} onChange={e => setEditingMember({...editingMember, is_vip: e.target.checked ? 'Y' : 'N'})}/>
-                                          <span className="font-bold text-sm text-amber-700 flex items-center gap-1"><Crown size={14}/> VIP 身分</span>
+                                          <span className="font-bold text-sm text-amber-700 flex items-center gap-1"><Crown size={14}/> 核心幹部 (VIP)</span>
                                       </label>
                                       <label className="flex items-center gap-2 cursor-pointer p-1 hover:bg-indigo-50 rounded">
                                           <input type="checkbox" className="w-4 h-4 accent-indigo-500" checked={editingMember.is_team_leader === 'Y'} onChange={e => setEditingMember({...editingMember, is_team_leader: e.target.checked ? 'Y' : 'N'})}/>
-                                          <span className="font-bold text-sm text-indigo-700">帶隊教官</span>
+                                          <span className="font-bold text-sm text-indigo-700">帶隊教官資格</span>
                                       </label>
                                       <label className="flex items-center gap-2 cursor-pointer p-1 hover:bg-green-50 rounded">
                                           <input type="checkbox" className="w-4 h-4 accent-green-500" checked={editingMember.is_new_member === 'Y'} onChange={e => setEditingMember({...editingMember, is_new_member: e.target.checked ? 'Y' : 'N'})}/>
-                                          <span className="font-bold text-sm text-green-700">新人標記</span>
+                                          <span className="font-bold text-sm text-green-700">新人身份標記</span>
                                       </label>
                                       <label className="flex items-center gap-2 cursor-pointer p-1 hover:bg-blue-50 rounded col-span-2 border-t pt-2 mt-1">
                                           <input type="checkbox" className="w-4 h-4 accent-blue-500" checked={editingMember.training_status === 'Y'} onChange={e => setEditingMember({...editingMember, training_status: e.target.checked ? 'Y' : 'N'})}/>
-                                          <span className="font-bold text-sm text-blue-700 flex items-center gap-1"><Activity size={14}/> 當屆會員訓練 <span className="text-[10px] text-blue-400 font-normal ml-1">(優先權+20)</span></span>
+                                          <span className="font-bold text-sm text-blue-700 flex items-center gap-1"><Activity size={14}/> 本年度訓練結業狀態</span>
                                       </label>
                                   </div>
                               </div>
@@ -691,41 +689,49 @@ export default function MemberCRM() {
                           {/* 右欄：後勤與備註 */}
                           <div className="space-y-6">
                               <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                                  <h4 className="font-black text-slate-800 border-b pb-2 flex items-center gap-2"><HeartPulse size={16} className="text-rose-500"/> 醫護與後勤資訊</h4>
+                                  <h4 className="font-black text-slate-800 border-b pb-2 flex items-center gap-2"><HeartPulse size={16} className="text-rose-500"/> 後勤與醫療資訊</h4>
                                   
                                   <div className="grid grid-cols-2 gap-4">
-                                      <FieldEditor label="醫護證照種類" name="medical_license" type="select" options={['EMT-1', 'EMT-2', 'EMTP', '醫師', '醫療線上護理師']} value={editingMember.medical_license} onChange={handleFieldChange} isHighlighted={highlightFields.includes('medical_license')} />
+                                      <FieldEditor label="醫護證照級別" name="medical_license" type="select" options={['EMT-1', 'EMT-2', 'EMTP', '醫師', '醫療線上護理師']} value={editingMember.medical_license} onChange={handleFieldChange} isHighlighted={highlightFields.includes('medical_license')} />
                                       <FieldEditor label="證照有效期限" name="license_expiry" type="date" value={editingMember.license_expiry} onChange={handleFieldChange} isHighlighted={highlightFields.includes('license_expiry')} />
                                   </div>
                                   
                                   <div className="grid grid-cols-2 gap-4">
                                       <FieldEditor label="血型" name="blood_type" type="select" options={['A', 'B', 'O', 'AB', '未知']} value={editingMember.blood_type} onChange={handleFieldChange} isHighlighted={highlightFields.includes('blood_type')} />
-                                      <FieldEditor label="衣服尺寸" name="shirt_size" type="select" options={['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL']} value={editingMember.shirt_size} onChange={handleFieldChange} isHighlighted={highlightFields.includes('shirt_size')} />
+                                      <FieldEditor label="服裝尺寸" name="shirt_size" type="select" options={['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL']} value={editingMember.shirt_size} onChange={handleFieldChange} isHighlighted={highlightFields.includes('shirt_size')} />
                                   </div>
 
-                                  <FieldEditor label="特殊病史與過敏" name="medical_history" value={editingMember.medical_history} onChange={handleFieldChange} isHighlighted={highlightFields.includes('medical_history')} />
+                                  <FieldEditor label="特殊病史註記" name="medical_history" value={editingMember.medical_history} onChange={handleFieldChange} isHighlighted={highlightFields.includes('medical_history')} />
 
                                   <div className="grid grid-cols-2 gap-4">
-                                      <FieldEditor label="交通偏好" name="transport_pref" type="select" options={['自行前往', '需要共乘', '搭乘大眾運輸']} value={editingMember.transport_pref} onChange={handleFieldChange} isHighlighted={highlightFields.includes('transport_pref')} />
-                                      <FieldEditor label="住宿偏好" name="stay_pref" type="select" options={['自行處理', '需要代訂']} value={editingMember.stay_pref} onChange={handleFieldChange} isHighlighted={highlightFields.includes('stay_pref')} />
+                                      <FieldEditor label="交通需求" name="transport_pref" type="select" options={['自行前往', '需要共乘', '搭乘大眾運輸']} value={editingMember.transport_pref} onChange={handleFieldChange} isHighlighted={highlightFields.includes('transport_pref')} />
+                                      <FieldEditor label="住宿安排" name="stay_pref" type="select" options={['自行處理', '需要代訂']} value={editingMember.stay_pref} onChange={handleFieldChange} isHighlighted={highlightFields.includes('stay_pref')} />
                                   </div>
                               </div>
 
                               <div className="bg-rose-50/50 p-5 rounded-xl border border-rose-100 shadow-sm space-y-4">
-                                  <h4 className="font-black text-rose-900 border-b border-rose-200 pb-2 flex items-center gap-2"><AlertCircle size={16} className="text-rose-500"/> 緊急聯絡人</h4>
-                                  <FieldEditor label="聯絡人姓名" name="emergency_name" value={editingMember.emergency_name} onChange={handleFieldChange} isHighlighted={highlightFields.includes('emergency_name')} />
+                                  <h4 className="font-black text-rose-900 border-b border-rose-200 pb-2 flex items-center gap-2"><AlertCircle size={16} className="text-rose-500"/> 緊急聯繫資訊</h4>
+                                  <FieldEditor label="緊急聯絡人" name="emergency_name" value={editingMember.emergency_name} onChange={handleFieldChange} isHighlighted={highlightFields.includes('emergency_name')} />
                                   <div className="grid grid-cols-2 gap-4">
                                       <FieldEditor label="關係" name="emergency_relation" value={editingMember.emergency_relation} onChange={handleFieldChange} isHighlighted={highlightFields.includes('emergency_relation')} />
-                                      <FieldEditor label="緊急電話" name="emergency_phone" value={editingMember.emergency_phone} onChange={handleFieldChange} isHighlighted={highlightFields.includes('emergency_phone')} />
+                                      <FieldEditor label="聯絡電話" name="emergency_phone" value={editingMember.emergency_phone} onChange={handleFieldChange} isHighlighted={highlightFields.includes('emergency_phone')} />
                                   </div>
                               </div>
 
-                              <div className="bg-amber-50/50 p-5 rounded-xl border border-amber-100 shadow-sm space-y-2">
-                                  <h4 className="font-black text-amber-900 border-b border-amber-200 pb-2 flex items-center gap-2"><Settings size={16} className="text-amber-600"/> 管理員內部註記 (Admin Note)</h4>
+                              <div className="bg-amber-50/50 p-5 rounded-xl border border-amber-100 shadow-sm space-y-2 relative">
+                                  <h4 className="font-black text-amber-900 border-b border-amber-200 pb-2 flex items-center gap-2"><Settings size={16} className="text-amber-600"/> 系統內部備註 (僅管理員可見)</h4>
+                                  
+                                  <div className="flex items-center gap-2 mb-2">
+                                      <label className="flex items-center gap-2 cursor-pointer p-1.5 hover:bg-amber-100/50 rounded-lg">
+                                          <input type="checkbox" className="w-4 h-4 accent-slate-800" checked={editingMember.is_blacklisted === 'Y'} onChange={e => setEditingMember({...editingMember, is_blacklisted: e.target.checked ? 'Y' : 'N'})}/>
+                                          <span className="font-black text-sm text-slate-800 flex items-center gap-1"><Ban size={14}/> 將此會員標記為停權(黑名單)</span>
+                                      </label>
+                                  </div>
+
                                   <textarea 
                                       className="w-full border border-amber-200 p-3 rounded-lg outline-none focus:ring-2 focus:ring-amber-400 bg-white resize-none text-sm font-medium" 
                                       rows="3" 
-                                      placeholder="僅管理員可見的內部備註..."
+                                      placeholder="紀錄查核、停權或其他相關系統備註事項..."
                                       value={editingMember.admin_note || ''}
                                       onChange={e => setEditingMember({...editingMember, admin_note: e.target.value})}
                                   ></textarea>
@@ -737,15 +743,15 @@ export default function MemberCRM() {
                   {/* Footer Actions */}
                   <div className="p-5 border-t border-slate-200 bg-white flex gap-4 shrink-0 shadow-[0_-10px_15px_rgba(0,0,0,0.03)]">
                       <button onClick={handleSaveMember} disabled={savingMember} className="flex-1 bg-blue-600 text-white font-black py-3.5 rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-600/30 transition-all active:scale-95 flex justify-center items-center gap-2 disabled:opacity-70">
-                          {savingMember ? <Loader2 className="animate-spin" size={18}/> : <Save size={18}/>} 儲存會員資料
+                          {savingMember ? <Loader2 className="animate-spin" size={18}/> : <Save size={18}/>} 儲存變更
                       </button>
-                      <button onClick={handleCloseEditModal} disabled={savingMember} className="w-1/3 bg-slate-100 text-slate-600 font-bold py-3.5 rounded-xl hover:bg-slate-200 transition-colors active:scale-95 disabled:opacity-50">取消</button>
+                      <button onClick={handleCloseEditModal} disabled={savingMember} className="w-1/3 bg-slate-100 text-slate-600 font-bold py-3.5 rounded-xl hover:bg-slate-200 transition-colors active:scale-95 disabled:opacity-50">放棄並返回</button>
                   </div>
               </div>
           </div>
       )}
 
-      {/* 購物車 Modal */}
+      {/* 匯出購物車 Modal */}
       {isCartModalOpen && (
           <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[110] backdrop-blur-sm animate-fade-in" onClick={() => setIsCartModalOpen(false)}>
              <div className="bg-white p-8 rounded-[2rem] shadow-2xl max-w-sm w-full animate-bounce-in" onClick={e => e.stopPropagation()}>
@@ -753,9 +759,9 @@ export default function MemberCRM() {
                  <h3 className="font-black text-2xl mb-3 text-center text-slate-800">匯出完整資料</h3>
                  <p className="mb-8 text-slate-500 text-sm text-center leading-relaxed">即將匯出 {exportCart.size} 位人員的 A~AO 全部欄位（Excel 格式），方便您進行離線處理或匯入中心。</p>
                  <button disabled={exporting} className="w-full font-black bg-green-600 hover:bg-green-700 text-white py-4 rounded-xl mb-3 flex items-center justify-center gap-2 transition-all shadow-lg shadow-green-600/30 disabled:opacity-50 active:scale-95" onClick={handleExportCart}>
-                     {exporting ? <Loader2 className="animate-spin" size={20}/> : <><FileSpreadsheet size={20}/> 產生並下載 XLSX</>}
+                     {exporting ? <Loader2 className="animate-spin" size={20}/> : <><FileSpreadsheet size={20}/> 執行匯出作業</>}
                  </button>
-                 <button className="w-full font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 py-4 rounded-xl transition-colors active:scale-95" onClick={()=>setIsCartModalOpen(false)}>返回</button>
+                 <button className="w-full font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 py-4 rounded-xl transition-colors active:scale-95" onClick={()=>setIsCartModalOpen(false)}>關閉視窗</button>
              </div>
           </div>
       )}

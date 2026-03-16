@@ -16,6 +16,12 @@ const RACE_IMPORT_TEMPLATE_HEADERS = [
     ...Array.from({length: 40}, (_, i) => `參加人員${i + 1}`)
 ]
 
+// 🌟 核心過濾器：無情去渣洗淨字串 (去除所有全/半形空白與換行)
+const cleanString = (str) => {
+    if (str === null || str === undefined) return '';
+    return String(str).replace(/[\s\u3000\n\r]/g, '');
+};
+
 export default function DataImportCenter() {
   const [mainTab, setMainTab] = useState('members') 
 
@@ -242,7 +248,7 @@ export default function DataImportCenter() {
                     }
                     
                     const nameKey = Object.keys(row).find(k => k.includes('姓名') || k.toLowerCase().includes('name'))
-                    if (nameKey && row[nameKey]) wixMapByName[String(row[nameKey]).replace(/\s+/g, '')] = row
+                    if (nameKey && row[nameKey]) wixMapByName[cleanString(row[nameKey])] = row
                 })
 
                 finalRows = finalRows.map(mRow => {
@@ -257,7 +263,7 @@ export default function DataImportCenter() {
                     }
 
                     if (!match && mNameKey && mRow[mNameKey]) {
-                        const mName = String(mRow[mNameKey]).replace(/\s+/g, '')
+                        const mName = cleanString(mRow[mNameKey])
                         match = wixMapByName[mName] || wixMapByName[Object.keys(wixMapByName).find(k => mName.includes(k) || k.includes(mName))]
                     }
 
@@ -339,33 +345,69 @@ export default function DataImportCenter() {
     } catch (err) { addLog(`分析異常: ${err.message}`, 'error') } finally { setProcessing(false) }
   }
 
+  // ==========================================
+  // 🌟 核心進化：四維度多重去空白比對引擎
+  // ==========================================
   const handleMatchAndTransform = async () => {
       setProcessing(true)
       
       if (mode === 'patch') {
           if (!patchAnchorExcel) { alert("請選擇 Excel 的比對基準欄位！"); setProcessing(false); return; }
           try {
-              // 🌟 核心防護解鎖：既然 DB Anchor 開放了，我們必須保證從 DB 拉出來的資料有包含這個欄位
-              // 最暴力有效的方法：直接把整個 profiles 撈出來，這樣不管你選什麼欄位當 Anchor 都有得比對！
+              // 撈出資料庫裡所有會員
               const { data: dbUsers, error } = await supabase.from('profiles').select('*')
               if (error) throw error
 
               let perfect = 0, duplicate = 0, notFound = 0;
 
               const transformed = rawData.map((row, idx) => {
-                  const anchorValue = String(row[patchAnchorExcel] || '').replace(/\s+/g, '')
+                  // 1. 去渣過濾器：將 Excel 裡用來比對的值洗淨
+                  const excelAnchorValue = cleanString(row[patchAnchorExcel]);
+                  
+                  // 我們找出 Excel 裡可能隱藏的身分證、Email、電話、姓名，並洗乾淨
+                  // 這是為了啟動「多維度保險鎖定」
+                  const possibleId = cleanString(row['身分證字號(C)'] || row['身分證'] || row['ID']);
+                  const possibleEmail = cleanString(row['email'] || row['e-mail(E)'] || row['信箱']);
+                  const possiblePhone = cleanString(row['手機(D)'] || row['電話'] || row['phone']);
+                  const possibleName = cleanString(row['姓名(A)'] || row['姓名'] || row['name']);
+
+                  // 2. 四維度保險鎖定：用多重條件去找資料庫裡的人
                   const matches = dbUsers.filter(u => {
-                      const dbVal = String(u[patchAnchorDB] || '').replace(/\s+/g, '')
-                      return dbVal === anchorValue && anchorValue !== ''
-                  })
+                      const dbAnchorVal = cleanString(u[patchAnchorDB]);
+                      const dbId = cleanString(u.national_id);
+                      const dbEmail1 = cleanString(u.email);
+                      const dbEmail2 = cleanString(u.contact_email);
+                      const dbPhone = cleanString(u.phone);
+                      const dbName = cleanString(u.full_name);
+
+                      // 條件 1：使用者指定的基準欄位完全命中 (洗淨後比對)
+                      if (excelAnchorValue !== '' && dbAnchorVal === excelAnchorValue) return true;
+                      
+                      // 條件 2：身分證命中
+                      if (possibleId !== '' && dbId === possibleId) return true;
+                      
+                      // 條件 3：Email 命中
+                      if (possibleEmail !== '' && (dbEmail1 === possibleEmail || dbEmail2 === possibleEmail)) return true;
+                      
+                      // 條件 4：手機號碼命中
+                      if (possiblePhone !== '' && dbPhone === possiblePhone) return true;
+                      
+                      // 條件 5：名字命中 (名字容易重複，當作最後一道防線)
+                      if (possibleName !== '' && dbName === possibleName) return true;
+
+                      return false;
+                  });
+
+                  // 為了避免「條件太寬鬆」導致重複匹配，我們把重複的結果去重 (用 ID)
+                  const uniqueMatches = Array.from(new Map(matches.map(m => [m.id, m])).values());
 
                   let status = 'not_found', dbId = null, duplicateOptions = []
                   let dbInfo = { full_name: '', email: '', contact_email: '' } 
 
-                  if (matches.length === 1) { 
-                      status = 'perfect'; dbId = matches[0].id; dbInfo = matches[0]; perfect++; 
-                  } else if (matches.length > 1) { 
-                      status = 'duplicate'; duplicateOptions = matches; duplicate++; 
+                  if (uniqueMatches.length === 1) { 
+                      status = 'perfect'; dbId = uniqueMatches[0].id; dbInfo = uniqueMatches[0]; perfect++; 
+                  } else if (uniqueMatches.length > 1) { 
+                      status = 'duplicate'; duplicateOptions = uniqueMatches; duplicate++; 
                   } else { notFound++; }
 
                   const updateData = {}
@@ -384,14 +426,14 @@ export default function DataImportCenter() {
                       row._gender_deduced = true;
                   }
 
-                  return { _id: idx, _rawAnchor: anchorValue, _status: status, _dbId: dbId, _duplicates: duplicateOptions, _updateData: updateData, ...dbInfo, ...updateData }
+                  return { _id: idx, _rawAnchor: excelAnchorValue || '空值', _status: status, _dbId: dbId, _duplicates: duplicateOptions, _updateData: updateData, ...dbInfo, ...updateData }
               })
 
               const groupedMap = new Map();
               const finalPreview = [];
               transformed.forEach(row => {
                   const key = row._rawAnchor;
-                  if (!key || key === '') finalPreview.push(row);
+                  if (!key || key === '空值') finalPreview.push(row);
                   else {
                       if (!groupedMap.has(key)) groupedMap.set(key, []);
                       groupedMap.get(key).push(row);
@@ -417,6 +459,9 @@ export default function DataImportCenter() {
               setStep(3)
           } catch (err) { addLog(`資料比對異常: ${err.message}`, 'error') }
       } else {
+          // ====================
+          // 完整匯入模式保持不變
+          // ====================
           const hasName = Object.values(fieldMapping).includes('full_name')
           const hasEmail = Object.values(fieldMapping).includes('email') || Object.values(fieldMapping).includes('contact_email')
 
@@ -435,6 +480,7 @@ export default function DataImportCenter() {
                       const isEmpty = (cellVal === undefined || cellVal === null || String(cellVal).trim() === '');
                       
                       if (newRow[dbField] && isEmpty) return;
+                      // 這裡的寫入不需要完全洗淨，因為我們希望保留名字原本的空格等，只在「比對時」洗淨
                       if (!isEmpty) newRow[dbField] = String(cellVal).trim();
                   }
               })
@@ -975,8 +1021,7 @@ export default function DataImportCenter() {
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
                 <div>
                     <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
-                        <Database className="text-blue-600"/> 資料整合匯入中心 <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold border border-slate-200">防覆蓋版 V9.8
-
+                        <Database className="text-blue-600"/> 資料整合匯入中心 <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold border border-slate-200">去渣四重比對版 V9.9
                         </span>
                     </h2>
                     <p className="text-slate-500 text-sm mt-1">用身分證自動辨識、防呆欄位鎖定與自定義擴充系統。</p>
@@ -1077,7 +1122,6 @@ export default function DataImportCenter() {
                             <ArrowRight className="text-slate-300 md:mt-5 shrink-0 rotate-90 md:rotate-0"/>
                             <div className="flex-1 w-full">
                                 <label className="text-xs font-bold text-slate-500 block mb-1">對應至系統識別欄位</label>
-                                {/* 🌟 核心升級：解鎖 patchAnchorDB，導入全欄位 TARGET_FIELDS */}
                                 <select className="w-full p-2.5 rounded-lg border focus:ring-2 border-slate-300 font-medium text-slate-700" value={patchAnchorDB} onChange={e=>setPatchAnchorDB(e.target.value)}>
                                     {TARGET_FIELDS.map(group => (
                                         <optgroup key={group.group} label={group.group}>
