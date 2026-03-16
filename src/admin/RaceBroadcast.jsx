@@ -14,7 +14,6 @@ export default function RaceBroadcast() {
     const fetchRaces = async () => {
         setLoading(true)
         try {
-            // 抓出所有有設定「預定廣播時間(announce_time)」的賽事
             const { data, error } = await supabase
                 .from('races')
                 .select('id, name, date, announce_time, is_announced, status')
@@ -30,37 +29,32 @@ export default function RaceBroadcast() {
         }
     }
 
-// 🚨 手動推播按鈕 (包含再次廣播)
     const handleManualFire = async (race) => {
-        const confirmFire = window.confirm(`⚠️ 系統確認：\n\n確定要對所有有效會員發送【${race.name}】的賽事通知嗎？\n(這將立即發送手機推播並同步更新小鈴鐺)`);
+        const confirmFire = window.confirm(`系統確認：\n\n確定要對所有有效會員發送【${race.name}】的賽事通知嗎？\n(這將立即發送手機推播並同步更新系統通知)`);
         
         if (!confirmFire) return;
 
         setFiringId(race.id);
         
         try {
-            // 把時間設定為過去 1 分鐘，避免電腦與伺服器的毫秒時差
             const pastTime = new Date(Date.now() - 60000).toISOString();
 
-            // 1. 修改時間為過去一分鐘，並將狀態重置為未廣播
             await supabase.from('races')
                 .update({ announce_time: pastTime, is_announced: false })
                 .eq('id', race.id);
 
-            // 2. 呼叫全域推播 API
             const res = await supabase.functions.invoke('broadcast-push');
             
             if (res.error) throw res.error;
 
-            // 防呆：如果伺服器因為時差沒抓到資料，擋下來並提示
             if (res.data && res.data.message && res.data.message.includes('無賽事')) {
-                alert('⚠️ 系統提示：伺服器正在同步資料，請等待 3 秒後再試一次。');
+                alert('系統提示：伺服器正在同步資料，請等待 3 秒後再試一次。');
                 setFiringId(null);
                 return;
             }
 
-            alert('✅ 推播發送成功！手機通知與小鈴鐺皆已同步。');
-            fetchRaces(); // 刷新清單
+            alert('✅ 推播發送成功！手機通知與系統通知皆已同步。');
+            fetchRaces(); 
         } catch (error) {
             console.error('推播失敗:', error);
             alert(`推播發送異常：${error.message}`);
@@ -78,7 +72,7 @@ export default function RaceBroadcast() {
                             <Radio className="text-blue-600"/> 賽事任務群體廣播清單
                         </h2>
                         <p className="text-slate-500 font-medium text-sm mt-1">
-                            監控系統排定的自動廣播任務。如有突發狀況，可使用緊急按鈕手動強制推播推播。
+                            監控系統排定的自動廣播任務。如有突發狀況，可使用緊急按鈕手動發送推播通知。
                         </p>
                     </div>
                     <button 
@@ -87,7 +81,7 @@ export default function RaceBroadcast() {
                         className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-xl font-bold transition-colors"
                     >
                         <RefreshCw size={16} className={loading ? 'animate-spin' : ''}/>
-                        {loading ? '更新中...' : '重新整理'}
+                        {loading ? '資料更新中...' : '重新整理'}
                     </button>
                 </div>
 
@@ -108,18 +102,17 @@ export default function RaceBroadcast() {
                             const isPast = new Date(race.announce_time) <= new Date();
                             const isAnnounced = race.is_announced;
                             
-                            // 狀態卡片樣式判斷
                             let statusClass = "border-slate-200 bg-white";
                             let statusText = "等待排程中";
                             let statusIcon = <CalendarClock size={20} className="text-slate-400"/>;
                             
                             if (isAnnounced) {
                                 statusClass = "border-emerald-200 bg-emerald-50";
-                                statusText = "已成功廣播";
+                                statusText = "通知已發送";
                                 statusIcon = <CheckCircle2 size={20} className="text-emerald-500"/>;
                             } else if (isPast && !isAnnounced) {
                                 statusClass = "border-amber-200 bg-amber-50";
-                                statusText = "排隊準備發送中...";
+                                statusText = "排隊處理中...";
                                 statusIcon = <RefreshCw size={20} className="text-amber-500 animate-spin"/>;
                             }
 
@@ -136,38 +129,36 @@ export default function RaceBroadcast() {
                                         <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-slate-500 font-medium">
                                             <span className="bg-white border border-slate-200 px-2 py-0.5 rounded-md">賽事日: {race.date}</span>
                                             <span className="flex items-center gap-1 text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
-                                                <Radio size={14}/> 預定廣播: {new Date(race.announce_time).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                                <Radio size={14}/> 預定時間: {new Date(race.announce_time).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
                                             </span>
                                         </div>
                                     </div>
                                     
                                     <div className="shrink-0 flex items-center justify-end gap-3">
-                                        {/* 如果還沒發送，顯示紅色緊急發送按鈕 */}
                                         {!isAnnounced && (
                                             <button 
                                                 onClick={() => handleManualFire(race)}
                                                 disabled={firingId === race.id}
-                                                className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white px-4 py-2.5 rounded-xl font-black shadow-[0_0_15px_rgba(220,38,38,0.3)] transition-colors disabled:opacity-50"
+                                                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2.5 rounded-xl font-black shadow-md transition-colors disabled:opacity-50"
                                             >
                                                 {firingId === race.id ? <Loader2 size={18} className="animate-spin"/> : <Send size={18}/>}
-                                                強制手動廣播
+                                                手動發送通知
                                             </button>
                                         )}
                                         
-                                        {/* 如果已發送，顯示綠色已完成標記 + 深色「再次廣播」按鈕 */}
                                         {isAnnounced && (
                                             <>
                                                 <div className="hidden sm:flex items-center gap-2 text-emerald-600 bg-emerald-100 px-4 py-2.5 rounded-xl font-black border border-emerald-200">
-                                                    <CheckCircle2 size={18}/> 任務已完成
+                                                    <CheckCircle2 size={18}/> 作業已完成
                                                 </div>
                                                 <button 
                                                     onClick={() => handleManualFire(race)}
                                                     disabled={firingId === race.id}
                                                     className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2.5 rounded-xl font-black shadow-md transition-colors disabled:opacity-50"
-                                                    title="重新發送推播與小鈴鐺通知"
+                                                    title="重新發送手機推播與系統通知"
                                                 >
                                                     {firingId === race.id ? <Loader2 size={18} className="animate-spin"/> : <Send size={18}/>}
-                                                    再次廣播
+                                                    重新發送通知
                                                 </button>
                                             </>
                                         )}
