@@ -14,28 +14,24 @@ const RACE_IMPORT_TEMPLATE_HEADERS = [
     ...Array.from({length: 40}, (_, i) => `參加人員${i + 1}`)
 ]
 
-// 🌟 核心過濾器：無情去渣洗淨字串 (去除所有全/半形空白、換行、以及連字號)
+// 🌟 核心過濾器：無情去渣洗淨字串 (去除所有全/半形空白、換行、連字號、底線)
 const cleanString = (str) => {
     if (str === null || str === undefined) return '';
-    // 新增 \- 和 _ 來清除連字號
     return String(str).replace(/[\s\u3000\n\r\-_]/g, '');
 };
 
-// 🌟 微觀升級 1：日期正規化引擎 (處理美式與民國年)
+// 日期正規化引擎 (處理美式與民國年)
 const formatDateString = (rawDate) => {
     if (!rawDate) return '';
     let str = String(rawDate).trim();
-    // 處理 Excel 匯出產生的 m/d/yy 格式 (如 5/17/84 或 10/30/77)
     const usFormatMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/);
     if (usFormatMatch) {
         let year = parseInt(usFormatMatch[3], 10);
-        // 假設年份小於 30 歸類為 2000 年後，否則歸類為 1900 年代
         year += (year < 30 ? 2000 : 1900);
         const month = String(usFormatMatch[1]).padStart(2, '0');
         const day = String(usFormatMatch[2]).padStart(2, '0');
         return `${year}-${month}-${day}`;
     }
-    // 處理民國年 (如 73/5/17)
     const twFormatMatch = str.match(/^(\d{2,3})[/-](\d{1,2})[/-](\d{1,2})$/);
     if (twFormatMatch && parseInt(twFormatMatch[1], 10) < 150) {
          let year = parseInt(twFormatMatch[1], 10) + 1911;
@@ -43,15 +39,14 @@ const formatDateString = (rawDate) => {
          const day = String(twFormatMatch[3]).padStart(2, '0');
          return `${year}-${month}-${day}`;
     }
-    // 處理標準 YYYY-MM-DD 或其他 Date 可辨識格式
     const d = new Date(str);
     if (!isNaN(d.getTime())) {
         return d.toISOString().split('T')[0];
     }
-    return str; // 無法解析保留原狀
+    return str; 
 }
 
-// 🌟 微觀升級 5：醫護證照字彙統一引擎 (嚴格對齊 5 種系統預設值)
+// 醫護證照字彙統一引擎 (嚴格對齊 5 種系統預設值)
 const normalizeMedicalLicense = (rawLicense) => {
     if (!rawLicense) return '';
     const s = String(rawLicense).toUpperCase().replace(/\s/g, '');
@@ -330,7 +325,7 @@ export default function DataImportCenter() {
             }
         });
 
-        // 🌟 微觀升級 2 & 3：精準過濾縣市並丟入黑洞收納箱
+        // 智慧辨識邏輯 (黑洞收納與去渣判斷)
         headers.forEach(h => {
             if (initialMap[h]) return; 
 
@@ -352,9 +347,7 @@ export default function DataImportCenter() {
                 else if (['衣服', 'size', '背心', 'shirt'].some(k => lowerH.includes(k))) matchedKey = 'shirt_size'
                 else if (lowerH.includes('血型') || lowerH.includes('blood')) matchedKey = 'blood_type'
                 else if (lowerH.includes('生日') || lowerH.includes('birthday') || lowerH === 'dob') matchedKey = 'birthday'
-                // 🌟 防止縣市干擾：如果名稱包含地址但「不包含縣市/城市」，才判定為地址
                 else if ((lowerH.includes('地址') || lowerH.includes('address')) && !lowerH.includes('縣市') && !lowerH.includes('城市')) matchedKey = 'address'
-                // 🌟 年齡、組別、縣市等雜項，強制歸類到黑洞收納箱
                 else if (lowerH.includes('縣市') || lowerH.includes('城市') || lowerH.includes('年齡') || lowerH.includes('組別') || lowerH.includes('age')) matchedKey = 'extra_info'
                 else if (lowerH.includes('緊急聯繫人電話') || lowerH.includes('emergencyphone')) matchedKey = 'emergency_phone'
                 else if (lowerH.includes('緊急聯繫人關係') || lowerH.includes('relationship')) matchedKey = 'emergency_relation'
@@ -365,13 +358,22 @@ export default function DataImportCenter() {
                 else if (lowerH.includes('編號') || lowerH.includes('no.')) matchedKey = 'ironmedic_no'
                 else if (lowerH.includes('病史')) matchedKey = 'medical_history'
                 else if (lowerH.includes('醫護證照') || lowerH.includes('醫療執照')) matchedKey = 'medical_license'
-                // 🌟 微觀升級 4：攔截「已繳納會員費年度」
                 else if (lowerH.includes('已繳交') || lowerH.includes('已繳納') || lowerH.includes('會費年度') || lowerH.includes('當年度會員')) matchedKey = 'is_current_member'
             }
 
-            // 無法辨識的全部丟進黑洞收納箱
             if (!matchedKey) {
                 matchedKey = 'extra_info';
+            }
+
+            // 處理地址衝突
+            if (matchedKey === 'address' && assignedDbFields.has('address')) {
+                 const oldHeader = Object.keys(initialMap).find(k => initialMap[k] === 'address');
+                 if (oldHeader && h.length > oldHeader.length) {
+                     initialMap[oldHeader] = 'extra_info'; 
+                     initialMap[h] = 'address';
+                 } else {
+                     matchedKey = 'extra_info'; 
+                 }
             }
 
             if (matchedKey) {
@@ -388,6 +390,7 @@ export default function DataImportCenter() {
     } catch (err) { addLog(`分析異常: ${err.message}`, 'error') } finally { setProcessing(false) }
   }
 
+  // 🌟 最終清洗與轉換引擎 (強制去渣)
   const handleMatchAndTransform = async () => {
       setProcessing(true)
       const currentYear = new Date().getFullYear().toString(); 
@@ -444,18 +447,30 @@ export default function DataImportCenter() {
                           let cellVal = row[exCol];
                           if (cellVal === undefined || cellVal === null || String(cellVal).trim() === '') return;
                           
-                          // 🌟 套用微觀正規化引擎
-                          if (dbField === 'birthday' || dbField === 'join_date') cellVal = formatDateString(cellVal);
-                          if (dbField === 'medical_license') cellVal = normalizeMedicalLicense(cellVal);
-                          if (dbField === 'is_current_member') {
-                              if (String(cellVal).includes(currentYear)) cellVal = 'Y';
-                              else cellVal = 'N';
+                          let normalizedVal = cellVal;
+                          
+                          // 🌟 強制清洗邏輯
+                          if (dbField === 'birthday' || dbField === 'join_date') {
+                              normalizedVal = formatDateString(cellVal);
+                          } else if (dbField === 'medical_license') {
+                              normalizedVal = normalizeMedicalLicense(cellVal);
+                          } else if (dbField === 'is_current_member') {
+                              normalizedVal = String(cellVal).includes(currentYear) ? 'Y' : 'N';
+                          } else if (dbField === 'phone' || dbField === 'emergency_phone') {
+                              normalizedVal = cleanString(cellVal); // 強制去除 - 和空白
+                          } else if (dbField === 'national_id') {
+                              normalizedVal = String(cellVal).toUpperCase().replace(/[\s\u3000\n\r\-_]/g, '');
+                          } else if (dbField === 'full_name' || dbField === 'emergency_name') {
+                              // 中文名字除空白，英文名字只去頭尾
+                              normalizedVal = /[a-zA-Z]/.test(String(cellVal)) ? String(cellVal).trim() : cleanString(cellVal);
+                          } else {
+                              normalizedVal = typeof cellVal === 'string' ? cellVal.trim() : cellVal;
                           }
 
                           if (dbField === 'extra_info') {
-                              extraInfoCollector[exCol] = cellVal;
+                              extraInfoCollector[exCol] = normalizedVal;
                           } else {
-                              updateData[dbField] = cellVal;
+                              updateData[dbField] = normalizedVal;
                           }
                       }
                   })
@@ -524,18 +539,29 @@ export default function DataImportCenter() {
                       
                       if (newRow[dbField] && isEmpty) return;
                       if (!isEmpty) {
-                          // 🌟 套用微觀正規化引擎
-                          if (dbField === 'birthday' || dbField === 'join_date') cellVal = formatDateString(cellVal);
-                          if (dbField === 'medical_license') cellVal = normalizeMedicalLicense(cellVal);
-                          if (dbField === 'is_current_member') {
-                              if (String(cellVal).includes(currentYear)) cellVal = 'Y';
-                              else cellVal = 'N';
+                          let normalizedVal = cellVal;
+                          
+                          // 🌟 強制清洗邏輯
+                          if (dbField === 'birthday' || dbField === 'join_date') {
+                              normalizedVal = formatDateString(cellVal);
+                          } else if (dbField === 'medical_license') {
+                              normalizedVal = normalizeMedicalLicense(cellVal);
+                          } else if (dbField === 'is_current_member') {
+                              normalizedVal = String(cellVal).includes(currentYear) ? 'Y' : 'N';
+                          } else if (dbField === 'phone' || dbField === 'emergency_phone') {
+                              normalizedVal = cleanString(cellVal); // 強制去除 - 和空白
+                          } else if (dbField === 'national_id') {
+                              normalizedVal = String(cellVal).toUpperCase().replace(/[\s\u3000\n\r\-_]/g, '');
+                          } else if (dbField === 'full_name' || dbField === 'emergency_name') {
+                              normalizedVal = /[a-zA-Z]/.test(String(cellVal)) ? String(cellVal).trim() : cleanString(cellVal);
+                          } else {
+                              normalizedVal = typeof cellVal === 'string' ? cellVal.trim() : cellVal;
                           }
 
                           if (dbField === 'extra_info') {
-                              extraInfoCollector[excelHeader] = String(cellVal).trim();
+                              extraInfoCollector[excelHeader] = normalizedVal;
                           } else {
-                              newRow[dbField] = String(cellVal).trim();
+                              newRow[dbField] = normalizedVal;
                           }
                       }
                   }
@@ -1335,7 +1361,6 @@ export default function DataImportCenter() {
                                             {row._status === 'resolved' && <span className="text-blue-600 font-bold flex items-center gap-1.5"><UserCheck size={14}/>已手動指定</span>}
                                             {row._status === 'not_found' && <span className="text-slate-400 font-medium flex items-center gap-1.5"><XCircle size={14}/>查無此人(略過)</span>}
                                             
-                                            {/* 🌟 內部衝突操作按鈕 */}
                                             {row._status === 'internal_conflict' && (
                                                 <button onClick={() => handleOpenConflictModal(row)} className="text-xs font-black bg-purple-600 text-white px-3 py-1.5 rounded-lg shadow-sm hover:bg-purple-700 transition-colors flex items-center gap-1.5 animate-pulse">
                                                     <GitMerge size={14}/> 👀 進行比對與合體
