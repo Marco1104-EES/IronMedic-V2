@@ -429,7 +429,12 @@ export default function DigitalID() {
                   
                   {displayUser.is_team_leader === 'Y' && <span className="bg-blue-500 text-white text-xs font-black px-3 py-1 rounded-full flex items-center gap-1 shadow-lg shadow-blue-500/20"><ShieldAlert size={12}/> 帶隊教官</span>}
                   
-                  {displayUser.is_new_member === 'Y' && <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/50 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1"><Sprout size={12}/> 新人</span>}
+                  {/* 🌟 修改：無縫融入「新人」Tag，顯示剩餘額度 */}
+                  {displayUser.is_new_member === 'Y' && (
+                      <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/50 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1">
+                          <Sprout size={12}/> 新人 (額度: {displayUser.newbie_passes ?? 3})
+                      </span>
+                  )}
                   
                   {hasTrainingStatus && (
                       <span className="bg-purple-500 text-white text-xs font-black px-3 py-1 rounded-full flex items-center gap-1 shadow-lg shadow-purple-500/30">
@@ -623,6 +628,10 @@ export default function DigitalID() {
                               <InfoRow label="真實完賽場次" value={`${finishedCount} 場`} icon={CheckCircle} />
                               <InfoRow label="總報名場次" value={`${totalEnrolledCount} 場`} icon={Flag} />
                               <InfoRow label="出席達成率" value={attendanceRate} icon={Target} />
+                              {/* 🌟 修改：無縫新增新人額度統計行 */}
+                              {displayUser.is_new_member === 'Y' && (
+                                  <InfoRow label="新人優先登記額度" value={`剩餘 ${displayUser.newbie_passes ?? 3} 次`} icon={Sprout} />
+                              )}
                           </div>
                       )}
 

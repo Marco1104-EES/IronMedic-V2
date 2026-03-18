@@ -156,7 +156,8 @@ export default function RaceEvents() {
       
       if (user && user.email) {
           try {
-              const { data: profile } = await supabase.from('profiles').select('id, role, full_name, is_new_member, is_current_member, license_expiry').eq('email', user.email).maybeSingle()
+              // 🌟 確保撈取 newbie_passes 以供新人額度判斷
+              const { data: profile } = await supabase.from('profiles').select('id, role, full_name, is_new_member, is_current_member, license_expiry, newbie_passes, total_races').eq('email', user.email).maybeSingle()
               if (profile) {
                   const role = profile.role ? profile.role.toUpperCase() : 'USER';
                   setUserRole(role);
@@ -347,6 +348,8 @@ export default function RaceEvents() {
 
   const unreadCountReal = notifications.filter(n => !(n.isRead || n.is_read)).length;
 
+  const isSuperAdmin = ['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR'].includes(userRole);
+
   const raceStats = useMemo(() => {
     let total = races.length;
     let currentYearCount = 0;
@@ -373,12 +376,32 @@ export default function RaceEvents() {
     return { total, currentYearCount, pastCount, futureCount, openCount, negotiatingCount, submittedCount, upcomingCount };
   }, [races, CURRENT_YEAR]);
 
+  const getRegistrationPhase = (openTimeStr) => {
+      if (!openTimeStr) return { phase: 2, label: '全面開放' }; 
+      const now = new Date();
+      const openTime = new Date(openTimeStr);
+      if (now < openTime) return { phase: -1, label: '尚未開放' }; 
+
+      const midnight1 = new Date(openTime);
+      midnight1.setHours(24, 0, 0, 0); 
+
+      const midnight2 = new Date(midnight1);
+      midnight2.setDate(midnight2.getDate() + 1); 
+
+      if (now < midnight1) return { phase: 0, label: '教官鎖定' }; 
+      if (now < midnight2) return { phase: 1, label: '幹部與新人' }; 
+      return { phase: 2, label: '全面開放' }; 
+  }
+
+  // 🌟 嚴謹判定新人資格與剩餘次數 (防範資料庫 NULL 陷阱)
+  const isNewbieUser = currentUserProfile?.is_new_member === 'Y' || currentUserProfile?.total_races < 2;
+  const newbiePassesLeft = currentUserProfile?.newbie_passes ?? 3;
+
   return (
     <div className="min-h-screen bg-slate-50 pb-24 font-sans flex flex-col relative overflow-x-hidden">
       
-      <div className="bg-slate-900 pt-24 md:pt-28 pb-32 px-4 md:px-8 text-center relative overflow-hidden shrink-0">
+      <div className="bg-slate-900 pt-24 md:pt-28 pb-32 px-4 md:px-8 text-center relative overflow-hidden shrink-0 animate-fade-in">
           
-          {/* 🌟 核心修復 1：完美還原您指定的左上角膠囊樣式 */}
           <div className="absolute top-4 left-4 md:top-6 md:left-8 z-40 flex flex-col gap-2">
               <div className="flex items-center gap-2 bg-slate-800/80 backdrop-blur-md px-3 py-1.5 md:px-4 md:py-2 rounded-full border border-slate-700 shadow-lg w-fit">
                   <div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]"></div>
@@ -465,24 +488,48 @@ export default function RaceEvents() {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-20 relative z-20 w-full flex-1">
           
-          {showWarning && (
-              <div className={`mb-4 p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4 shadow-xl border animate-fade-in-down 
-                  ${showWarning.type === 'danger' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
-                  <AlertTriangle size={28} className={`shrink-0 ${showWarning.type === 'danger' ? 'text-red-500' : 'text-amber-500'}`} />
-                  <div>
-                      <h4 className={`font-black text-lg sm:text-xl mb-1 ${showWarning.type === 'danger' ? 'text-red-700' : 'text-amber-800'}`}>
-                          {showWarning.title}
-                      </h4>
-                      <p className="text-sm font-bold opacity-90 leading-relaxed">{showWarning.msg}</p>
+          <div className="space-y-4 mb-4">
+              {showWarning && (
+                  <div className={`p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4 shadow-xl border animate-fade-in-down 
+                      ${showWarning.type === 'danger' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
+                      <AlertTriangle size={28} className={`shrink-0 ${showWarning.type === 'danger' ? 'text-red-500' : 'text-amber-500'}`} />
+                      <div>
+                          <h4 className={`font-black text-lg sm:text-xl mb-1 ${showWarning.type === 'danger' ? 'text-red-700' : 'text-amber-800'}`}>
+                              {showWarning.title}
+                          </h4>
+                          <p className="text-sm font-bold opacity-90 leading-relaxed">{showWarning.msg}</p>
+                      </div>
+                      <button onClick={() => navigate('/my-id')} className={`mt-3 sm:mt-0 sm:ml-auto w-full sm:w-auto whitespace-nowrap px-5 py-2.5 rounded-xl font-black text-sm shadow-md transition-transform active:scale-95 border
+                          ${showWarning.type === 'danger' ? 'bg-red-600 hover:bg-red-700 text-white border-red-700' : 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600'}`}>
+                          前往更新資料
+                      </button>
                   </div>
-                  <button onClick={() => navigate('/my-id')} className={`mt-3 sm:mt-0 sm:ml-auto w-full sm:w-auto whitespace-nowrap px-5 py-2.5 rounded-xl font-black text-sm shadow-md transition-transform active:scale-95 border
-                      ${showWarning.type === 'danger' ? 'bg-red-600 hover:bg-red-700 text-white border-red-700' : 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600'}`}>
-                      前往更新資料
-                  </button>
-              </div>
-          )}
+              )}
 
-          <div className="bg-white/95 backdrop-blur-xl rounded-2xl md:rounded-[2rem] shadow-xl p-3 md:p-4 flex flex-col xl:flex-row justify-between items-center gap-3 md:gap-4 mb-4 border border-slate-100/50">
+              {/* 🌟 獨立結構的新人橫幅：不會影響下方排版 */}
+              {isNewbieUser && newbiePassesLeft > 0 && (
+                  <div className="bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-2xl p-4 md:p-5 shadow-xl shadow-emerald-500/20 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-fade-in-down border border-emerald-400/50">
+                      <div className="flex items-center gap-3">
+                          <div className="bg-white/20 p-2.5 rounded-xl backdrop-blur-sm shrink-0">
+                              <Sprout size={24} className="text-emerald-50 drop-shadow-sm" />
+                          </div>
+                          <div>
+                              <h3 className="font-black text-lg drop-shadow-sm flex items-center gap-2">
+                                  新人專屬優先報名權限
+                              </h3>
+                              <p className="text-emerald-50 text-sm font-medium mt-0.5 leading-snug">
+                                  您目前尚有 <span className="font-black text-2xl text-yellow-300 mx-1.5 drop-shadow-md">{newbiePassesLeft}</span> 次優先登記額度，請把握 Day 2 專屬階段報名！
+                              </p>
+                          </div>
+                      </div>
+                      <button onClick={() => { setStatusFilter('OPEN'); setTimeFilter('CURRENT_YEAR'); }} className="shrink-0 bg-white text-emerald-600 hover:bg-emerald-50 px-5 py-2.5 rounded-xl font-black text-sm transition-colors shadow-sm active:scale-95 w-full sm:w-auto border border-emerald-100">
+                          立即尋找招募賽事
+                      </button>
+                  </div>
+              )}
+          </div>
+
+          <div className="bg-white/95 backdrop-blur-xl rounded-2xl md:rounded-[2rem] shadow-xl p-3 md:p-4 flex flex-col xl:flex-row justify-between items-center gap-3 md:gap-4 mb-4 border border-slate-100/50 animate-fade-in-up">
               <div className="flex gap-2 w-full xl:w-auto overflow-x-auto pb-1 md:pb-0 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden snap-x">
                   <button onClick={() => setStatusFilter('ALL')} className={`shrink-0 px-4 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all whitespace-nowrap snap-start ${statusFilter === 'ALL' ? 'bg-slate-800 text-white shadow-md' : 'text-slate-500 hover:bg-slate-100 bg-slate-50/50'}`}>全部賽事</button>
                   <button onClick={() => setStatusFilter('OPEN')} className={`shrink-0 px-4 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all whitespace-nowrap flex items-center gap-1.5 snap-start ${statusFilter === 'OPEN' ? 'bg-green-500 text-white shadow-md shadow-green-500/20' : 'text-slate-500 hover:bg-slate-100 bg-slate-50/50'}`}><Activity size={14} className="hidden sm:block"/> 招募中</button>
@@ -497,7 +544,7 @@ export default function RaceEvents() {
               </div>
           </div>
 
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 mb-8 overflow-hidden transition-all duration-300">
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 mb-8 overflow-hidden transition-all duration-300 animate-fade-in-up">
               <div 
                   className="px-6 py-4 flex justify-between items-center cursor-pointer bg-slate-50 hover:bg-slate-100 transition-colors"
                   onClick={() => setShowStats(!showStats)}
@@ -546,7 +593,7 @@ export default function RaceEvents() {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 lg:gap-8 pb-10">
                   {filteredRaces.map((race, idx) => {
                       const { totalRegistered, newcomerCount, participantDetails } = extractParticipantsData(race);
-                      const required = race.medic_required || 0;
+                      const required = race.medicRequired || 0;
                       let progressPercentage = 0;
                       if (required > 0) {
                           progressPercentage = Math.round((totalRegistered / required) * 100);
@@ -564,65 +611,102 @@ export default function RaceEvents() {
                       }
                       const btnConfig = getButtonConfig();
 
+                      const phaseInfo = getRegistrationPhase(race.openTime);
+
                       return (
-                      <div key={race.id} className="bg-white rounded-[1.5rem] md:rounded-[2rem] shadow-lg shadow-slate-200/40 hover:shadow-2xl hover:shadow-blue-900/10 hover:-translate-y-1.5 border border-slate-100 overflow-hidden transition-all duration-300 group flex flex-col h-full animate-fade-in-up" style={{ animationDelay: `${(idx % 6) * 50}ms` }}>
-                          <div className="h-[180px] md:h-[200px] relative overflow-hidden bg-slate-200 shrink-0">
+                      <div key={race.id} 
+                           onClick={() => race.status !== 'UPCOMING' && navigate(`/race-detail/${race.id}`)}
+                           className={`group bg-white rounded-3xl shadow-sm hover:shadow-2xl transition-all duration-500 border border-slate-100 overflow-hidden flex flex-col relative animate-fade-in-up
+                           ${race.status === 'UPCOMING' ? 'opacity-80 grayscale-[20%]' : 'cursor-pointer hover:-translate-y-1'}`}
+                           style={{ animationDelay: `${(idx % 6) * 50}ms` }}>
+                          
+                          <div className="relative h-48 md:h-52 overflow-hidden shrink-0">
+                              <div className="absolute inset-0 bg-slate-900/20 group-hover:bg-transparent transition-colors z-10"></div>
                               <img 
                                   src={race.imageUrl || race.image_url || 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&q=80&w=600'} 
-                                  alt={race.name} 
+                                  alt={race.title} 
                                   onError={(e) => {
                                       e.target.onerror = null; 
                                       e.target.src = 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&q=80&w=600';
                                   }}
-                                  className={`w-full h-full object-cover transition-transform duration-700 group-hover:scale-105 ${isFull || race.status === 'SUBMITTED' ? 'grayscale opacity-70' : ''}`} 
+                                  className={`w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-700 ease-out ${isFull || race.status === 'SUBMITTED' ? 'grayscale opacity-70' : ''}`} 
                               />
                               <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-slate-900/20 to-transparent"></div>
-                              {renderStatusBadge(race.status, race.is_hot, isFull)}
+                              {renderStatusBadge(race.status, race.isHot, isFull)}
                               <div className="absolute bottom-3 left-3 md:bottom-4 md:left-4 flex items-center gap-2">
                                   <span className="bg-white/20 backdrop-blur-md text-white text-[10px] md:text-xs font-bold px-2.5 md:px-3 py-1 md:py-1.5 rounded-lg border border-white/30">{race.type}</span>
                               </div>
                           </div>
 
                           <div className="p-5 md:p-6 flex flex-col flex-1">
-                              <h3 className="text-lg md:text-xl font-black text-slate-800 mb-4 md:mb-5 line-clamp-2 leading-snug group-hover:text-blue-600 transition-colors cursor-pointer" onClick={() => navigate(`/race-detail/${race.id}`)}>{race.name}</h3>
+                              <h3 className="text-lg md:text-xl font-black text-slate-800 mb-4 md:mb-5 line-clamp-2 leading-snug group-hover:text-blue-600 transition-colors">
+                                  {race.title}
+                              </h3>
                               
-                              {/* 🌟 核心修復 2：移除 mb-6 改為 mb-4，減少地點與名單間的空白 */}
                               <div className="space-y-2 md:space-y-2.5 mb-4 flex-1">
                                   <div className="flex items-center text-slate-600 text-xs md:text-sm font-medium bg-slate-50 p-2 md:p-2.5 rounded-xl"><Calendar size={14} className="text-blue-500 mr-2.5 shrink-0"/><span>{race.date}</span></div>
                                   <div className="flex items-center text-slate-600 text-xs md:text-sm font-medium bg-slate-50 p-2 md:p-2.5 rounded-xl"><MapPin size={14} className="text-red-500 mr-2.5 shrink-0"/><span className="truncate">{race.location}</span></div>
+                                  
+                                  <div className="flex items-center text-[11px] font-bold text-slate-500 bg-slate-50 px-2 md:px-2.5 py-1.5 rounded-xl border border-slate-100 gap-1.5">
+                                      <Timer size={14} className="text-amber-500 shrink-0"/> 
+                                      開放報名: {race.openTime ? new Date(race.openTime).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '未設定'}
+                                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-black shrink-0 ${phaseInfo.phase === -1 ? 'bg-slate-200 text-slate-500' : phaseInfo.phase === 0 ? 'bg-indigo-100 text-indigo-700' : phaseInfo.phase === 1 ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
+                                          {phaseInfo.label}
+                                      </span>
+                                  </div>
                               </div>
 
-                              <div className="mb-5 md:mb-6">
-                                  <div className="flex justify-between items-end mb-2">
-                                      <div className="flex items-center cursor-pointer hover:bg-slate-100 p-1.5 -ml-1.5 rounded-xl transition-colors active:scale-95" onClick={() => setPreviewRace({...race, participants: participantDetails})} title="點擊查看名單">
-                                          {participantDetails.length > 0 ? (
-                                              <div className="flex -space-x-2.5 md:-space-x-3">
-                                                  {participantDetails.slice(0, 4).map((p, i) => (
-                                                      <div key={i} className="w-7 h-7 md:w-8 md:h-8 rounded-full border-2 border-white flex items-center justify-center text-[10px] md:text-xs font-bold text-white shadow-sm" style={{ backgroundColor: `hsl(${i * 60 + 200}, 70%, 50%)` }}>{getInitial(p.name)}</div>
-                                                  ))}
-                                              </div>
-                                          ) : (
-                                              <div className="w-7 h-7 md:w-8 md:h-8 rounded-full border-2 border-slate-200 bg-slate-100 flex items-center justify-center text-slate-400"><UsersRound size={12} md:size={14}/></div>
-                                          )}
-                                          
-                                          {/* 🌟 核心修復 3：補回新人統計資訊 */}
-                                          <div className="ml-2 md:ml-3 flex flex-col">
-                                              <span className="text-[10px] md:text-xs font-bold flex items-center gap-1 text-slate-600">{totalRegistered} 人已報名 <ChevronRight size={12}/></span>
-                                              {newcomerCount > 0 && <span className="text-[9px] text-green-600 font-bold">(含 {newcomerCount} 位新人)</span>}
+                              <div className="mt-auto pt-5 border-t border-slate-100 flex items-end justify-between">
+                                  <div className="flex-1 pr-4">
+                                      <div className="flex justify-between items-center mb-2">
+                                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">招募進度</span>
+                                          <span className="text-xs font-black text-slate-700">{totalRegistered} / {required}</span>
+                                      </div>
+                                      <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden border border-slate-200 shadow-inner">
+                                          <div className={`h-full rounded-full transition-all duration-1000 ease-out relative overflow-hidden ${progressPercentage >= 100 ? 'bg-gradient-to-r from-amber-400 to-amber-500' : 'bg-gradient-to-r from-blue-500 to-blue-400'}`} style={{ width: `${progressPercentage}%` }}>
+                                              <div className="absolute inset-0 bg-white/20 w-full h-full" style={{ backgroundImage: 'linear-gradient(45deg,rgba(255,255,255,.15) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.15) 50%,rgba(255,255,255,.15) 75%,transparent 75%,transparent)', backgroundSize: '1rem 1rem' }}></div>
                                           </div>
                                       </div>
-                                      
-                                      <div className="flex flex-col items-end">
-                                           {isFull ? <span className="text-[9px] md:text-[10px] font-black text-red-500 mb-0.5">已滿編</span> : isAlmostFull ? <span className="text-[9px] md:text-[10px] font-black text-amber-500 mb-0.5">即將額滿</span> : null}
-                                          <div className="text-[10px] md:text-xs font-black text-slate-400">總需 {required} 人</div>
+                                      <div className="flex justify-between items-center mt-1.5">
+                                          <span className="text-[10px] text-slate-400 font-bold">{progressPercentage}% 達成</span>
+                                          {race.waitlistCount > 0 && <span className="text-[10px] text-amber-600 font-bold">候補: {race.waitlistCount} 人</span>}
                                       </div>
                                   </div>
-                                  <div className="w-full bg-slate-200 rounded-full h-1.5 md:h-2 overflow-hidden shadow-inner">
-                                      <div className={`h-full rounded-full transition-all duration-1000 ${isFull ? 'bg-red-500' : isAlmostFull ? 'bg-amber-400' : 'bg-blue-500'}`} style={{ width: `${progressPercentage}%` }}></div>
+
+                                  <div 
+                                      className="flex items-center -space-x-2 shrink-0 cursor-pointer hover:scale-110 transition-transform bg-slate-50 p-1.5 rounded-full border border-slate-100 shadow-sm"
+                                      onClick={(e) => { e.stopPropagation(); setPreviewRace({...race, participants: participantDetails}); }}
+                                      title="點擊查看名單"
+                                  >
+                                      {participantDetails.length > 0 ? (
+                                          <>
+                                              {participantDetails.slice(0, 4).map((p, i) => (
+                                                  <div key={i} className="w-8 h-8 rounded-full border-2 border-white flex items-center justify-center text-[10px] font-black text-white shadow-sm ring-1 ring-slate-200/50 z-10" style={{ backgroundColor: `hsl(${i * 60 + 200}, 70%, 50%)` }}>
+                                                      {getInitial(p.name)}
+                                                  </div>
+                                              ))}
+                                              {participantDetails.length > 4 && (
+                                                  <div className="w-8 h-8 rounded-full border-2 border-white flex items-center justify-center text-[10px] font-black bg-slate-100 text-slate-500 shadow-sm z-0">
+                                                      +{participantDetails.length - 4}
+                                                  </div>
+                                              )}
+                                          </>
+                                      ) : (
+                                          <div className="w-8 h-8 rounded-full border border-slate-200 bg-slate-100 flex items-center justify-center text-slate-300">
+                                              <UsersRound size={14}/>
+                                          </div>
+                                      )}
+                                      
+                                      {/* 顯示新人數量小標籤 */}
+                                      {newcomerCount > 0 && (
+                                          <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-green-500 border-2 border-white flex items-center justify-center z-20 shadow-sm">
+                                              <Sprout size={10} className="text-white"/>
+                                          </div>
+                                      )}
                                   </div>
                               </div>
-
-                              <button onClick={() => navigate(`/race-detail/${race.id}`)} disabled={race.status === 'UPCOMING'} className={`w-full py-3 md:py-4 rounded-xl font-black text-[13px] md:text-[15px] flex items-center justify-center gap-2 transition-all active:scale-95 ${btnConfig.class}`}>
+                              
+                              <button onClick={() => navigate(`/race-detail/${race.id}`)} disabled={race.status === 'UPCOMING'} className={`w-full mt-5 py-3 md:py-4 rounded-xl font-black text-[13px] md:text-[15px] flex items-center justify-center gap-2 transition-all active:scale-95 ${btnConfig.class}`}>
                                   {btnConfig.text}
                                   {race.status !== 'UPCOMING' && <ChevronRight size={16} md:size={18} className="group-hover:translate-x-1 transition-transform" />}
                               </button>
@@ -689,12 +773,12 @@ export default function RaceEvents() {
 
       {previewRace && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in" onClick={() => setPreviewRace(null)}>
-              <div className="bg-white rounded-[2rem] shadow-2xl max-w-sm md:max-w-md w-full p-6 animate-bounce-in" onClick={e => e.stopPropagation()}>
+              <div className="bg-white rounded-[2rem] shadow-2xl max-w-sm md:max-w-md w-full p-6 animate-bounce-in flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
                   <div className="flex justify-between items-center mb-4">
                       <h3 className="font-black text-xl text-slate-800 flex items-center gap-2"><Users className="text-blue-600"/> 已報名夥伴名單</h3>
                       <button onClick={() => setPreviewRace(null)} className="text-slate-400 hover:bg-slate-100 p-2 rounded-full transition-colors"><X size={20}/></button>
                   </div>
-                  <div className="text-sm font-bold text-slate-500 mb-4 pb-4 border-b border-slate-100 leading-snug">{previewRace.name}</div>
+                  <div className="text-sm font-bold text-slate-500 mb-4 pb-4 border-b border-slate-100 leading-snug">{previewRace.title}</div>
                   <div className="max-h-[60vh] overflow-y-auto space-y-3 custom-scrollbar pr-2">
                       {previewRace.participants?.map((p, i) => {
                           const cleanName = p.name.split('#')[0].trim();

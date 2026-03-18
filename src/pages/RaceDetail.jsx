@@ -33,7 +33,6 @@ export default function RaceDetail() {
           if (user && user.email) {
               const { data: profile } = await supabase.from('profiles').select('*').eq('email', user.email).maybeSingle()
               if (profile) {
-                  // 🌟 核心修復：強制把官方 auth.users 的 UUID 綁定到 auth_user_id 屬性上，專供通知寫入使用
                   fetchedUser = { ...profile, auth_user_id: user.id };
                   const role = profile.role?.toUpperCase() || 'USER';
                   if (role === 'SUPER_ADMIN' || role === 'TOURNAMENT_DIRECTOR') {
@@ -100,7 +99,7 @@ export default function RaceDetail() {
           isTimeOpenForMe: true 
       }
       
-      if (['鐵人三項', '二鐵', '游泳'].includes(activeRace.type)) checks.isTriShirtValid = !!currentUser.shirt_expiry_25;
+      if (['鐵人三項', '二鐵', '路跑接力', '游泳'].includes(activeRace.type)) checks.isTriShirtValid = !!currentUser.shirt_expiry_25;
       
       if (selectedSlot) {
           const slotInfo = activeRace.slots.find(s => s.id === selectedSlot)
@@ -112,6 +111,9 @@ export default function RaceDetail() {
       let openMessage = "";
       const phase = getRegistrationPhase(activeRace.openTime);
       const userTier = getUserTier(currentUser);
+      
+      // 🌟 新人優先權額度檢查變數
+      const newbiePasses = currentUser.newbie_passes !== undefined ? currentUser.newbie_passes : 3;
 
       if (userTier === 6) {
           checks.isTimeOpenForMe = false;
@@ -128,7 +130,15 @@ export default function RaceDetail() {
               openMessage = "今日僅開放「帶隊教官」報名，您的身分將於明日 00:00 解鎖";
           }
       } else if (phase === 1) {
-          if (userTier <= 4) checks.isTimeOpenForMe = true; 
+          if (userTier <= 4) {
+              // 🌟 核心防護：如果在 Phase 1，且是以新人身分(Tier 3)來搶，必須檢查額度
+              if (userTier === 3 && newbiePasses <= 0) {
+                  checks.isTimeOpenForMe = false;
+                  openMessage = "您的「3 次新人優先報名權利」已用罄，請等候明日全面開放階段報名。";
+              } else {
+                  checks.isTimeOpenForMe = true; 
+              }
+          }
           else {
               checks.isTimeOpenForMe = false;
               openMessage = "今日僅開放「帶隊官/新人/當屆訓練」，您的身分將於明日 00:00 解鎖";
@@ -160,11 +170,17 @@ export default function RaceDetail() {
       if (!selectedSlot) return alert("請先選擇您要報名的賽段！")
       if (!allPassed && !isGodMode) return alert("報名資格審查未通過，無法報名！")
 
-      // 🌟 核心防護 1：全域掃描，徹底封殺分身之術！
+      const phase = getRegistrationPhase(activeRace.openTime);
+      const userTier = getUserTier(currentUser);
+
+      // 🌟 核心防護 1：全域掃描分身
       let isAlreadyInRace = false;
       let existingSlotName = "";
+      
+      // 🌟 核心防護 2：掃描帶隊教官是否已被指派 (Highlander Protocol)
+      let hasTeamLeaderAlready = false;
 
-      if (!isGodMode) { // 賽事總監可無視分身限制
+      if (!isGodMode) { 
           // 檢查所有正取名單
           for (const slot of activeRace.slots) {
               if (slot.assignee) {
@@ -176,6 +192,10 @@ export default function RaceDetail() {
                           if (p.id === currentUser.id || p.name === currentUser.full_name) {
                               isAlreadyInRace = true;
                               existingSlotName = slot.name;
+                          }
+                          // 同步檢查是否已經有人卡走帶隊教官的位置
+                          if (p.roleTag === '帶隊教官') {
+                              hasTeamLeaderAlready = true;
                           }
                       } catch (e) {
                           const legacyName = item.split('#')[0].trim();
@@ -198,6 +218,17 @@ export default function RaceDetail() {
           return alert(`❌ 系統攔截：您已經報名【${existingSlotName}】！\n一個人無法同時報名多個組別 (禁止分身)。若要更改組別，請先至數位 ID 卡「取消報名」後再重新操作。`);
       }
 
+      // 🌟 核心防護 3：帶隊教官唯一防呆鎖定
+      let assignedRoleTag = null;
+      if (phase === 0 && userTier === 2 && !isGodMode) {
+          if (hasTeamLeaderAlready) {
+              return alert(`⚠️ 報名失敗：本場賽事之【帶隊教官】名額已被登記！\n請於下一階段以一般身分報名，或聯繫賽事總監。`);
+          } else {
+              // 第一個來搶的教官，自動賦予專屬黃馬褂
+              assignedRoleTag = '帶隊教官';
+          }
+      }
+
       const now = new Date();
       const timestamp = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
       
@@ -205,13 +236,22 @@ export default function RaceDetail() {
           id: currentUser.id,
           name: currentUser.full_name || currentUser.email.split('@')[0],
           email: currentUser.email,
-          tier: getUserTier(currentUser),
+          tier: userTier,
           isVip: currentUser.is_vip === 'Y',
           isNew: currentUser.is_new_member === 'Y' || currentUser.total_races < 2,
           timestamp: timestamp,
           slot: selectedSlot,
+          roleTag: assignedRoleTag, // 🌟 偷偷塞入的專屬標籤
           isMe: true 
       };
+
+      // 🌟 核心防護 4：預先計算新人扣抵邏輯
+      let willBurnNewbiePass = false;
+      let newbiePassesLeft = currentUser.newbie_passes !== undefined ? currentUser.newbie_passes : 3;
+      // 只有在 Phase 1 (Day 2) 且是以新人身分搶票時，才會扣抵次數
+      if (phase === 1 && userTier === 3 && !isGodMode) {
+          willBurnNewbiePass = true;
+      }
 
       if (!isSelectedSlotFull) {
           const updatedSlots = activeRace.slots.map(s => {
@@ -224,28 +264,35 @@ export default function RaceDetail() {
           });
 
           setActiveRace({ ...activeRace, slots: updatedSlots });
-          alert(`✅ 報名成功！您已正式加入【${targetSlotData.name}】`);
+          alert(`✅ 報名成功！您已正式加入【${targetSlotData.name}】${assignedRoleTag ? ` (並鎖定${assignedRoleTag}資格)` : ''}`);
 
           try {
               const { error } = await supabase.from('races').update({ slots_data: updatedSlots }).eq('id', activeRace.id);
               if (error) throw error;
               
-              // 🌟 核心防護 2：保證通知寫入與除錯回報 (使用 auth_user_id)
+              // 🌟 核心防護 4 執行：扣除新人優先權次數
+              if (willBurnNewbiePass) {
+                  const newPasses = Math.max(0, newbiePassesLeft - 1);
+                  await supabase.from('profiles').update({ newbie_passes: newPasses }).eq('id', currentUser.id);
+                  setCurrentUser(prev => ({ ...prev, newbie_passes: newPasses }));
+              }
+
               try {
                   if (currentUser.auth_user_id) {
+                      let successMsg = `您已成功報名【${activeRace.title}】的「${targetSlotData.name}」賽段。`;
+                      if (assignedRoleTag) successMsg += ` 您已自動登記為本場賽事之【${assignedRoleTag}】。`;
+                      if (willBurnNewbiePass) successMsg += ` (已使用 1 次新人優先報名權利，剩餘 ${Math.max(0, newbiePassesLeft - 1)} 次)`;
+
                       const { error: notifError } = await supabase.from('user_notifications').insert([{
                           user_id: currentUser.auth_user_id,
                           tab: 'personal', 
                           category: 'race',
-                          message: `您已成功報名【${activeRace.title}】的「${targetSlotData.name}」賽段。`,
+                          message: successMsg,
                           is_read: false
                       }]);
                       if (notifError) {
                           console.error("發送報名通知失敗", notifError);
-                          alert(`⚠️ 系統提示：賽事報名成功，但個人通知寫入失敗 (${notifError.message})。這不影響您的參賽資格，請聯繫系統管理員檢查系統權限。`);
                       }
-                  } else {
-                      console.log("未抓取到 auth_user_id，跳過發送通知");
                   }
               } catch(e) { console.error("發送報名通知異常", e) }
 
@@ -262,19 +309,27 @@ export default function RaceDetail() {
               const { error } = await supabase.from('races').update({ waitlist_data: newWaitlist }).eq('id', activeRace.id);
               if (error) throw error;
               
-              // 🌟 核心防護 2：候補通知寫入與除錯回報 (使用 auth_user_id)
+              // 🌟 候補成功一樣要扣除新人次數
+              if (willBurnNewbiePass) {
+                  const newPasses = Math.max(0, newbiePassesLeft - 1);
+                  await supabase.from('profiles').update({ newbie_passes: newPasses }).eq('id', currentUser.id);
+                  setCurrentUser(prev => ({ ...prev, newbie_passes: newPasses }));
+              }
+
               try {
                   if (currentUser.auth_user_id) {
+                      let waitMsg = `您已進入【${activeRace.title}】的候補名單，請靜候系統通知。`;
+                      if (willBurnNewbiePass) waitMsg += ` (已扣除 1 次新人優先報名權利)`;
+
                       const { error: notifError } = await supabase.from('user_notifications').insert([{
                           user_id: currentUser.auth_user_id,
                           tab: 'personal',
                           category: 'race',
-                          message: `您已進入【${activeRace.title}】的候補名單，請靜候系統或總監通知。`,
+                          message: waitMsg,
                           is_read: false
                       }]);
                       if (notifError) {
                           console.error("發送候補通知失敗", notifError);
-                          alert(`⚠️ 系統提示：已登記候補，但個人通知寫入失敗 (${notifError.message})。這不影響您的候補順位。`);
                       }
                   }
               } catch(e) { console.error("發送候補通知異常", e) }

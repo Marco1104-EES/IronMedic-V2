@@ -20,10 +20,18 @@ const cleanString = (str) => {
     return String(str).replace(/[\s\u3000\n\r\-_]/g, '');
 };
 
-// 日期正規化引擎 (處理美式與民國年)
+// 🌟 類神經升級：日期正規化 (支援 2025/1/1-2025/1/8 這種區間寫法)
 const formatDateString = (rawDate) => {
     if (!rawDate) return '';
     let str = String(rawDate).trim();
+    
+    // 如果是日期區間 (例如: 2025/1/1-2025/1/8)，強制截斷保留第一個日期
+    if (str.match(/\d+\/\d+\/\d+\s*-\s*\d+/)) {
+        str = str.split('-')[0].trim();
+    } else if (str.includes('~')) {
+        str = str.split('~')[0].trim();
+    }
+
     const usFormatMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/);
     if (usFormatMatch) {
         let year = parseInt(usFormatMatch[3], 10);
@@ -46,7 +54,6 @@ const formatDateString = (rawDate) => {
     return str; 
 }
 
-// 醫護證照字彙統一引擎 (嚴格對齊 5 種系統預設值)
 const normalizeMedicalLicense = (rawLicense) => {
     if (!rawLicense) return '';
     const s = String(rawLicense).toUpperCase().replace(/\s/g, '');
@@ -325,7 +332,6 @@ export default function DataImportCenter() {
             }
         });
 
-        // 智慧辨識邏輯 (黑洞收納與去渣判斷)
         headers.forEach(h => {
             if (initialMap[h]) return; 
 
@@ -365,7 +371,6 @@ export default function DataImportCenter() {
                 matchedKey = 'extra_info';
             }
 
-            // 處理地址衝突
             if (matchedKey === 'address' && assignedDbFields.has('address')) {
                  const oldHeader = Object.keys(initialMap).find(k => initialMap[k] === 'address');
                  if (oldHeader && h.length > oldHeader.length) {
@@ -390,7 +395,6 @@ export default function DataImportCenter() {
     } catch (err) { addLog(`分析異常: ${err.message}`, 'error') } finally { setProcessing(false) }
   }
 
-  // 🌟 最終清洗與轉換引擎 (強制去渣)
   const handleMatchAndTransform = async () => {
       setProcessing(true)
       const currentYear = new Date().getFullYear().toString(); 
@@ -449,7 +453,6 @@ export default function DataImportCenter() {
                           
                           let normalizedVal = cellVal;
                           
-                          // 🌟 強制清洗邏輯
                           if (dbField === 'birthday' || dbField === 'join_date') {
                               normalizedVal = formatDateString(cellVal);
                           } else if (dbField === 'medical_license') {
@@ -457,11 +460,10 @@ export default function DataImportCenter() {
                           } else if (dbField === 'is_current_member') {
                               normalizedVal = String(cellVal).includes(currentYear) ? 'Y' : 'N';
                           } else if (dbField === 'phone' || dbField === 'emergency_phone') {
-                              normalizedVal = cleanString(cellVal); // 強制去除 - 和空白
+                              normalizedVal = cleanString(cellVal);
                           } else if (dbField === 'national_id') {
                               normalizedVal = String(cellVal).toUpperCase().replace(/[\s\u3000\n\r\-_]/g, '');
                           } else if (dbField === 'full_name' || dbField === 'emergency_name') {
-                              // 中文名字除空白，英文名字只去頭尾
                               normalizedVal = /[a-zA-Z]/.test(String(cellVal)) ? String(cellVal).trim() : cleanString(cellVal);
                           } else {
                               normalizedVal = typeof cellVal === 'string' ? cellVal.trim() : cellVal;
@@ -541,7 +543,6 @@ export default function DataImportCenter() {
                       if (!isEmpty) {
                           let normalizedVal = cellVal;
                           
-                          // 🌟 強制清洗邏輯
                           if (dbField === 'birthday' || dbField === 'join_date') {
                               normalizedVal = formatDateString(cellVal);
                           } else if (dbField === 'medical_license') {
@@ -549,7 +550,7 @@ export default function DataImportCenter() {
                           } else if (dbField === 'is_current_member') {
                               normalizedVal = String(cellVal).includes(currentYear) ? 'Y' : 'N';
                           } else if (dbField === 'phone' || dbField === 'emergency_phone') {
-                              normalizedVal = cleanString(cellVal); // 強制去除 - 和空白
+                              normalizedVal = cleanString(cellVal);
                           } else if (dbField === 'national_id') {
                               normalizedVal = String(cellVal).toUpperCase().replace(/[\s\u3000\n\r\-_]/g, '');
                           } else if (dbField === 'full_name' || dbField === 'emergency_name') {
@@ -757,6 +758,9 @@ export default function DataImportCenter() {
       });
   }
 
+  // ==========================================
+  // 🌟 賽事類神經網絡匯入引擎 (精準去重、解析後綴、職位對齊)
+  // ==========================================
   const handleExecuteRaceUpload = async () => {
       if (!raceFile) return alert("請先選擇賽事建檔表！");
       
@@ -786,6 +790,7 @@ export default function DataImportCenter() {
               const keys = Object.keys(row);
               
               try {
+                  // 1. 抓取賽事名稱
                   let name = row['賽事名稱'] || row['賽事或活動名稱'] || '';
                   if (!name && keys.length > 0) {
                        for(let k of keys) {
@@ -800,21 +805,14 @@ export default function DataImportCenter() {
                       continue; 
                   }
 
+                  // 2. 時空日期收束器
                   let rawDate = row['日期(YYYY-MM-DD)'] || row['賽事或活動日期'] || row['日期'] || '';
                   let location = row['地點'] || row['賽事地點'] || '';
                   const imgUrl = row['海報圖片URL'] || row['賽事URL'] || '';
                   
-                  let parsedDate = null;
-                  if (rawDate instanceof Date) {
-                      parsedDate = new Date(rawDate.getTime() - rawDate.getTimezoneOffset() * 60000).toISOString().split('T')[0];
-                  } else if (typeof rawDate === 'number') {
-                      const excelEpoch = new Date(1899, 11, 31);
-                      parsedDate = new Date(excelEpoch.getTime() + rawDate * 86400000).toISOString().split('T')[0];
-                  } else if (typeof rawDate === 'string' && rawDate.length >= 8) {
-                      parsedDate = rawDate.replace(/\//g, '-').trim().substring(0, 10);
-                  }
+                  let parsedDate = formatDateString(rawDate);
 
-                  if (!parsedDate) {
+                  if (!parsedDate || parsedDate === rawDate) {
                       parsedDate = '2025-01-01'; 
                       addLog(`⚠️ 賽事「${name}」日期異常 [${rawDate}]，已暫時代入 2025-01-01`, 'warning');
                   }
@@ -823,76 +821,111 @@ export default function DataImportCenter() {
                       location = imgUrl ? "詳見賽事連結" : "地點未定";
                   }
 
-                  let rawStatus = String(row['狀態(OPEN/NEGOTIATING/SUBMITTED)'] || row['與主辦單位合作進度'] || '');
+                  // 3. 狀態精準映射
+                  let rawStatus = String(row['狀態(OPEN/NEGOTIATING/SUBMITTED)'] || row['與主辦單位合作進度'] || '').toUpperCase();
                   let finalStatus = 'OPEN'; 
-                  if (rawStatus.includes('尚未開放') || rawStatus.includes('確認合作') || rawStatus.includes('洽談')) finalStatus = 'NEGOTIATING';
-                  if (rawStatus.includes('名單已送交') || rawStatus.includes('已送交主辦') || rawStatus.includes('名單送出')) finalStatus = 'SUBMITTED';
-                  if (rawStatus.includes('已額滿') || rawStatus.includes('滿編') || rawStatus.includes('已報滿')) finalStatus = 'FULL';
-                  if (['OPEN', 'NEGOTIATING', 'SUBMITTED', 'FULL', 'UPCOMING'].includes(rawStatus)) finalStatus = rawStatus; 
+                  if (rawStatus.includes('洽談') || rawStatus.includes('確認合作') || rawStatus.includes('尚未開放')) finalStatus = 'NEGOTIATING';
+                  else if (rawStatus.includes('名單已送交') || rawStatus.includes('已送交') || rawStatus.includes('名單送出') || rawStatus.includes('SUBMITTED')) finalStatus = 'SUBMITTED';
+                  else if (rawStatus.includes('額滿') || rawStatus.includes('滿編') || rawStatus.includes('FULL')) finalStatus = 'FULL';
+                  else if (['OPEN', 'COMPLETED', 'CANCELLED', 'UPCOMING'].includes(rawStatus)) finalStatus = rawStatus;
 
                   const participantsMap = new Map(); 
 
-                  for(let j = 1; j <= 40; j++) {
-                      const person = row[`參加人員${j}`];
-                      if (person && String(person).trim() !== '') {
-                          let rawString = String(person).trim();
-                          let pSlotName = null;
-                          const match = rawString.match(/(.*?)\((.*?)\)/) || rawString.match(/(.*?)（(.*?)）/);
-                          if (match) {
-                              rawString = match[1].trim();
-                              pSlotName = match[2].trim();
-                          }
-                          let cleanName = rawString.replace(/[A-Za-z0-9\s]+$/, '').trim(); 
-                          if (!cleanName) cleanName = rawString.trim(); 
-                          
-                          if (!participantsMap.has(cleanName)) {
-                              participantsMap.set(cleanName, { cleanName, pSlotName, roleTag: null });
+                  // ===================================
+                  // 🌟 後綴語意智慧解析刀 & 加入名單
+                  // ===================================
+                  const addParticipant = (rawStr, forcedRole = null) => {
+                      if (!rawStr || String(rawStr).trim() === '') return;
+                      let str = String(rawStr).trim();
+                      let pSlotName = null;
+
+                      // 處理括號 e.g. 董珮珊(21K)
+                      const parenMatch = str.match(/(.*?)[(（](.*?)[)）]/);
+                      if (parenMatch) {
+                          str = parenMatch[1].trim();
+                          pSlotName = parenMatch[2].trim();
+                      } else {
+                          // 處理直接黏在一起的後綴 e.g. 曾柏耀d11, 董珮珊da1, 蔡智豪21K
+                          const suffixMatch = str.match(/^([\u4e00-\u9fa5]+)\s*([a-zA-Z0-9]+)$/);
+                          if (suffixMatch) {
+                              str = suffixMatch[1].trim();
+                              let suffix = suffixMatch[2].toUpperCase();
+                              
+                              if (suffix.includes('DA') || suffix.includes('D')) {
+                                  let dayMatch = suffix.match(/\d+/);
+                                  if(dayMatch) pSlotName = `Day ${dayMatch[0]}`;
+                              } else if (suffix.includes('K')) {
+                                  pSlotName = `${suffix.replace('K','')}K`;
+                              } else if (!isNaN(suffix)) {
+                                  if (['113', '226', '515'].includes(suffix)) pSlotName = `鐵人三項 ${suffix}`;
+                                  else pSlotName = `${suffix}K`;
+                              } else {
+                                  pSlotName = suffix;
+                              }
                           }
                       }
-                  }
 
-                  const assignSpecialRole = (rawSpecialName, role) => {
-                      if (!rawSpecialName) return;
-                      let cleanSpecial = String(rawSpecialName).replace(/[A-Za-z0-9\s]+$/, '').trim();
-                      if (!cleanSpecial) cleanSpecial = String(rawSpecialName).trim();
-                      
-                      if (participantsMap.has(cleanSpecial)) {
-                          participantsMap.get(cleanSpecial).roleTag = role;
+                      let cleanName = cleanString(str);
+                      if (!cleanName) return;
+
+                      if (participantsMap.has(cleanName)) {
+                          let existing = participantsMap.get(cleanName);
+                          if (forcedRole && !existing.roleTag) existing.roleTag = forcedRole;
+                          if (pSlotName && !existing.pSlotName) existing.pSlotName = pSlotName;
                       } else {
-                          participantsMap.set(cleanSpecial, { cleanName: cleanSpecial, pSlotName: null, roleTag: role });
+                          participantsMap.set(cleanName, { cleanName, pSlotName, roleTag: forcedRole });
                       }
                   };
 
-                  const sponsor1 = row['贊助方（鐵人醫護有限公司）代表1'] || '';
-                  const sponsor2 = row['贊助方（鐵人醫護有限公司）代表2'] || '';
-                  const sponsor3 = row['贊助方（鐵人醫護有限公司）代表3'] || '';
-                  assignSpecialRole(sponsor1, '官方代表');
-                  assignSpecialRole(sponsor2, '官方代表');
-                  assignSpecialRole(sponsor3, '官方代表');
+                  for(let j = 1; j <= 40; j++) {
+                      addParticipant(row[`參加人員${j}`]);
+                  }
+
+                  // ===================================
+                  // 🌟 職稱智能拆解與去重融合
+                  // ===================================
+                  const assignSpecialRole = (rawNameBlock, fallbackRole) => {
+                      if (!rawNameBlock) return;
+                      const names = String(rawNameBlock).split(/[,，、\n]/);
+                      names.forEach(n => {
+                          // 拔除 "1. 帶隊教官：" 這種前綴
+                          let cleanN = n.replace(/^[0-9\.\s]+/, '').replace(/.*(?:教官|代表)[：:\s]*/, '').trim();
+                          cleanN = cleanN.replace(/[a-zA-Z0-9]+$/, '').trim(); // 預防性切除後綴
+                          cleanN = cleanString(cleanN);
+                          if (cleanN) addParticipant(cleanN, fallbackRole);
+                      });
+                  };
+
+                  assignSpecialRole(row['贊助方（鐵人醫護有限公司）代表1'], '官方代表');
+                  assignSpecialRole(row['贊助方（鐵人醫護有限公司）代表2'], '官方代表');
+                  assignSpecialRole(row['贊助方（鐵人醫護有限公司）代表3'], '官方代表');
 
                   const instructors = row['教官'] || '';
                   if (instructors) {
-                      const lines = String(instructors).split('\n');
+                      const lines = String(instructors).split(/[\n]/);
                       lines.forEach(line => {
-                          let rawInst = line.replace(/^[0-9\.\s]+/, '').trim();
-                          if (rawInst) {
-                              let role = '帶隊教官'; 
-                              if (rawInst.includes('賽道')) role = '賽道教官';
-                              if (rawInst.includes('醫護')) role = '醫護教官';
-                              rawInst = rawInst.replace(/帶隊教官[：:]?|賽道教官[：:]?|醫護教官[：:]?/g, '').trim();
-                              if(rawInst) assignSpecialRole(rawInst, role);
-                          }
+                          if (!line.trim()) return;
+                          let role = '帶隊教官'; 
+                          if (line.includes('賽道')) role = '賽道教官';
+                          if (line.includes('醫護')) role = '醫護教官';
+                          if (line.includes('代表')) role = '官方代表';
+                          
+                          let rawN = line.replace(/^[0-9\.\s]+/, '').replace(/.*(?:教官|代表)[：:\s]*/, '').trim();
+                          if(rawN) assignSpecialRole(rawN, role);
                       });
                   }
 
                   const extraInfo = {
                       organizer: row['主辦單位或承辦單位'] || '',
                       instructor: instructors,
-                      sponsor1: sponsor1,
-                      sponsor2: sponsor2,
-                      sponsor3: sponsor3
+                      sponsor1: row['贊助方（鐵人醫護有限公司）代表1'] || '',
+                      sponsor2: row['贊助方（鐵人醫護有限公司）代表2'] || '',
+                      sponsor3: row['贊助方（鐵人醫護有限公司）代表3'] || ''
                   };
 
+                  // ===================================
+                  // 🌟 賽段容量語意解析 (Slots NLP)
+                  // ===================================
                   let slotsArray = [];
                   let totalRequiredInput = parseInt(row['參賽總人數'] || row['開放總名額數'] || row['需求人數'], 10);
                   if (isNaN(totalRequiredInput)) totalRequiredInput = 0;
@@ -901,14 +934,9 @@ export default function DataImportCenter() {
                   
                   if (!rawSlotsText) {
                       slotsArray = [{ 
-                          id: Date.now(), 
-                          group: '一般組別', 
-                          name: '全賽段', 
+                          id: Date.now(), group: '一般組別', name: '全賽段', 
                           capacity: Math.max(1, participantsMap.size, totalRequiredInput), 
-                          genderLimit: 'ANY', 
-                          filled: 0, 
-                          assignee: '',
-                          ...extraInfo
+                          genderLimit: 'ANY', filled: 0, assignee: '', ...extraInfo
                       }];
                   } else {
                       const parts = String(rawSlotsText).split(/[,，、\n]/);
@@ -922,8 +950,9 @@ export default function DataImportCenter() {
                           if (numMatch) {
                               cap = parseInt(numMatch[1], 10);
                               sName = sName.replace(numMatch[0], '').trim() || `組別${idx+1}`;
-                          } else {
-                              cap = 0;
+                          } else if (sName.includes('不限')) {
+                              // "不限名額" 會在後面動態調整
+                              cap = 0; 
                           }
 
                           if (sName.includes('-')) {
@@ -951,6 +980,7 @@ export default function DataImportCenter() {
                       }
                   }
 
+                  // 🌟 四維度會員綁定與分派
                   Array.from(participantsMap.values()).forEach(pData => {
                       let targetSlot = slotsArray[0];
                       if (pData.pSlotName) {
@@ -974,6 +1004,7 @@ export default function DataImportCenter() {
                       targetSlot.assignee = assigneesList.join('|');
                       targetSlot.filled = assigneesList.length;
                       
+                      // 動態擴充容量 (如果不限名額，或人數超出預期)
                       if (targetSlot.filled > targetSlot.capacity) {
                           targetSlot.capacity = targetSlot.filled;
                       }
@@ -1415,7 +1446,7 @@ export default function DataImportCenter() {
                 <h2 className="text-2xl font-black text-amber-600 flex items-center gap-2">
                     <Flag className="text-amber-500"/> 賽事年度總表批次建檔
                 </h2>
-                <p className="text-slate-500 text-sm mt-1">用自動篩選/排除重疊，帶隊教官/會員,高度整合版！</p>
+                <p className="text-slate-500 text-sm mt-1">智能時空收束 / 語意職位融合 / 自動對齊系統狀態版 V10.5</p>
             </div>
           </div>
 
@@ -1443,15 +1474,15 @@ export default function DataImportCenter() {
                       className={`w-full py-4 rounded-xl font-black flex items-center justify-center gap-2 transition-all shadow-lg
                           ${isUploadingRace || !raceFile ? 'bg-slate-400 text-white cursor-not-allowed shadow-none' : 'bg-amber-500 hover:bg-amber-600 text-white shadow-amber-500/30 active:scale-95'}`}
                   >
-                      {isUploadingRace ? <><Loader2 className="animate-spin" size={20}/> 系統去重解析與寫入中...</> : <><Upload size={20}/> 開始執行賽事匯入</>}
+                      {isUploadingRace ? <><Loader2 className="animate-spin" size={20}/> 系統深度解析與融合中...</> : <><Upload size={20}/> 開始執行賽事智能匯入</>}
                   </button>
 
                   {uploadRaceStatus === 'success' && (
                       <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-xl flex items-start gap-3 animate-bounce-in">
                           <CheckCircle className="text-green-500 shrink-0 mt-0.5" size={20}/>
                           <div>
-                              <h4 className="font-bold text-green-800">賽事批次建檔成功！</h4>
-                              <p className="text-sm text-green-600 mt-1">人員資料已去重並寫入，您可至「賽事任務總覽」查看精準數據。</p>
+                              <h4 className="font-bold text-green-800">賽事智能建檔成功！</h4>
+                              <p className="text-sm text-green-600 mt-1">人員資料已去重、清洗後綴，並完美融合於系統，您可至「賽事任務總覽」查看精準數據。</p>
                           </div>
                       </div>
                   )}
@@ -1475,10 +1506,11 @@ export default function DataImportCenter() {
                       下載 賽事總表標準範本 (.xlsx)
                   </button>
                   <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg text-xs font-medium text-amber-800 leading-relaxed shadow-inner">
-                      <span className="font-bold text-amber-600 block mb-1 flex items-center gap-1"><AlertTriangle size={14}/> 人員防呆與去重說明：</span>
+                      <span className="font-bold text-amber-600 block mb-1 flex items-center gap-1"><AlertTriangle size={14}/> 類神經網絡整合說明：</span>
                       <ul className="list-disc pl-4 space-y-1 text-slate-700 mt-2">
-                          <li>系統會自動辨識並清除非人名的後綴 (如 da1)。</li>
-                          <li><span className="font-bold text-red-600">不會重複計算：</span>若「教官」已存在於「參加人員 1~40」中，系統會自動將其合併為同一人，並掛上教官徽章。</li>
+                          <li><span className="font-bold text-blue-600">時空解析：</span>遇到 `2025/1/1-2025/1/8` 等區間格式，系統將自動收束為首日標準日期。</li>
+                          <li><span className="font-bold text-purple-600">後綴智能剖析：</span>遇到 `蔡智豪21K`, `董珮珊da1`，系統自動拆除後綴，並將其自動分派至 `21K`, `Day 1` 等對應梯次。</li>
+                          <li><span className="font-bold text-red-600">職務融合去重：</span>同時出現在「教官欄」與「人員欄」的成員，系統會自動融為一筆，並保留其專業教官身分（絕不重複計算名額）。</li>
                       </ul>
                   </div>
               </div>
