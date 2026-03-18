@@ -1,13 +1,11 @@
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
 import * as XLSX from 'xlsx' 
-// 🌟 這次絕對把 X 給加進來了！
 import { FileSpreadsheet, CheckCircle, ArrowRight, Save, Database, Settings, LayoutList, Merge, Plus, Target, UserCheck, XCircle, BrainCircuit, Trash2, Edit, Download, FileText, Filter, Users, Flag, Upload, AlertTriangle, FileDown, Loader2, Settings2, Fingerprint, GitMerge, X } from 'lucide-react'
 
 const MAPPING_MEMORY_KEY = 'ironmedic_mapping_memory'
 const EXT_LABELS_KEY = 'ironmedic_ext_labels'
 
-// 🌟 賽事匯入模板表頭
 const RACE_IMPORT_TEMPLATE_HEADERS = [
     "賽事名稱", "日期(YYYY-MM-DD)", "鳴槍時間(HH:MM)", "地點", "賽事類型(馬拉松/鐵人三項...)", 
     "海報圖片URL", "狀態(OPEN/NEGOTIATING/SUBMITTED)", "是否火熱(Y/N)", 
@@ -16,16 +14,58 @@ const RACE_IMPORT_TEMPLATE_HEADERS = [
     ...Array.from({length: 40}, (_, i) => `參加人員${i + 1}`)
 ]
 
-// 🌟 核心過濾器：無情去渣洗淨字串 (去除所有全/半形空白與換行)
+// 🌟 核心過濾器：無情去渣洗淨字串 (去除所有全/半形空白、換行、以及連字號)
 const cleanString = (str) => {
     if (str === null || str === undefined) return '';
-    return String(str).replace(/[\s\u3000\n\r]/g, '');
+    // 新增 \- 和 _ 來清除連字號
+    return String(str).replace(/[\s\u3000\n\r\-_]/g, '');
 };
+
+// 🌟 微觀升級 1：日期正規化引擎 (處理美式與民國年)
+const formatDateString = (rawDate) => {
+    if (!rawDate) return '';
+    let str = String(rawDate).trim();
+    // 處理 Excel 匯出產生的 m/d/yy 格式 (如 5/17/84 或 10/30/77)
+    const usFormatMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/);
+    if (usFormatMatch) {
+        let year = parseInt(usFormatMatch[3], 10);
+        // 假設年份小於 30 歸類為 2000 年後，否則歸類為 1900 年代
+        year += (year < 30 ? 2000 : 1900);
+        const month = String(usFormatMatch[1]).padStart(2, '0');
+        const day = String(usFormatMatch[2]).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+    // 處理民國年 (如 73/5/17)
+    const twFormatMatch = str.match(/^(\d{2,3})[/-](\d{1,2})[/-](\d{1,2})$/);
+    if (twFormatMatch && parseInt(twFormatMatch[1], 10) < 150) {
+         let year = parseInt(twFormatMatch[1], 10) + 1911;
+         const month = String(twFormatMatch[2]).padStart(2, '0');
+         const day = String(twFormatMatch[3]).padStart(2, '0');
+         return `${year}-${month}-${day}`;
+    }
+    // 處理標準 YYYY-MM-DD 或其他 Date 可辨識格式
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) {
+        return d.toISOString().split('T')[0];
+    }
+    return str; // 無法解析保留原狀
+}
+
+// 🌟 微觀升級 5：醫護證照字彙統一引擎 (嚴格對齊 5 種系統預設值)
+const normalizeMedicalLicense = (rawLicense) => {
+    if (!rawLicense) return '';
+    const s = String(rawLicense).toUpperCase().replace(/\s/g, '');
+    if (s.includes('EMT-P') || s.includes('EMTP')) return 'EMTP';
+    if (s.includes('EMT-2') || s.includes('EMT2')) return 'EMT-2';
+    if (s.includes('EMT-1') || s.includes('EMT1')) return 'EMT-1';
+    if (s.includes('護理') || s.includes('NURSE')) return '醫療線上護理師';
+    if (s.includes('醫') || s.includes('DOCTOR')) return '醫師';
+    return rawLicense; 
+}
 
 export default function DataImportCenter() {
   const [mainTab, setMainTab] = useState('members') 
 
-  // --- 會員匯入專用 State ---
   const [mode, setMode] = useState('full') 
   const [step, setStep] = useState(1) 
   const [fileMaster, setFileMaster] = useState(null)
@@ -35,28 +75,23 @@ export default function DataImportCenter() {
   const [fieldMapping, setFieldMapping] = useState({}) 
   const [memoryFlags, setMemoryFlags] = useState({}) 
   const [patchAnchorExcel, setPatchAnchorExcel] = useState('') 
-  const [patchAnchorDB, setPatchAnchorDB] = useState('national_id') // 預設改為更精準的身分證
+  const [patchAnchorDB, setPatchAnchorDB] = useState('national_id') 
   const [previewData, setPreviewData] = useState([]) 
   const [viewFilter, setViewFilter] = useState('all') 
   
-  // 🌟 擴充欄位標籤管理器 State
   const [extLabels, setExtLabels] = useState(() => JSON.parse(localStorage.getItem(EXT_LABELS_KEY) || '{}'))
 
-  // 🌟 合體視窗 (Conflict Resolution Modal) 專用 State
   const [conflictModalData, setConflictModalData] = useState(null)
   const [mergedData, setMergedData] = useState({})
 
-  // --- 賽事匯入專用 State ---
   const [isUploadingRace, setIsUploadingRace] = useState(false)
   const [uploadRaceStatus, setUploadRaceStatus] = useState(null)
   const [raceFile, setRaceFile] = useState(null)
 
-  // --- 共用 State ---
   const [logs, setLogs] = useState([])
   const [processing, setProcessing] = useState(false)
   const logsEndRef = useRef(null)
 
-  // 🌟 動態產生 TARGET_FIELDS
   const TARGET_FIELDS = [
       { group: '🟢 【基本與聯絡資料】', options: [
           { key: 'full_name', label: '姓名(A) *必填' }, { key: 'birthday', label: '出生年月日(B)' },
@@ -85,7 +120,7 @@ export default function DataImportCenter() {
           { key: 'shirt_receive_date', label: '領衣日(AK)' }, { key: 'cert_send_date', label: '證書日(AL)' },
           { key: 'transport_pref', label: '交通(AM)' }, { key: 'stay_pref', label: '住宿(AN)' },
           { key: 'family_count', label: '眷屬(AO)' }, { key: 'join_date', label: '加入年月/申請年份' },
-          { key: 'ironmedic_no', label: '醫護鐵人編號' }
+          { key: 'ironmedic_no', label: '醫護鐵人編號' }, { key: 'extra_info', label: '🕳️ 黑洞收納箱 (未歸類資料包)' }
       ]},
       { group: '⚙️ 【自定義擴充資料欄位】', options: Array.from({length: 40}, (_, i) => { 
           const k = `ext_${String(i+1).padStart(2,'0')}`;
@@ -126,7 +161,7 @@ export default function DataImportCenter() {
       let headers = [];
       let filename = "";
       if (type === 'members') {
-          headers = FLAT_TARGETS.map(f => f.label.split('(')[0]); 
+          headers = FLAT_TARGETS.filter(f=>f.key !== 'extra_info').map(f => f.label.split('(')[0]); 
           filename = "醫護鐵人_會員匯入標準範本.xlsx";
       } else {
           headers = RACE_IMPORT_TEMPLATE_HEADERS;
@@ -188,7 +223,7 @@ export default function DataImportCenter() {
           if (mode === 'patch') exportRow['比對基準'] = row._rawAnchor;
           Object.keys(fieldMapping).forEach(excelHeader => {
               const dbField = fieldMapping[excelHeader]
-              if (dbField && !['full_name', 'email', 'contact_email'].includes(dbField)) {
+              if (dbField && !['full_name', 'email', 'contact_email', 'extra_info'].includes(dbField)) {
                   exportRow[`[更新] ${excelHeader}`] = row[dbField] || '';
               }
           });
@@ -201,9 +236,6 @@ export default function DataImportCenter() {
       XLSX.writeFile(wb, `Import_Report_${new Date().toISOString().slice(0,10)}.xlsx`);
   }
 
-  // ==========================================
-  // 🌟 會員名單匯入：終極防覆蓋與防呆版 (Wix 配對升級)
-  // ==========================================
   const handleStep1Submit = async () => {
     if (!fileMaster) return alert("請上傳主要資料檔案！")
     setProcessing(true)
@@ -217,14 +249,12 @@ export default function DataImportCenter() {
             if (finalRows.length === 0) throw new Error("檔案為空")
             headers = Object.keys(finalRows[0])
             
-            // 💡 智慧猜測 Excel 裡哪個欄位最像比對基準 (身分證優先，再來是信箱，最後才是姓名)
             let bestAnchor = headers.find(h => h.toLowerCase().includes('id') || h.includes('身分證'));
             if (!bestAnchor) bestAnchor = headers.find(h => h.toLowerCase().includes('mail') || h.includes('信箱'));
             if (!bestAnchor) bestAnchor = headers.find(h => h.includes('姓名') || h.toLowerCase().includes('name'));
             
             setPatchAnchorExcel(bestAnchor || headers[0]);
             
-            // 💡 根據猜測到的 Excel 欄位，自動選擇對應的 DB 欄位
             if (bestAnchor) {
                 const lowerH = bestAnchor.toLowerCase().replace(/\s+/g, '');
                 if (lowerH.includes('id') || lowerH.includes('身分證')) setPatchAnchorDB('national_id');
@@ -300,6 +330,7 @@ export default function DataImportCenter() {
             }
         });
 
+        // 🌟 微觀升級 2 & 3：精準過濾縣市並丟入黑洞收納箱
         headers.forEach(h => {
             if (initialMap[h]) return; 
 
@@ -321,7 +352,10 @@ export default function DataImportCenter() {
                 else if (['衣服', 'size', '背心', 'shirt'].some(k => lowerH.includes(k))) matchedKey = 'shirt_size'
                 else if (lowerH.includes('血型') || lowerH.includes('blood')) matchedKey = 'blood_type'
                 else if (lowerH.includes('生日') || lowerH.includes('birthday') || lowerH === 'dob') matchedKey = 'birthday'
-                else if (lowerH.includes('地址') || lowerH.includes('address')) matchedKey = 'address'
+                // 🌟 防止縣市干擾：如果名稱包含地址但「不包含縣市/城市」，才判定為地址
+                else if ((lowerH.includes('地址') || lowerH.includes('address')) && !lowerH.includes('縣市') && !lowerH.includes('城市')) matchedKey = 'address'
+                // 🌟 年齡、組別、縣市等雜項，強制歸類到黑洞收納箱
+                else if (lowerH.includes('縣市') || lowerH.includes('城市') || lowerH.includes('年齡') || lowerH.includes('組別') || lowerH.includes('age')) matchedKey = 'extra_info'
                 else if (lowerH.includes('緊急聯繫人電話') || lowerH.includes('emergencyphone')) matchedKey = 'emergency_phone'
                 else if (lowerH.includes('緊急聯繫人關係') || lowerH.includes('relationship')) matchedKey = 'emergency_relation'
                 else if (lowerH.includes('緊急聯繫人') || lowerH.includes('emergencycontact')) matchedKey = 'emergency_name'
@@ -329,9 +363,18 @@ export default function DataImportCenter() {
                 else if (lowerH.includes('性別') || lowerH === 'gender' || lowerH === 'sex') matchedKey = 'gender'
                 else if (lowerH.includes('加入') || lowerH.includes('申請年月')) matchedKey = 'join_date'
                 else if (lowerH.includes('編號') || lowerH.includes('no.')) matchedKey = 'ironmedic_no'
+                else if (lowerH.includes('病史')) matchedKey = 'medical_history'
+                else if (lowerH.includes('醫護證照') || lowerH.includes('醫療執照')) matchedKey = 'medical_license'
+                // 🌟 微觀升級 4：攔截「已繳納會員費年度」
+                else if (lowerH.includes('已繳交') || lowerH.includes('已繳納') || lowerH.includes('會費年度') || lowerH.includes('當年度會員')) matchedKey = 'is_current_member'
             }
 
-            if (matchedKey && !assignedDbFields.has(matchedKey)) {
+            // 無法辨識的全部丟進黑洞收納箱
+            if (!matchedKey) {
+                matchedKey = 'extra_info';
+            }
+
+            if (matchedKey) {
                 initialMap[h] = matchedKey;
                 assignedDbFields.add(matchedKey);
             }
@@ -345,33 +388,26 @@ export default function DataImportCenter() {
     } catch (err) { addLog(`分析異常: ${err.message}`, 'error') } finally { setProcessing(false) }
   }
 
-  // ==========================================
-  // 🌟 核心進化：四維度多重去空白比對引擎
-  // ==========================================
   const handleMatchAndTransform = async () => {
       setProcessing(true)
+      const currentYear = new Date().getFullYear().toString(); 
       
       if (mode === 'patch') {
           if (!patchAnchorExcel) { alert("請選擇 Excel 的比對基準欄位！"); setProcessing(false); return; }
           try {
-              // 撈出資料庫裡所有會員
               const { data: dbUsers, error } = await supabase.from('profiles').select('*')
               if (error) throw error
 
               let perfect = 0, duplicate = 0, notFound = 0;
 
               const transformed = rawData.map((row, idx) => {
-                  // 1. 去渣過濾器：將 Excel 裡用來比對的值洗淨
                   const excelAnchorValue = cleanString(row[patchAnchorExcel]);
                   
-                  // 我們找出 Excel 裡可能隱藏的身分證、Email、電話、姓名，並洗乾淨
-                  // 這是為了啟動「多維度保險鎖定」
                   const possibleId = cleanString(row['身分證字號(C)'] || row['身分證'] || row['ID']);
                   const possibleEmail = cleanString(row['email'] || row['e-mail(E)'] || row['信箱']);
                   const possiblePhone = cleanString(row['手機(D)'] || row['電話'] || row['phone']);
-                  const possibleName = cleanString(row['姓名(A)'] || row['姓名'] || row['name']);
+                  const possibleName = cleanString(row['姓名(A)'] || row['姓名'] || row['name'] || row['中文姓名']);
 
-                  // 2. 四維度保險鎖定：用多重條件去找資料庫裡的人
                   const matches = dbUsers.filter(u => {
                       const dbAnchorVal = cleanString(u[patchAnchorDB]);
                       const dbId = cleanString(u.national_id);
@@ -380,25 +416,14 @@ export default function DataImportCenter() {
                       const dbPhone = cleanString(u.phone);
                       const dbName = cleanString(u.full_name);
 
-                      // 條件 1：使用者指定的基準欄位完全命中 (洗淨後比對)
                       if (excelAnchorValue !== '' && dbAnchorVal === excelAnchorValue) return true;
-                      
-                      // 條件 2：身分證命中
                       if (possibleId !== '' && dbId === possibleId) return true;
-                      
-                      // 條件 3：Email 命中
                       if (possibleEmail !== '' && (dbEmail1 === possibleEmail || dbEmail2 === possibleEmail)) return true;
-                      
-                      // 條件 4：手機號碼命中
                       if (possiblePhone !== '' && dbPhone === possiblePhone) return true;
-                      
-                      // 條件 5：名字命中 (名字容易重複，當作最後一道防線)
                       if (possibleName !== '' && dbName === possibleName) return true;
-
                       return false;
                   });
 
-                  // 為了避免「條件太寬鬆」導致重複匹配，我們把重複的結果去重 (用 ID)
                   const uniqueMatches = Array.from(new Map(matches.map(m => [m.id, m])).values());
 
                   let status = 'not_found', dbId = null, duplicateOptions = []
@@ -411,14 +436,33 @@ export default function DataImportCenter() {
                   } else { notFound++; }
 
                   const updateData = {}
+                  let extraInfoCollector = {} 
+
                   Object.keys(fieldMapping).forEach(exCol => {
                       const dbField = fieldMapping[exCol]
                       if (dbField && exCol !== patchAnchorExcel) {
-                          const cellVal = row[exCol];
-                          if (updateData[dbField] && (!cellVal || String(cellVal).trim() === '')) return;
-                          updateData[dbField] = cellVal;
+                          let cellVal = row[exCol];
+                          if (cellVal === undefined || cellVal === null || String(cellVal).trim() === '') return;
+                          
+                          // 🌟 套用微觀正規化引擎
+                          if (dbField === 'birthday' || dbField === 'join_date') cellVal = formatDateString(cellVal);
+                          if (dbField === 'medical_license') cellVal = normalizeMedicalLicense(cellVal);
+                          if (dbField === 'is_current_member') {
+                              if (String(cellVal).includes(currentYear)) cellVal = 'Y';
+                              else cellVal = 'N';
+                          }
+
+                          if (dbField === 'extra_info') {
+                              extraInfoCollector[exCol] = cellVal;
+                          } else {
+                              updateData[dbField] = cellVal;
+                          }
                       }
                   })
+
+                  if (Object.keys(extraInfoCollector).length > 0) {
+                      updateData.extra_info = { ...(dbInfo.extra_info || {}), ...extraInfoCollector };
+                  }
 
                   const tempId = updateData.national_id || dbInfo.national_id || '';
                   if (tempId && /^[A-Za-z][12]\d{8}$/.test(tempId)) {
@@ -459,9 +503,7 @@ export default function DataImportCenter() {
               setStep(3)
           } catch (err) { addLog(`資料比對異常: ${err.message}`, 'error') }
       } else {
-          // ====================
-          // 完整匯入模式保持不變
-          // ====================
+          // 完整匯入模式
           const hasName = Object.values(fieldMapping).includes('full_name')
           const hasEmail = Object.values(fieldMapping).includes('email') || Object.values(fieldMapping).includes('contact_email')
 
@@ -472,19 +514,37 @@ export default function DataImportCenter() {
 
           const transformed = rawData.map((row, idx) => {
               const newRow = { _id: idx, _status: 'pending', _source: row._source || '主名單' }
-              
+              let extraInfoCollector = {}
+
               Object.keys(fieldMapping).forEach(excelHeader => {
                   const dbField = fieldMapping[excelHeader]
                   if (dbField && dbField !== "") {
-                      const cellVal = row[excelHeader];
+                      let cellVal = row[excelHeader];
                       const isEmpty = (cellVal === undefined || cellVal === null || String(cellVal).trim() === '');
                       
                       if (newRow[dbField] && isEmpty) return;
-                      // 這裡的寫入不需要完全洗淨，因為我們希望保留名字原本的空格等，只在「比對時」洗淨
-                      if (!isEmpty) newRow[dbField] = String(cellVal).trim();
+                      if (!isEmpty) {
+                          // 🌟 套用微觀正規化引擎
+                          if (dbField === 'birthday' || dbField === 'join_date') cellVal = formatDateString(cellVal);
+                          if (dbField === 'medical_license') cellVal = normalizeMedicalLicense(cellVal);
+                          if (dbField === 'is_current_member') {
+                              if (String(cellVal).includes(currentYear)) cellVal = 'Y';
+                              else cellVal = 'N';
+                          }
+
+                          if (dbField === 'extra_info') {
+                              extraInfoCollector[excelHeader] = String(cellVal).trim();
+                          } else {
+                              newRow[dbField] = String(cellVal).trim();
+                          }
+                      }
                   }
               })
               
+              if (Object.keys(extraInfoCollector).length > 0) {
+                  newRow.extra_info = extraInfoCollector;
+              }
+
               const idToCheck = newRow.national_id || '';
               if (idToCheck && /^[A-Za-z][12]\d{8}$/.test(idToCheck)) {
                   newRow.gender = idToCheck.charAt(1) === '1' ? '男' : '女';
@@ -532,12 +592,10 @@ export default function DataImportCenter() {
       setProcessing(false)
   }
 
-  // 🌟 打開合體視窗
   const handleOpenConflictModal = (row) => {
       const rows = row._conflictRows;
       const autoMerged = mode === 'patch' ? { ...rows[0]._updateData } : { ...rows[0] };
       
-      // AI 預先合體邏輯 (優先保留最長姓名與非空值)
       rows.forEach((r, idx) => {
           if (idx === 0) return;
           const sourceData = mode === 'patch' ? r._updateData : r;
@@ -547,7 +605,6 @@ export default function DataImportCenter() {
               const newVal = sourceData[k];
               
               if (newVal !== undefined && newVal !== null && String(newVal).trim() !== '') {
-                  // 姓名保留最長的 (如：陳霖毅 打敗 霖)
                   if (k === 'full_name' && oldVal) {
                       if (String(newVal).trim().length > String(oldVal).trim().length) {
                           autoMerged[k] = String(newVal).trim();
@@ -563,7 +620,6 @@ export default function DataImportCenter() {
       setConflictModalData(row);
   }
 
-  // 🌟 儲存合體結果 (解決衝突並轉為正常狀態)
   const handleSaveConflict = () => {
       const newPreview = previewData.map(r => {
           if (r._id === conflictModalData._id) {
@@ -596,7 +652,6 @@ export default function DataImportCenter() {
   const handleExecute = async () => {
       setProcessing(true)
       
-      // 阻擋未處理的內部衝突
       if (previewData.some(r => r._status === 'internal_conflict')) {
           alert("您還有「內部衝突」尚未比對合體！請處理完畢後再執行匯入。");
           setProcessing(false);
@@ -610,7 +665,7 @@ export default function DataImportCenter() {
           let success = 0, fail = 0;
           for (const row of toUpdate) {
               try {
-                  if (Object.keys(row._updateData).length === 0) continue; // 防呆：如果完全沒有要更新的資料就跳過
+                  if (Object.keys(row._updateData).length === 0) continue; 
                   const { error } = await supabase.from('profiles').update(row._updateData).eq('id', row._dbId)
                   if (error) throw error
                   success++
@@ -672,13 +727,10 @@ export default function DataImportCenter() {
   const getDynamicMappedFields = () => {
       return Object.keys(fieldMapping).filter(excelCol => {
           const dbField = fieldMapping[excelCol];
-          return dbField && !['full_name', 'email', 'contact_email'].includes(dbField);
+          return dbField && !['full_name', 'email', 'contact_email', 'extra_info'].includes(dbField);
       });
   }
 
-  // ==========================================
-  // 🌟 賽事匯入核心邏輯 (智慧轉換引擎 2026 版)
-  // ==========================================
   const handleExecuteRaceUpload = async () => {
       if (!raceFile) return alert("請先選擇賽事建檔表！");
       
@@ -708,7 +760,6 @@ export default function DataImportCenter() {
               const keys = Object.keys(row);
               
               try {
-                  // 1. 智慧尋找賽事名稱 (解決無表頭問題)
                   let name = row['賽事名稱'] || row['賽事或活動名稱'] || '';
                   if (!name && keys.length > 0) {
                        for(let k of keys) {
@@ -723,7 +774,6 @@ export default function DataImportCenter() {
                       continue; 
                   }
 
-                  // 2. 智慧處理日期
                   let rawDate = row['日期(YYYY-MM-DD)'] || row['賽事或活動日期'] || row['日期'] || '';
                   let location = row['地點'] || row['賽事地點'] || '';
                   const imgUrl = row['海報圖片URL'] || row['賽事URL'] || '';
@@ -747,7 +797,6 @@ export default function DataImportCenter() {
                       location = imgUrl ? "詳見賽事連結" : "地點未定";
                   }
 
-                  // 3. 智慧處理狀態轉換
                   let rawStatus = String(row['狀態(OPEN/NEGOTIATING/SUBMITTED)'] || row['與主辦單位合作進度'] || '');
                   let finalStatus = 'OPEN'; 
                   if (rawStatus.includes('尚未開放') || rawStatus.includes('確認合作') || rawStatus.includes('洽談')) finalStatus = 'NEGOTIATING';
@@ -757,7 +806,6 @@ export default function DataImportCenter() {
 
                   const participantsMap = new Map(); 
 
-                  // 4. 處理人員
                   for(let j = 1; j <= 40; j++) {
                       const person = row[`參加人員${j}`];
                       if (person && String(person).trim() !== '') {
@@ -796,7 +844,6 @@ export default function DataImportCenter() {
                   assignSpecialRole(sponsor2, '官方代表');
                   assignSpecialRole(sponsor3, '官方代表');
 
-                  // 5. 智慧拔除教官雜訊
                   const instructors = row['教官'] || '';
                   if (instructors) {
                       const lines = String(instructors).split('\n');
@@ -1021,10 +1068,10 @@ export default function DataImportCenter() {
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
                 <div>
                     <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
-                        <Database className="text-blue-600"/> 資料整合匯入中心 <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold border border-slate-200">去渣四重比對版 V9.9
+                        <Database className="text-blue-600"/> 資料整合匯入中心 <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold border border-slate-200">微觀八核心比對版 V10.0
                         </span>
                     </h2>
-                    <p className="text-slate-500 text-sm mt-1">用身分證自動辨識、防呆欄位鎖定與自定義擴充系統。</p>
+                    <p className="text-slate-500 text-sm mt-1">深度清洗、日期轉換與黑洞收納箱完整實裝。</p>
                 </div>
                 <div className="flex bg-slate-50 p-1 rounded-lg border border-slate-200">
                     <button onClick={()=>handleModeSwitch('full')} className={`px-4 py-2 rounded-md font-bold text-sm flex items-center gap-2 transition-all ${mode==='full' ? 'bg-white shadow-sm border border-slate-200 text-blue-600' : 'text-slate-500 hover:text-slate-700'} `}><Merge size={16}/> 完整資料整合</button>
@@ -1320,7 +1367,10 @@ export default function DataImportCenter() {
                                         {mode === 'patch' && <td className={`px-6 py-3 font-bold ${row._status === 'internal_conflict' ? 'text-purple-700 bg-purple-100/50' : 'text-amber-700 bg-amber-50/30 border-l border-amber-100/50'}`}>{row._rawAnchor}</td>}
                                         {getDynamicMappedFields().map(excelCol => (
                                             <td key={excelCol} className="px-6 py-3 text-blue-700">
-                                                {row._status === 'internal_conflict' ? '待合體...' : (row[fieldMapping[excelCol]] || '-')}
+                                                {row._status === 'internal_conflict' ? '待合體...' : 
+                                                    (fieldMapping[excelCol] === 'extra_info' && row.extra_info 
+                                                        ? row.extra_info[excelCol] || '-' 
+                                                        : row[fieldMapping[excelCol]] || '-')}
                                             </td>
                                         ))}
                                     </tr>
