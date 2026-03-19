@@ -156,7 +156,6 @@ export default function RaceEvents() {
       
       if (user && user.email) {
           try {
-              // 🌟 確保撈取 newbie_passes 以供新人額度判斷
               const { data: profile } = await supabase.from('profiles').select('id, role, full_name, is_new_member, is_current_member, license_expiry, newbie_passes, total_races').eq('email', user.email).maybeSingle()
               if (profile) {
                   const role = profile.role ? profile.role.toUpperCase() : 'USER';
@@ -273,7 +272,8 @@ export default function RaceEvents() {
       return null;
   }, [currentUserProfile, userRole]);
 
-  const renderStatusBadge = (status, isHot, isFull) => {
+  const renderStatusBadge = (status, isHot, isFull, isPast) => {
+    if (isPast) return <div className="absolute top-3 left-3 md:top-4 md:left-4 flex gap-2"><span className="bg-slate-500/90 backdrop-blur text-white text-[10px] md:text-xs font-black px-2.5 py-1 md:px-3 rounded-full shadow-md flex items-center gap-1"><CheckCircle size={12} /> 賽事已結束</span></div>
     if (isFull) return <div className="absolute top-3 left-3 md:top-4 md:left-4 flex gap-2"><span className="bg-red-500/90 backdrop-blur text-white text-[10px] md:text-xs font-black px-2.5 py-1 md:px-3 rounded-full shadow-md flex items-center gap-1"><CheckCircle size={12} /> 滿編 / 可候補</span></div>
     switch (status) {
       case 'OPEN': return <div className="absolute top-3 left-3 md:top-4 md:left-4 flex gap-2"><span className="bg-green-500/90 backdrop-blur text-white text-[10px] md:text-xs font-black px-2.5 py-1 md:px-3 rounded-full shadow-md flex items-center gap-1"><Activity size={12} className="animate-pulse" /> 招募中</span>{isHot && <span className="bg-red-500/90 backdrop-blur text-white text-[10px] md:text-xs font-black px-2.5 py-1 md:px-3 rounded-full shadow-md flex items-center gap-1"><Flame size={12} /> 火熱</span>}</div>
@@ -393,12 +393,11 @@ export default function RaceEvents() {
       return { phase: 2, label: '全面開放' }; 
   }
 
-  // 🌟 嚴謹判定新人資格與剩餘次數 (防範資料庫 NULL 陷阱)
   const isNewbieUser = currentUserProfile?.is_new_member === 'Y' || currentUserProfile?.total_races < 2;
   const newbiePassesLeft = currentUserProfile?.newbie_passes ?? 3;
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-24 font-sans flex flex-col relative overflow-x-hidden">
+    <div className="min-h-screen bg-slate-50 font-sans pb-24 flex flex-col relative overflow-x-hidden">
       
       <div className="bg-slate-900 pt-24 md:pt-28 pb-32 px-4 md:px-8 text-center relative overflow-hidden shrink-0 animate-fade-in">
           
@@ -506,23 +505,22 @@ export default function RaceEvents() {
                   </div>
               )}
 
-              {/* 🌟 獨立結構的新人橫幅：不會影響下方排版 */}
               {isNewbieUser && newbiePassesLeft > 0 && (
-                  <div className="bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-2xl p-4 md:p-5 shadow-xl shadow-emerald-500/20 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-fade-in-down border border-emerald-400/50">
+                  <div className="bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-[2rem] p-4 md:p-5 shadow-xl shadow-emerald-500/20 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-fade-in-down border border-emerald-400/50">
                       <div className="flex items-center gap-3">
                           <div className="bg-white/20 p-2.5 rounded-xl backdrop-blur-sm shrink-0">
                               <Sprout size={24} className="text-emerald-50 drop-shadow-sm" />
                           </div>
                           <div>
                               <h3 className="font-black text-lg drop-shadow-sm flex items-center gap-2">
-                                  新人專屬優先報名權限
+                                  新人專屬優先報名權利
                               </h3>
                               <p className="text-emerald-50 text-sm font-medium mt-0.5 leading-snug">
                                   您目前尚有 <span className="font-black text-2xl text-yellow-300 mx-1.5 drop-shadow-md">{newbiePassesLeft}</span> 次優先登記額度，請把握 Day 2 專屬階段報名！
                               </p>
                           </div>
                       </div>
-                      <button onClick={() => { setStatusFilter('OPEN'); setTimeFilter('CURRENT_YEAR'); }} className="shrink-0 bg-white text-emerald-600 hover:bg-emerald-50 px-5 py-2.5 rounded-xl font-black text-sm transition-colors shadow-sm active:scale-95 w-full sm:w-auto border border-emerald-100">
+                      <button onClick={() => { setStatusFilter('OPEN'); setTimeFilter('CURRENT_YEAR'); }} className="shrink-0 bg-white text-emerald-600 hover:bg-emerald-50 px-5 py-2.5 rounded-xl font-black text-sm transition-colors shadow-sm active:scale-95 w-full sm:w-auto text-center border-b-2 border-emerald-200">
                           立即尋找招募賽事
                       </button>
                   </div>
@@ -593,16 +591,22 @@ export default function RaceEvents() {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 lg:gap-8 pb-10">
                   {filteredRaces.map((race, idx) => {
                       const { totalRegistered, newcomerCount, participantDetails } = extractParticipantsData(race);
-                      const required = race.medicRequired || 0;
+                      const required = race.medic_required || 0;
                       let progressPercentage = 0;
                       if (required > 0) {
                           progressPercentage = Math.round((totalRegistered / required) * 100);
                           progressPercentage = Math.max(2, Math.min(progressPercentage, 100)); 
                       }
                       const isFull = totalRegistered >= required && required > 0;
-                      const isAlmostFull = !isFull && progressPercentage >= 80;
+                      const waitlistCount = race.waitlist_data ? race.waitlist_data.length : 0;
+                      
+                      // 🌟 過期賽事時間判定邏輯
+                      const today = new Date();
+                      today.setHours(0,0,0,0);
+                      const isPastRace = new Date(race.date) < today;
 
                       const getButtonConfig = () => {
+                          if (isPastRace) return { text: '賽事已結束 / 檢視名單', class: 'bg-slate-200 text-slate-500 border border-slate-300' }
                           if (race.status === 'SUBMITTED') return { text: '名單已送出 / 檢視', class: 'bg-slate-700 text-white hover:bg-slate-800' }
                           if (race.status === 'NEGOTIATING') return { text: '賽事洽談中 / 預覽', class: 'bg-amber-100 text-amber-700 hover:bg-amber-200 border border-amber-200' }
                           if (race.status === 'UPCOMING') return { text: '敬請期待', class: 'bg-slate-50 text-slate-400 cursor-not-allowed border border-slate-100' }
@@ -611,7 +615,7 @@ export default function RaceEvents() {
                       }
                       const btnConfig = getButtonConfig();
 
-                      const phaseInfo = getRegistrationPhase(race.openTime);
+                      const phaseInfo = getRegistrationPhase(race.open_time);
 
                       return (
                       <div key={race.id} 
@@ -623,16 +627,16 @@ export default function RaceEvents() {
                           <div className="relative h-48 md:h-52 overflow-hidden shrink-0">
                               <div className="absolute inset-0 bg-slate-900/20 group-hover:bg-transparent transition-colors z-10"></div>
                               <img 
-                                  src={race.imageUrl || race.image_url || 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&q=80&w=600'} 
-                                  alt={race.title} 
+                                  src={race.image_url || 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&q=80&w=600'} 
+                                  alt={race.name} 
                                   onError={(e) => {
                                       e.target.onerror = null; 
                                       e.target.src = 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&q=80&w=600';
                                   }}
-                                  className={`w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-700 ease-out ${isFull || race.status === 'SUBMITTED' ? 'grayscale opacity-70' : ''}`} 
+                                  className={`w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-700 ease-out ${isFull || race.status === 'SUBMITTED' || isPastRace ? 'grayscale opacity-70' : ''}`} 
                               />
                               <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-slate-900/20 to-transparent"></div>
-                              {renderStatusBadge(race.status, race.isHot, isFull)}
+                              {renderStatusBadge(race.status, race.is_hot, isFull, isPastRace)}
                               <div className="absolute bottom-3 left-3 md:bottom-4 md:left-4 flex items-center gap-2">
                                   <span className="bg-white/20 backdrop-blur-md text-white text-[10px] md:text-xs font-bold px-2.5 md:px-3 py-1 md:py-1.5 rounded-lg border border-white/30">{race.type}</span>
                               </div>
@@ -640,7 +644,7 @@ export default function RaceEvents() {
 
                           <div className="p-5 md:p-6 flex flex-col flex-1">
                               <h3 className="text-lg md:text-xl font-black text-slate-800 mb-4 md:mb-5 line-clamp-2 leading-snug group-hover:text-blue-600 transition-colors">
-                                  {race.title}
+                                  {race.name}
                               </h3>
                               
                               <div className="space-y-2 md:space-y-2.5 mb-4 flex-1">
@@ -649,7 +653,7 @@ export default function RaceEvents() {
                                   
                                   <div className="flex items-center text-[11px] font-bold text-slate-500 bg-slate-50 px-2 md:px-2.5 py-1.5 rounded-xl border border-slate-100 gap-1.5">
                                       <Timer size={14} className="text-amber-500 shrink-0"/> 
-                                      開放報名: {race.openTime ? new Date(race.openTime).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '未設定'}
+                                      開放報名: {race.open_time ? new Date(race.open_time).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '未設定'}
                                       <span className={`px-1.5 py-0.5 rounded text-[9px] font-black shrink-0 ${phaseInfo.phase === -1 ? 'bg-slate-200 text-slate-500' : phaseInfo.phase === 0 ? 'bg-indigo-100 text-indigo-700' : phaseInfo.phase === 1 ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
                                           {phaseInfo.label}
                                       </span>
@@ -669,7 +673,7 @@ export default function RaceEvents() {
                                       </div>
                                       <div className="flex justify-between items-center mt-1.5">
                                           <span className="text-[10px] text-slate-400 font-bold">{progressPercentage}% 達成</span>
-                                          {race.waitlistCount > 0 && <span className="text-[10px] text-amber-600 font-bold">候補: {race.waitlistCount} 人</span>}
+                                          {waitlistCount > 0 && <span className="text-[10px] text-amber-600 font-bold">候補: {waitlistCount} 人</span>}
                                       </div>
                                   </div>
 
@@ -682,7 +686,7 @@ export default function RaceEvents() {
                                           <>
                                               {participantDetails.slice(0, 4).map((p, i) => (
                                                   <div key={i} className="w-8 h-8 rounded-full border-2 border-white flex items-center justify-center text-[10px] font-black text-white shadow-sm ring-1 ring-slate-200/50 z-10" style={{ backgroundColor: `hsl(${i * 60 + 200}, 70%, 50%)` }}>
-                                                      {getInitial(p.name)}
+                                                      {getInitial(p.name.split('#')[0].trim())}
                                                   </div>
                                               ))}
                                               {participantDetails.length > 4 && (
@@ -697,7 +701,6 @@ export default function RaceEvents() {
                                           </div>
                                       )}
                                       
-                                      {/* 顯示新人數量小標籤 */}
                                       {newcomerCount > 0 && (
                                           <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-green-500 border-2 border-white flex items-center justify-center z-20 shadow-sm">
                                               <Sprout size={10} className="text-white"/>
@@ -778,7 +781,7 @@ export default function RaceEvents() {
                       <h3 className="font-black text-xl text-slate-800 flex items-center gap-2"><Users className="text-blue-600"/> 已報名夥伴名單</h3>
                       <button onClick={() => setPreviewRace(null)} className="text-slate-400 hover:bg-slate-100 p-2 rounded-full transition-colors"><X size={20}/></button>
                   </div>
-                  <div className="text-sm font-bold text-slate-500 mb-4 pb-4 border-b border-slate-100 leading-snug">{previewRace.title}</div>
+                  <div className="text-sm font-bold text-slate-500 mb-4 pb-4 border-b border-slate-100 leading-snug">{previewRace.name}</div>
                   <div className="max-h-[60vh] overflow-y-auto space-y-3 custom-scrollbar pr-2">
                       {previewRace.participants?.map((p, i) => {
                           const cleanName = p.name.split('#')[0].trim();

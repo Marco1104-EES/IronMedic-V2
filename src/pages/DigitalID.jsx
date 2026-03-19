@@ -364,7 +364,14 @@ export default function DigitalID() {
   }
 
   const genderTag = getGenderFromID(displayUser.national_id);
-  const pastRaces = myRaces.filter(r => new Date(r.date) < new Date());
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  // 🌟 將原來的已完賽判定 logic 保留，並塞入 Modal 中
+  const pastRaces = myRaces.filter(r => new Date(r.date) < today);
+  
+  // 🌟 修正點 1: 此區塊「我報名的賽事」嚴格判定僅顯示未來的賽事
+  const futureRaces = myRaces.filter(r => new Date(r.date) >= today);
+
   const finishedCount = pastRaces.length;
   const totalEnrolledCount = myRaces.length;
   const attendanceRate = pastRaces.length > 0 ? '100%' : 'N/A';
@@ -372,6 +379,9 @@ export default function DigitalID() {
   const unreadCountReal = notifications.filter(n => !(n.isRead || n.is_read)).length;
 
   const hasTrainingStatus = ['Y', 'y', 'true', true, '1', 1].includes(displayUser.training_status);
+
+  // 🌟 參賽明細判定：僅顯示過往紀錄，並按時間倒序
+  const detailedRaces = [...pastRaces].sort((a,b) => new Date(b.date) - new Date(a.date));
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans pb-24 animate-fade-in flex flex-col relative overflow-x-hidden">
@@ -429,7 +439,6 @@ export default function DigitalID() {
                   
                   {displayUser.is_team_leader === 'Y' && <span className="bg-blue-500 text-white text-xs font-black px-3 py-1 rounded-full flex items-center gap-1 shadow-lg shadow-blue-500/20"><ShieldAlert size={12}/> 帶隊教官</span>}
                   
-                  {/* 🌟 修改：無縫融入「新人」Tag，顯示剩餘額度 */}
                   {displayUser.is_new_member === 'Y' && (
                       <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/50 text-xs font-black px-3 py-1 rounded-full flex items-center gap-1">
                           <Sprout size={12}/> 新人 (額度: {displayUser.newbie_passes ?? 3})
@@ -451,11 +460,12 @@ export default function DigitalID() {
 
           <div>
               <div className="flex items-center justify-between mb-3 px-1">
-                  <h3 className="font-black text-slate-800 flex items-center gap-1.5"><Flag className="text-blue-600" size={18}/> 我報名的賽事</h3>
+                  <h3 className="font-black text-slate-800 flex items-center gap-1.5"><Flag className="text-blue-600" size={18}/> 我報名的賽事 (當前任務)</h3>
               </div>
               <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar snap-x">
-                  {myRaces.filter(r => new Date(r.date) >= new Date()).length > 0 ? (
-                      myRaces.filter(r => new Date(r.date) >= new Date()).map(race => (
+                  {/* 🌟 修正點 1: 僅顯示未來的賽事，香川馬等歷史賽事不再顯示於此 */}
+                  {futureRaces.length > 0 ? (
+                      futureRaces.map(race => (
                           <div key={race.id} className="bg-white min-w-[260px] md:min-w-[300px] p-4 rounded-[1.5rem] shadow-sm border border-slate-200 hover:shadow-md transition-all snap-start flex flex-col justify-between">
                               <div onClick={() => navigate(`/race-detail/${race.id}`)} className="cursor-pointer active:scale-95 flex-1">
                                   <div className="flex justify-between items-start mb-2">
@@ -487,7 +497,7 @@ export default function DigitalID() {
                       ))
                   ) : (
                       <div className="bg-white w-full p-6 rounded-[1.5rem] border border-dashed border-slate-300 text-center text-slate-400 font-medium text-sm shadow-sm">
-                          目前沒有即將到來的賽事
+                          目前沒有即將到來的賽事任務
                       </div>
                   )}
               </div>
@@ -522,12 +532,13 @@ export default function DigitalID() {
                   </div>
               </div>
 
+              {/* 🌟 此區塊：參賽明細，將作為歷史紀錄的 Modal 入口 */}
               <div onClick={() => handleOpenModal('system')} className="bg-white p-4 md:p-5 rounded-[1.5rem] shadow-sm border border-slate-200 cursor-pointer active:scale-95 hover:border-blue-400 transition-all flex flex-col items-center justify-center text-center gap-2 relative">
                   <div className="absolute top-3 right-3 text-slate-300"><MousePointerClick size={16} className="animate-bounce" /></div>
                   <div className="w-12 h-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mb-1"><ListOrdered size={24}/></div>
                   <div>
-                      <h4 className="font-black text-slate-800 text-[13px] sm:text-sm">參賽明細</h4>
-                      <div className="text-[10px] font-bold text-slate-500 mt-0.5">查看歷史紀錄</div>
+                      <h4 className="font-black text-slate-800 text-[13px] sm:text-sm">參賽明細 (歷史紀錄)</h4>
+                      <div className="text-[10px] font-bold text-slate-500 mt-0.5">已累積 {finishedCount} 場紀錄</div>
                   </div>
               </div>
 
@@ -616,7 +627,8 @@ export default function DigitalID() {
                           {activeModal === 'stats' && <><Activity className="text-blue-600"/> 賽事參與統計</>}
                           {activeModal === 'basic' && <><User className="text-indigo-600"/> 核心基本資料</>}
                           {activeModal === 'medical' && <><HeartPulse className="text-rose-600"/> 醫護與裝備</>}
-                          {activeModal === 'system' && <><ListOrdered className="text-amber-600"/> 參賽明細</>}
+                          {/* 🌟 修正點：參賽明細，不再共用編輯框架 */}
+                          {activeModal === 'system' && <><ListOrdered className="text-amber-600"/> 參賽明細 (歷史紀錄)</>}
                       </h3>
                       {!isEditing && <button onClick={() => setActiveModal(null)} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors active:scale-95"><X size={20}/></button>}
                   </div>
@@ -628,31 +640,30 @@ export default function DigitalID() {
                               <InfoRow label="真實完賽場次" value={`${finishedCount} 場`} icon={CheckCircle} />
                               <InfoRow label="總報名場次" value={`${totalEnrolledCount} 場`} icon={Flag} />
                               <InfoRow label="出席達成率" value={attendanceRate} icon={Target} />
-                              {/* 🌟 修改：無縫新增新人額度統計行 */}
                               {displayUser.is_new_member === 'Y' && (
                                   <InfoRow label="新人優先登記額度" value={`剩餘 ${displayUser.newbie_passes ?? 3} 次`} icon={Sprout} />
                               )}
                           </div>
                       )}
 
+                      {/* 🌟 修正點 2: 參賽明細核心渲染區，僅顯示過往紀錄 */}
                       {activeModal === 'system' && (
                           <div className="space-y-3">
-                              {myRaces.length > 0 ? myRaces.map(race => (
-                                  <div key={race.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+                              {detailedRaces.length > 0 ? detailedRaces.map(race => (
+                                  <div key={race.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between hover:bg-slate-50 transition-colors">
                                       <div>
                                           <div className="flex items-center gap-2 mb-1">
-                                              <span className={`text-[10px] font-black px-2 py-0.5 rounded ${new Date(race.date) < new Date() ? 'bg-slate-100 text-slate-500' : 'bg-green-100 text-green-700'}`}>
-                                                  {new Date(race.date) < new Date() ? '已完賽' : '即將到來'}
-                                              </span>
+                                              <span className="text-[10px] font-black px-2 py-0.5 rounded bg-slate-100 text-slate-500">歷史紀錄</span>
                                               <span className="text-xs font-bold text-slate-500">{race.date}</span>
                                           </div>
                                           <div className="font-black text-slate-800 text-sm mb-1">{race.name}</div>
-                                          <div className="text-xs font-medium text-blue-600">{race.slotName} | {race.role}</div>
+                                          <div className="text-xs font-medium text-slate-500">{race.slotName} | {race.role}</div>
                                       </div>
+                                      <CheckCircle size={20} className="text-green-500 opacity-60"/>
                                   </div>
                               )) : (
                                   <div className="text-center py-10 text-slate-400 font-medium bg-white rounded-2xl border border-dashed border-slate-200">
-                                      目前沒有任何參賽紀錄
+                                      目前沒有任何過往參賽紀錄
                                   </div>
                               )}
                           </div>
@@ -747,7 +758,13 @@ export default function DigitalID() {
                                   {saving ? <Loader2 className="animate-spin" size={18}/> : <Check size={18}/>} 儲存並發送通知
                               </button>
                           </div>
+                      ) : activeModal === 'system' ? (
+                          // 🌟 修正點 3: 若為參賽明細 Modal，徹底閹割編輯按鈕，僅提供關閉
+                          <button onClick={() => setActiveModal(null)} className="w-full py-4 bg-slate-100 text-slate-600 font-bold rounded-xl transition-colors active:scale-95 flex justify-center items-center gap-1">
+                              <X size={16}/> 關閉歷史紀錄大賽
+                          </button>
                       ) : (
+                          // 其餘 Modal 保留編輯按鈕
                           <div className="flex flex-col gap-3">
                               <button onClick={() => setIsEditing(true)} className="w-full py-4 bg-slate-900 text-white font-black rounded-xl hover:bg-slate-800 shadow-lg shadow-slate-900/20 flex justify-center items-center gap-2 transition-transform active:scale-95">
                                   <Edit3 size={18}/> 開放修改

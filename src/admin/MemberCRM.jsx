@@ -144,7 +144,6 @@ export default function MemberCRM() {
       navigate(`/admin/members?view=${targetView}`)
   }
 
-  // 🌟 終極修復：使用 or('is_blacklisted.is.null,is_blacklisted.eq.N') 避開 SQL 的 NULL 陷阱
   const fetchGlobalStats = async () => {
       try {
           const [
@@ -178,7 +177,6 @@ export default function MemberCRM() {
       setLoading(true)
       let query = supabase.from('profiles').select('*', { count: 'exact' }).order('created_at', { ascending: false })
       
-      // 🌟 終極修復：確保其他分頁不會撈出黑名單人員，同時安全包容 NULL
       if (currentView !== 'BLACKLIST') {
           query = query.or('is_blacklisted.is.null,is_blacklisted.eq.N');
       }
@@ -401,7 +399,7 @@ export default function MemberCRM() {
                     全部人員總表 
                     <span className="text-xs px-2 py-1 rounded text-white bg-blue-600">{currentView}</span>
                 </h1>
-                <p className="text-sm text-slate-500">系統資料庫檢視模式 V10.9.1</p>
+                <p className="text-sm text-slate-500">系統資料庫檢視模式 V10.9.2 (左側凍結排版)</p>
             </div>
             <div className="flex gap-2">
                  <button onClick={() => navigate('/admin/import')} className="px-4 py-2 bg-slate-100 text-slate-600 rounded-lg font-bold hover:bg-slate-200 shadow-sm flex items-center gap-1"><FileSpreadsheet size={16}/> 前往匯入中心</button>
@@ -473,29 +471,34 @@ export default function MemberCRM() {
           </div>
       )}
 
-      {/* 資料表格 */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden overflow-x-auto">
-         <table className="w-full text-left min-w-[1200px]">
+      {/* 資料表格 🌟 升級緊湊與左側凍結 */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden overflow-x-auto relative">
+         <table className="w-full text-left whitespace-nowrap">
             <thead className="bg-slate-50 border-b border-slate-200 text-xs uppercase text-slate-500 font-bold cursor-pointer select-none">
                 <tr>
-                    <th className="p-4 w-12 text-center"><button onClick={toggleSelectAll}><CheckSquare size={20}/></button></th>
+                    {/* 🌟 凍結：核取方塊 */}
+                    <th className="px-4 py-2.5 w-12 text-center sticky left-0 z-20 bg-slate-50 shadow-[1px_0_0_#e2e8f0]">
+                        <button onClick={toggleSelectAll}><CheckSquare size={18}/></button>
+                    </th>
+                    {/* 🌟 凍結：管理作業移至左側 */}
+                    <th className="px-4 py-2.5 w-24 text-center sticky left-[48px] z-20 bg-slate-50 shadow-[2px_0_5px_rgba(0,0,0,0.06)]">
+                        管理作業
+                    </th>
                     
-                    <th className="p-4 w-48 bg-slate-50 hover:bg-slate-100" onClick={() => handleSort('full_name')}>
+                    <th className="px-4 py-2.5 w-48 bg-slate-50 hover:bg-slate-100" onClick={() => handleSort('full_name')}>
                         <div className="flex items-center gap-1">基本資料 (Name/Email) {sortConfig.key==='full_name' && <ArrowUpDown size={14}/>}</div>
                     </th>
                     
-                    {columnGroups.group1_general && <th className="p-4 bg-blue-50 text-blue-700 hover:bg-blue-100" onClick={() => handleSort('medical_license')}>
+                    {columnGroups.group1_general && <th className="px-4 py-2.5 bg-blue-50/50 text-blue-700 hover:bg-blue-100/50" onClick={() => handleSort('medical_license')}>
                         <div className="flex items-center gap-1">大會資料 (證照/血型) {sortConfig.key==='medical_license' && <ArrowUpDown size={14}/>}</div>
                     </th>}
                     
-                    {columnGroups.group2_event && <th className="p-4 bg-red-50 text-red-700 hover:bg-red-100" onClick={() => handleSort('priority')}>
+                    {columnGroups.group2_event && <th className="px-4 py-2.5 bg-red-50/50 text-red-700 hover:bg-red-100/50" onClick={() => handleSort('priority')}>
                         <div className="flex items-center gap-1">狀態與優先順序 {sortConfig.key==='priority' && <ArrowUpDown size={14}/>}</div>
                     </th>}
                     
-                    {columnGroups.group3_logistics && <th className="p-4 bg-amber-50 text-amber-700 hover:bg-amber-100">後勤資訊 (尺寸/交通/住宿/緊急聯絡人)</th>}
-                    {columnGroups.group4_ext && <th className="p-4 bg-purple-50 text-purple-700">擴充註記 (Admin Note)</th>}
-                    
-                    <th className="p-4 text-right bg-slate-50">管理作業</th>
+                    {columnGroups.group3_logistics && <th className="px-4 py-2.5 bg-amber-50/50 text-amber-700 hover:bg-amber-100/50">後勤資訊 (尺寸/交通/住宿/緊急聯絡人)</th>}
+                    {columnGroups.group4_ext && <th className="px-4 py-2.5 bg-purple-50/50 text-purple-700">擴充註記 (Admin Note)</th>}
                 </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -504,11 +507,28 @@ export default function MemberCRM() {
                     const isInCart = exportCart.has(member.id)
                     const isBlacklisted = member.is_blacklisted === 'Y'
 
+                    // 計算列背景色，以套用給 sticky cells
+                    const rowBgClass = isBlacklisted ? 'bg-slate-50 opacity-60 hover:opacity-100' : isSelected ? 'bg-blue-50' : isInCart ? 'bg-green-50/50' : 'bg-white hover:bg-slate-50';
+                    const stickyBgClass = isBlacklisted ? 'bg-slate-50' : isSelected ? 'bg-blue-50' : isInCart ? 'bg-green-50' : 'bg-white group-hover:bg-slate-50';
+
                     return (
-                    <tr key={member.id} className={`group transition-colors ${isBlacklisted ? 'bg-slate-50 opacity-60 hover:opacity-100' : isSelected ? 'bg-blue-50' : isInCart ? 'bg-green-50/50' : 'hover:bg-slate-50'}`}>
-                         <td className="p-4 text-center"><button onClick={() => toggleSelection(member.id)}><CheckSquare size={20} className={isSelected ? 'text-blue-600' : 'text-slate-300 hover:text-blue-400'}/></button></td>
+                    <tr key={member.id} className={`group transition-colors ${rowBgClass}`}>
+                         {/* 🌟 凍結：核取方塊 */}
+                         <td className={`px-4 py-2.5 text-center sticky left-0 z-10 shadow-[1px_0_0_#e2e8f0] transition-colors ${stickyBgClass}`}>
+                             <button onClick={() => toggleSelection(member.id)}><CheckSquare size={20} className={isSelected ? 'text-blue-600' : 'text-slate-300 hover:text-blue-400'}/></button>
+                         </td>
                          
-                         <td className="p-4">
+                         {/* 🌟 凍結：管理作業 (編輯/刪除) */}
+                         <td className={`px-4 py-2.5 text-center sticky left-[48px] z-10 shadow-[2px_0_5px_rgba(0,0,0,0.04)] transition-colors ${stickyBgClass}`}>
+                             <div className="flex justify-center gap-2">
+                                 <button onClick={() => handleEditClick(member)} className="p-1.5 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors border border-transparent hover:border-blue-200 shadow-sm bg-white/80" title="編輯會員紀錄"><Edit size={16}/></button>
+                                 {!isBlacklisted && (
+                                     <button onClick={() => handleDelete(member.id)} className="p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-lg transition-colors border border-transparent hover:border-red-200 shadow-sm bg-white/80" title="刪除並加入停權名單"><Trash2 size={16}/></button>
+                                 )}
+                             </div>
+                         </td>
+                         
+                         <td className="px-4 py-2.5">
                              <div className="font-bold text-slate-800 flex items-center gap-2">
                                  {member.full_name}
                                  {isBlacklisted && <Ban size={14} className="text-slate-500" title="已停權"/>}
@@ -519,7 +539,7 @@ export default function MemberCRM() {
                              <div className="text-[10px] text-slate-500 mt-1">{member.phone || '無聯絡電話'}</div>
                          </td>
 
-                         {columnGroups.group1_general && <td className="p-4 text-sm text-slate-600">
+                         {columnGroups.group1_general && <td className="px-4 py-2.5 text-sm text-slate-600">
                              <div className="flex items-center gap-2 mb-1">
                                  <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-bold">{member.medical_license || '未提供證照資料'}</span>
                                  {member.blood_type && <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold">{member.blood_type}</span>}
@@ -527,7 +547,7 @@ export default function MemberCRM() {
                              <div className="text-xs text-slate-500">ID: {member.national_id || '-'}</div>
                          </td>}
 
-                         {columnGroups.group2_event && <td className="p-4">
+                         {columnGroups.group2_event && <td className="px-4 py-2.5">
                              {isBlacklisted ? (
                                  <span className="flex items-center text-slate-500 font-bold bg-slate-200 px-2 py-1 rounded w-max"><Ban size={16} className="mr-1"/> 帳號已停權</span>
                              ) : (
@@ -550,7 +570,7 @@ export default function MemberCRM() {
                              )}
                          </td>}
 
-                         {columnGroups.group3_logistics && <td className="p-4 text-sm">
+                         {columnGroups.group3_logistics && <td className="px-4 py-2.5 text-sm">
                              <div className="flex items-center gap-2 mb-1">
                                  <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-bold" title="衣服尺寸">👕 {member.shirt_size || '?'}</span>
                                  <span className="text-xs text-slate-500" title="交通/住宿">{member.transport_pref || '-'} / {member.stay_pref || '-'}</span>
@@ -563,18 +583,10 @@ export default function MemberCRM() {
                              <div className="text-[10px] text-slate-400 truncate w-40 mt-1" title={member.address}>{member.address || '無聯絡地址'}</div>
                          </td>}
 
-                         {columnGroups.group4_ext && <td className="p-4 text-xs text-purple-600 font-medium">
+                         {/* Admin note 可以允許換行，避免太長 */}
+                         {columnGroups.group4_ext && <td className="px-4 py-2.5 text-xs text-purple-600 font-medium whitespace-normal min-w-[200px]">
                              <div className="bg-purple-50 p-2 rounded-lg line-clamp-2" title={member.admin_note}>{member.admin_note || '無註記資訊'}</div>
                          </td>}
-
-                         <td className="p-4 text-right">
-                             <div className="flex justify-end gap-2">
-                                 <button onClick={() => handleEditClick(member)} className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors border border-transparent hover:border-blue-200 shadow-sm bg-white" title="編輯會員紀錄"><Edit size={16}/></button>
-                                 {!isBlacklisted && (
-                                     <button onClick={() => handleDelete(member.id)} className="p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-lg transition-colors border border-transparent hover:border-red-200 shadow-sm bg-white" title="刪除並加入停權名單"><Trash2 size={16}/></button>
-                                 )}
-                             </div>
-                         </td>
                     </tr>
                 )})}
             </tbody>

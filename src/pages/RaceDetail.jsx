@@ -88,6 +88,11 @@ export default function RaceDetail() {
       return 2; 
   }
 
+  // 🌟 時序封印機制核心
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const isPastRace = activeRace ? new Date(activeRace.date) < today : false;
+
   const checkEligibility = () => {
       if (!activeRace || !currentUser) return { allPassed: false, checks: {}, openMessage: '' }
       
@@ -112,10 +117,13 @@ export default function RaceDetail() {
       const phase = getRegistrationPhase(activeRace.openTime);
       const userTier = getUserTier(currentUser);
       
-      // 🌟 新人優先權額度檢查變數
       const newbiePasses = currentUser.newbie_passes !== undefined ? currentUser.newbie_passes : 3;
 
-      if (userTier === 6) {
+      // 🌟 時序封印攔截點
+      if (isPastRace) {
+          checks.isTimeOpenForMe = false;
+          openMessage = "本賽事已經結束，報名已截止。";
+      } else if (userTier === 6) {
           checks.isTimeOpenForMe = false;
           openMessage = "非當屆會員，無法報名賽事";
       } else if (phase === -1) {
@@ -131,7 +139,6 @@ export default function RaceDetail() {
           }
       } else if (phase === 1) {
           if (userTier <= 4) {
-              // 🌟 核心防護：如果在 Phase 1，且是以新人身分(Tier 3)來搶，必須檢查額度
               if (userTier === 3 && newbiePasses <= 0) {
                   checks.isTimeOpenForMe = false;
                   openMessage = "您的「3 次新人優先報名權利」已用罄，請等候明日全面開放階段報名。";
@@ -168,20 +175,17 @@ export default function RaceDetail() {
   const handleRegister = async () => {
       if (!currentUser) return alert("請先登入！");
       if (!selectedSlot) return alert("請先選擇您要報名的賽段！")
+      if (isPastRace) return alert("本賽事已經結束，無法報名！");
       if (!allPassed && !isGodMode) return alert("報名資格審查未通過，無法報名！")
 
       const phase = getRegistrationPhase(activeRace.openTime);
       const userTier = getUserTier(currentUser);
 
-      // 🌟 核心防護 1：全域掃描分身
       let isAlreadyInRace = false;
       let existingSlotName = "";
-      
-      // 🌟 核心防護 2：掃描帶隊教官是否已被指派 (Highlander Protocol)
       let hasTeamLeaderAlready = false;
 
       if (!isGodMode) { 
-          // 檢查所有正取名單
           for (const slot of activeRace.slots) {
               if (slot.assignee) {
                   const assignees = slot.assignee.split('|');
@@ -193,7 +197,6 @@ export default function RaceDetail() {
                               isAlreadyInRace = true;
                               existingSlotName = slot.name;
                           }
-                          // 同步檢查是否已經有人卡走帶隊教官的位置
                           if (p.roleTag === '帶隊教官') {
                               hasTeamLeaderAlready = true;
                           }
@@ -207,7 +210,6 @@ export default function RaceDetail() {
                   }
               }
           }
-          // 檢查候補名單
           if (waitlist.some(w => w.id === currentUser.id || w.name === currentUser.full_name)) {
               isAlreadyInRace = true;
               existingSlotName = "候補區";
@@ -218,13 +220,11 @@ export default function RaceDetail() {
           return alert(`❌ 系統攔截：您已經報名【${existingSlotName}】！\n一個人無法同時報名多個組別 (禁止分身)。若要更改組別，請先至數位 ID 卡「取消報名」後再重新操作。`);
       }
 
-      // 🌟 核心防護 3：帶隊教官唯一防呆鎖定
       let assignedRoleTag = null;
       if (phase === 0 && userTier === 2 && !isGodMode) {
           if (hasTeamLeaderAlready) {
               return alert(`⚠️ 報名失敗：本場賽事之【帶隊教官】名額已被登記！\n請於下一階段以一般身分報名，或聯繫賽事總監。`);
           } else {
-              // 第一個來搶的教官，自動賦予專屬黃馬褂
               assignedRoleTag = '帶隊教官';
           }
       }
@@ -241,14 +241,12 @@ export default function RaceDetail() {
           isNew: currentUser.is_new_member === 'Y' || currentUser.total_races < 2,
           timestamp: timestamp,
           slot: selectedSlot,
-          roleTag: assignedRoleTag, // 🌟 偷偷塞入的專屬標籤
+          roleTag: assignedRoleTag,
           isMe: true 
       };
 
-      // 🌟 核心防護 4：預先計算新人扣抵邏輯
       let willBurnNewbiePass = false;
       let newbiePassesLeft = currentUser.newbie_passes !== undefined ? currentUser.newbie_passes : 3;
-      // 只有在 Phase 1 (Day 2) 且是以新人身分搶票時，才會扣抵次數
       if (phase === 1 && userTier === 3 && !isGodMode) {
           willBurnNewbiePass = true;
       }
@@ -270,7 +268,6 @@ export default function RaceDetail() {
               const { error } = await supabase.from('races').update({ slots_data: updatedSlots }).eq('id', activeRace.id);
               if (error) throw error;
               
-              // 🌟 核心防護 4 執行：扣除新人優先權次數
               if (willBurnNewbiePass) {
                   const newPasses = Math.max(0, newbiePassesLeft - 1);
                   await supabase.from('profiles').update({ newbie_passes: newPasses }).eq('id', currentUser.id);
@@ -309,7 +306,6 @@ export default function RaceDetail() {
               const { error } = await supabase.from('races').update({ waitlist_data: newWaitlist }).eq('id', activeRace.id);
               if (error) throw error;
               
-              // 🌟 候補成功一樣要扣除新人次數
               if (willBurnNewbiePass) {
                   const newPasses = Math.max(0, newbiePassesLeft - 1);
                   await supabase.from('profiles').update({ newbie_passes: newPasses }).eq('id', currentUser.id);
@@ -338,7 +334,6 @@ export default function RaceDetail() {
       }
   }
 
-  // ================= 賽事總監功能 =================
   const handleKickUser = async (slotId, userIdToKick, userName) => {
       if(!isGodMode) return;
       if(!window.confirm(`⚠️ 賽事總監警告 ⚠️\n確定要強制將【${userName}】從此賽段踢除嗎？`)) return;
@@ -420,7 +415,6 @@ export default function RaceDetail() {
           alert(`✅ 已強制將【${insertData.name}】安插至名單內。`);
       } catch(e) { alert("安插寫入失敗：" + e.message) }
   }
-  // ==============================================
 
   const handleApproveFromWaitlist = async (user) => {
       if (!isGodMode) return;
@@ -551,14 +545,14 @@ export default function RaceDetail() {
                                       const extraCount = assignees.length - 5;
 
                                       return (
-                                          <div key={slot.id} onClick={() => setSelectedSlot(slot.id)}
-                                              className={`relative p-5 md:p-6 rounded-2xl border-2 transition-all cursor-pointer flex flex-col xl:flex-row xl:items-start justify-between gap-5
-                                                  ${isSelected ? 'bg-blue-50/50 border-blue-500 shadow-lg ring-4 ring-blue-500/10' 
-                                                  : isFull ? 'bg-slate-50/80 border-slate-200 hover:border-slate-300' 
-                                                  : 'bg-white border-slate-200 hover:border-blue-400 hover:shadow-md'}`}>
+                                          <div key={slot.id} onClick={() => !isPastRace && setSelectedSlot(slot.id)}
+                                              className={`relative p-5 md:p-6 rounded-2xl border-2 transition-all flex flex-col xl:flex-row xl:items-start justify-between gap-5
+                                                  ${isPastRace ? 'bg-slate-50 opacity-80 border-slate-200 cursor-not-allowed'
+                                                  : isSelected ? 'bg-blue-50/50 border-blue-500 shadow-lg ring-4 ring-blue-500/10 cursor-pointer' 
+                                                  : isFull ? 'bg-slate-50/80 border-slate-200 hover:border-slate-300 cursor-pointer' 
+                                                  : 'bg-white border-slate-200 hover:border-blue-400 hover:shadow-md cursor-pointer'}`}>
                                               
-                                              {/* 🌟 賽事總監：強制安插按鈕 */}
-                                              {isGodMode && (
+                                              {isGodMode && !isPastRace && (
                                                   <div className="absolute top-4 right-4 xl:static xl:ml-auto z-10">
                                                       <button 
                                                           onClick={(e) => openInsertModal(e, slot.id)}
@@ -572,7 +566,7 @@ export default function RaceDetail() {
 
                                               <div className="flex-1 min-w-0">
                                                   <div className="flex items-center gap-3 flex-wrap mb-1 pr-16 xl:pr-0">
-                                                      <h3 className={`font-black text-lg ${isFull && !isSelected ? 'text-slate-500' : 'text-slate-800'}`}>
+                                                      <h3 className={`font-black text-lg ${isPastRace || (isFull && !isSelected) ? 'text-slate-500' : 'text-slate-800'}`}>
                                                           {slot.name}
                                                       </h3>
                                                       {slot.genderLimit === 'F' && <span className="bg-pink-50 text-pink-600 text-[10px] px-2.5 py-1 rounded-full border border-pink-200 font-black tracking-widest">限定女性</span>}
@@ -624,7 +618,7 @@ export default function RaceDetail() {
                                                       <span>{filledCount} <span className="text-slate-400 mx-0.5">/</span> {slotCapacity}</span>
                                                   </div>
                                                   <div className={`w-7 h-7 rounded-full border-2 flex items-center justify-center transition-colors 
-                                                      ${isSelected ? 'border-blue-600 bg-blue-600 text-white shadow-md' : 'border-slate-300 bg-white'}`}>
+                                                      ${isSelected ? 'border-blue-600 bg-blue-600 text-white shadow-md' : isPastRace ? 'border-slate-200 bg-slate-100' : 'border-slate-300 bg-white'}`}>
                                                       {isSelected && <CheckCircle size={16}/>}
                                                   </div>
                                               </div>
@@ -684,7 +678,7 @@ export default function RaceDetail() {
                                           <div className="text-xs font-black text-slate-500 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm">
                                               Tier {user.tier}
                                           </div>
-                                          {isGodMode && (
+                                          {isGodMode && !isPastRace && (
                                               <button onClick={() => handleApproveFromWaitlist(user)} title="手動核准報名" className="bg-green-600 hover:bg-green-700 text-white text-sm font-bold px-4 py-2 rounded-xl shadow-md shadow-green-600/20 flex items-center gap-1.5 transition-all active:scale-95">
                                                   <UserCheck size={16}/> 遞補
                                               </button>
@@ -714,7 +708,7 @@ export default function RaceDetail() {
                               </div>
                           )}
 
-                          <div className={`space-y-5 ${isGodMode ? 'opacity-40 grayscale pointer-events-none' : ''}`}>
+                          <div className={`space-y-5 ${isGodMode || isPastRace ? 'opacity-40 grayscale pointer-events-none' : ''}`}>
                               <div className="flex items-center justify-between pb-3 border-b border-slate-800/50">
                                   <span className="text-sm text-slate-300 font-medium">當屆會員身分</span>
                                   {checks.isCurrentMember ? <CheckCircle size={20} className="text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.5)]"/> : <XCircle size={20} className="text-red-500"/>}
@@ -742,23 +736,24 @@ export default function RaceDetail() {
                       </div>
 
                       <div className="fixed bottom-0 left-0 right-0 z-[60] p-4 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 shadow-[0_-10px_30px_rgba(0,0,0,0.5)] lg:static lg:bg-transparent lg:p-0 lg:border-t lg:mt-8 lg:pt-6 lg:shadow-none lg:backdrop-blur-none">
-                          {!allPassed && !isGodMode && (
+                          {(!allPassed && !isGodMode) || isPastRace ? (
                               <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl text-sm font-bold flex gap-3 mb-4 lg:mb-6">
                                   <AlertTriangle size={20} className="shrink-0 mt-0.5"/>
                                   <div className="leading-relaxed">
-                                      {!checks.isTimeOpenForMe ? openMessage : '資料不符報名規定，按鈕已鎖定。'}
+                                      {openMessage || '資料不符報名規定，按鈕已鎖定。'}
                                   </div>
                               </div>
-                          )}
+                          ) : null}
 
-                          <button onClick={handleRegister} disabled={(!allPassed && !isGodMode) || !selectedSlot}
+                          <button onClick={handleRegister} disabled={isPastRace || (!allPassed && !isGodMode) || !selectedSlot}
                               className={`w-full py-4 rounded-xl font-black text-lg flex items-center justify-center gap-2 transition-all duration-300 active:scale-95 
                                   disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed disabled:shadow-none disabled:border-transparent
-                                  ${isSelectedSlotFull && selectedSlot 
+                                  ${isPastRace ? 'bg-slate-800 text-slate-500' :
+                                    isSelectedSlotFull && selectedSlot 
                                       ? 'bg-gradient-to-r from-amber-500 to-amber-400 text-slate-900 shadow-[0_0_20px_rgba(245,158,11,0.3)] hover:shadow-[0_0_25px_rgba(245,158,11,0.5)]' 
                                       : 'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-[0_0_20px_rgba(37,99,235,0.4)] hover:shadow-[0_0_25px_rgba(37,99,235,0.6)]'}`}
                           >
-                              {isSelectedSlotFull && selectedSlot ? '⚡ 滿編：登記進入候補池' : '✅ 資格核准，立即報名'}
+                              {isPastRace ? '🚫 賽事已結束' : isSelectedSlotFull && selectedSlot ? '⚡ 滿編：登記進入候補池' : '✅ 資格核准，立即報名'}
                           </button>
                       </div>
                   </div>
@@ -783,7 +778,9 @@ export default function RaceDetail() {
                           return (
                           <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl border border-slate-100 hover:bg-slate-50 hover:border-slate-200 transition-all cursor-default gap-3">
                               <div className="flex items-center gap-3">
-                                  <div className="w-10 h-10 shrink-0 rounded-full flex items-center justify-center text-sm font-black text-white shadow-sm" style={{ backgroundColor: `hsl(${i * 60 + 200}, 70%, 50%)` }}>
+                                  <div className="w-10 h-10 shrink-0 rounded-full flex items-center justify-center text-sm font-black text-white shadow-sm ring-1 ring-slate-100"
+                                      style={{ backgroundColor: `hsl(${i * 60 + 200}, 70%, 50%)` }}
+                                  >
                                       {getInitial(cleanName)}
                                   </div>
                                   <div>
@@ -800,7 +797,7 @@ export default function RaceDetail() {
                                   </div>
                               </div>
                               
-                              {isGodMode ? (
+                              {isGodMode && !isPastRace ? (
                                   <button onClick={() => handleKickUser(previewSlot.id, participant.id || participant.name, participant.name)} className="shrink-0 p-2 text-red-500 hover:bg-red-100 rounded-lg transition-colors border border-transparent hover:border-red-200" title="賽事總監踢除">
                                       <Trash2 size={18}/>
                                   </button>
