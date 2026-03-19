@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
 import * as XLSX from 'xlsx' 
-import { FileSpreadsheet, CheckCircle, ArrowRight, Save, Database, Settings, LayoutList, Merge, Plus, Target, UserCheck, XCircle, BrainCircuit, Trash2, Edit, Download, FileText, Filter, Users, Flag, Upload, AlertTriangle, FileDown, Loader2, Settings2, Fingerprint, GitMerge, X } from 'lucide-react'
+import { FileSpreadsheet, CheckCircle, ArrowRight, Save, Database, Settings, LayoutList, Merge, Plus, Target, UserCheck, XCircle, BrainCircuit, Trash2, Edit, Download, FileText, Filter, Users, Flag, Upload, AlertTriangle, FileDown, Loader2, Settings2, Fingerprint, GitMerge, X, ListOrdered, ArchiveRestore } from 'lucide-react'
 
 const MAPPING_MEMORY_KEY = 'ironmedic_mapping_memory'
 const EXT_LABELS_KEY = 'ironmedic_ext_labels'
+const ERROR_STASH_KEY = 'ironmedic_error_stash'
 
 const RACE_IMPORT_TEMPLATE_HEADERS = [
     "賽事名稱", "日期(YYYY-MM-DD)", "鳴槍時間(HH:MM)", "地點", "賽事類型(馬拉松/鐵人三項...)", 
@@ -14,18 +15,15 @@ const RACE_IMPORT_TEMPLATE_HEADERS = [
     ...Array.from({length: 40}, (_, i) => `參加人員${i + 1}`)
 ]
 
-// 🌟 核心過濾器：無情去渣洗淨字串 (去除所有全/半形空白、換行、連字號、底線)
 const cleanString = (str) => {
     if (str === null || str === undefined) return '';
     return String(str).replace(/[\s\u3000\n\r\-_]/g, '');
 };
 
-// 🌟 類神經升級：日期正規化 (支援 2025/1/1-2025/1/8 這種區間寫法)
 const formatDateString = (rawDate) => {
     if (!rawDate) return '';
     let str = String(rawDate).trim();
     
-    // 如果是日期區間 (例如: 2025/1/1-2025/1/8)，強制截斷保留第一個日期
     if (str.match(/\d+\/\d+\/\d+\s*-\s*\d+/)) {
         str = str.split('-')[0].trim();
     } else if (str.includes('~')) {
@@ -85,6 +83,8 @@ export default function DataImportCenter() {
 
   const [conflictModalData, setConflictModalData] = useState(null)
   const [mergedData, setMergedData] = useState({})
+  
+  const [conflictStep, setConflictStep] = useState('edit') 
 
   const [isUploadingRace, setIsUploadingRace] = useState(false)
   const [uploadRaceStatus, setUploadRaceStatus] = useState(null)
@@ -93,6 +93,23 @@ export default function DataImportCenter() {
   const [logs, setLogs] = useState([])
   const [processing, setProcessing] = useState(false)
   const logsEndRef = useRef(null)
+
+  // 🌟 異常待處理區 State
+  const [stashData, setStashData] = useState([])
+  const [stashFilter, setStashFilter] = useState('all')
+
+  useEffect(() => {
+      if (mainTab === 'stash') {
+          loadStashData();
+      }
+  }, [mainTab])
+
+  const loadStashData = () => {
+      try {
+          const data = JSON.parse(localStorage.getItem(ERROR_STASH_KEY) || '[]');
+          setStashData(data);
+      } catch(e) { setStashData([]); }
+  }
 
   const TARGET_FIELDS = [
       { group: '🟢 【基本與聯絡資料】', options: [
@@ -211,22 +228,23 @@ export default function DataImportCenter() {
       URL.revokeObjectURL(url);
   }
 
-  const handleExportExcel = () => {
-      if (previewData.length === 0) return alert("目前沒有資料可匯出");
-      const exportData = previewData.map(row => {
+  const exportDataToExcel = (dataToExport, fileName) => {
+      if (dataToExport.length === 0) return alert("目前沒有資料可匯出");
+      const exportData = dataToExport.map(row => {
           const exportRow = {
               '狀態': row._status === 'valid' || row._status === 'perfect' || row._status === 'resolved' ? '🟢 正常' : (row._status === 'internal_conflict' ? '🟣 內部衝突' : '🔴 異常'),
-              '錯誤/異常原因': row._error || (row._status === 'duplicate' ? '發現同名者' : (row._status === 'not_found' ? '查無此人' : '無')),
+              '錯誤/異常原因': row._error || (row._status === 'duplicate' ? '發現同名者' : (row._status === 'not_found' ? '查無此人' : (row._status === 'internal_conflict' ? '資料欄位內容分歧' : '無'))),
               '姓名(A)': row.full_name || '未提供',
               '聯絡信箱(E)': row.contact_email || '未提供',
               '報名系統登入/WIX(Y)': row.email || '未提供',
               '資料來源': row._source || ''
           };
-          if (mode === 'patch') exportRow['比對基準'] = row._rawAnchor;
+          if (mode === 'patch' || row._rawAnchor) exportRow['比對基準'] = row._rawAnchor;
+          
           Object.keys(fieldMapping).forEach(excelHeader => {
               const dbField = fieldMapping[excelHeader]
               if (dbField && !['full_name', 'email', 'contact_email', 'extra_info'].includes(dbField)) {
-                  exportRow[`[更新] ${excelHeader}`] = row[dbField] || '';
+                  exportRow[`[原始欄位] ${excelHeader}`] = row[dbField] || '';
               }
           });
           return exportRow;
@@ -234,8 +252,19 @@ export default function DataImportCenter() {
 
       const ws = XLSX.utils.json_to_sheet(exportData);
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "匯入審核報表");
-      XLSX.writeFile(wb, `Import_Report_${new Date().toISOString().slice(0,10)}.xlsx`);
+      XLSX.utils.book_append_sheet(wb, ws, "名單匯出");
+      XLSX.writeFile(wb, `${fileName}_${new Date().toISOString().slice(0,10)}.xlsx`);
+  }
+
+  const handleExportExcel = () => exportDataToExcel(previewData, 'Import_Report');
+  const handleExportStash = () => exportDataToExcel(stashFilter === 'all' ? stashData : stashData.filter(r => r._status === stashFilter), 'Error_Stash_Report');
+
+  const handleClearStash = () => {
+      if (window.confirm("確定要清空所有待處理區的資料嗎？清空後將無法復原。")) {
+          localStorage.removeItem(ERROR_STASH_KEY);
+          setStashData([]);
+          addLog("待處理區已清空", 'info');
+      }
   }
 
   const handleStep1Submit = async () => {
@@ -345,7 +374,12 @@ export default function DataImportCenter() {
 
             if (!matchedKey) {
                 const lowerH = h.toLowerCase().replace(/\s+/g, '')
-                if (['姓名', 'name', 'fullname'].some(k => lowerH.includes(k)) && !lowerH.includes('緊急') && !lowerH.includes('英文') && !lowerH.includes('emergency')) matchedKey = 'full_name'
+                
+                // 🌟 絕對防衛機制：縣市、鄉鎮等干擾詞彙，一律丟入黑洞收納箱
+                if (['縣市', '城市', '鄉鎮', '區域', '區別', '年齡', '組別', 'age'].some(k => lowerH.includes(k))) {
+                    matchedKey = 'extra_info';
+                }
+                else if (['姓名', 'name', 'fullname'].some(k => lowerH.includes(k)) && !lowerH.includes('緊急') && !lowerH.includes('英文') && !lowerH.includes('emergency')) matchedKey = 'full_name'
                 else if (['wix', '報名系統', 'account'].some(k => lowerH.includes(k)) || (lowerH.includes('登入') && lowerH.includes('帳號'))) matchedKey = 'email'
                 else if (lowerH === 'e-mail' || lowerH === 'email' || lowerH.includes('信箱')) matchedKey = 'contact_email'
                 else if (['手機', 'phone', 'mobile'].some(k => lowerH.includes(k)) && !lowerH.includes('緊急') && !lowerH.includes('emergency')) matchedKey = 'phone'
@@ -353,8 +387,8 @@ export default function DataImportCenter() {
                 else if (['衣服', 'size', '背心', 'shirt'].some(k => lowerH.includes(k))) matchedKey = 'shirt_size'
                 else if (lowerH.includes('血型') || lowerH.includes('blood')) matchedKey = 'blood_type'
                 else if (lowerH.includes('生日') || lowerH.includes('birthday') || lowerH === 'dob') matchedKey = 'birthday'
-                else if ((lowerH.includes('地址') || lowerH.includes('address')) && !lowerH.includes('縣市') && !lowerH.includes('城市')) matchedKey = 'address'
-                else if (lowerH.includes('縣市') || lowerH.includes('城市') || lowerH.includes('年齡') || lowerH.includes('組別') || lowerH.includes('age')) matchedKey = 'extra_info'
+                // 🌟 只要過了縣市過濾器，來到這裡的就是乾淨的地址了
+                else if (lowerH.includes('地址') || lowerH.includes('address') || lowerH.includes('通訊處')) matchedKey = 'address'
                 else if (lowerH.includes('緊急聯繫人電話') || lowerH.includes('emergencyphone')) matchedKey = 'emergency_phone'
                 else if (lowerH.includes('緊急聯繫人關係') || lowerH.includes('relationship')) matchedKey = 'emergency_relation'
                 else if (lowerH.includes('緊急聯繫人') || lowerH.includes('emergencycontact')) matchedKey = 'emergency_name'
@@ -369,16 +403,6 @@ export default function DataImportCenter() {
 
             if (!matchedKey) {
                 matchedKey = 'extra_info';
-            }
-
-            if (matchedKey === 'address' && assignedDbFields.has('address')) {
-                 const oldHeader = Object.keys(initialMap).find(k => initialMap[k] === 'address');
-                 if (oldHeader && h.length > oldHeader.length) {
-                     initialMap[oldHeader] = 'extra_info'; 
-                     initialMap[h] = 'address';
-                 } else {
-                     matchedKey = 'extra_info'; 
-                 }
             }
 
             if (matchedKey) {
@@ -520,7 +544,6 @@ export default function DataImportCenter() {
               setStep(3)
           } catch (err) { addLog(`資料比對異常: ${err.message}`, 'error') }
       } else {
-          // 完整匯入模式
           const hasName = Object.values(fieldMapping).includes('full_name')
           const hasEmail = Object.values(fieldMapping).includes('email') || Object.values(fieldMapping).includes('contact_email')
 
@@ -620,6 +643,7 @@ export default function DataImportCenter() {
   }
 
   const handleOpenConflictModal = (row) => {
+      setConflictStep('edit'); 
       const rows = row._conflictRows;
       const autoMerged = mode === 'patch' ? { ...rows[0]._updateData } : { ...rows[0] };
       
@@ -648,6 +672,11 @@ export default function DataImportCenter() {
   }
 
   const handleSaveConflict = () => {
+      const safeMergedData = { ...mergedData };
+      if (typeof safeMergedData.extra_info === 'string') {
+          try { safeMergedData.extra_info = JSON.parse(safeMergedData.extra_info); } catch(e) {}
+      }
+
       const newPreview = previewData.map(r => {
           if (r._id === conflictModalData._id) {
               if (mode === 'patch') {
@@ -656,11 +685,11 @@ export default function DataImportCenter() {
                       ...baseRow,
                       _id: Date.now(),
                       _status: 'resolved', 
-                      _updateData: mergedData, 
-                      full_name: mergedData.full_name || baseRow.full_name 
+                      _updateData: safeMergedData, 
+                      full_name: safeMergedData.full_name || baseRow.full_name 
                   };
               } else {
-                  const newRow = { ...conflictModalData._conflictRows[0], ...mergedData, _id: Date.now() };
+                  const newRow = { ...conflictModalData._conflictRows[0], ...safeMergedData, _id: Date.now() };
                   if (!newRow.full_name || (!newRow.email && !newRow.contact_email)) {
                       newRow._status = 'invalid';
                       newRow._error = !newRow.full_name ? '姓名欄位空白' : '聯絡信箱空白';
@@ -676,56 +705,83 @@ export default function DataImportCenter() {
       setConflictModalData(null);
   }
 
+  // 🌟 非阻塞式：部分匯入與異常暫存機制
   const handleExecute = async () => {
       setProcessing(true)
-      
-      if (previewData.some(r => r._status === 'internal_conflict')) {
-          alert("您還有「內部衝突」尚未比對合體！請處理完畢後再執行匯入。");
-          setProcessing(false);
-          return;
-      }
 
-      if (mode === 'patch') {
-          const toUpdate = previewData.filter(r => ['perfect', 'resolved'].includes(r._status) && r._dbId)
-          if (toUpdate.length === 0) { alert("無有效資料可更新！"); setProcessing(false); return; }
+      const readyRows = mode === 'patch' 
+          ? previewData.filter(r => ['perfect', 'resolved'].includes(r._status) && r._dbId)
+          : previewData.filter(r => r._status === 'valid');
           
-          let success = 0, fail = 0;
-          for (const row of toUpdate) {
-              try {
-                  if (Object.keys(row._updateData).length === 0) continue; 
-                  const { error } = await supabase.from('profiles').update(row._updateData).eq('id', row._dbId)
-                  if (error) throw error
-                  success++
-              } catch (err) { fail++; addLog(`更新失敗 (${row.full_name}): ${err.message}`, 'error') }
+      const errorRows = previewData.filter(r => !(mode === 'patch' ? ['perfect', 'resolved'].includes(r._status) : r._status === 'valid'));
+
+      if (readyRows.length === 0) {
+          if(errorRows.length > 0) {
+              if(!window.confirm("目前沒有可匯入的正常資料，是否將這些異常/衝突資料直接移至「待處理區」稍後處理？")) {
+                  setProcessing(false); return;
+              }
+          } else {
+              alert("無有效資料可更新！"); 
+              setProcessing(false); return;
           }
-          addLog(`資料更新作業完成。成功: ${success} 筆，失敗: ${fail} 筆。`, success > 0 ? 'success' : 'error')
+      }
 
-      } else {
-          const validRows = previewData.filter(r => r._status === 'valid')
-          if (validRows.length === 0) { setProcessing(false); return; }
-          const BATCH = 50
-          let success = 0, fail = 0
+      let success = 0, fail = 0;
 
-          const cleanRows = validRows.map(({ _id, _status, _error, _source, _gender_deduced, _conflictRows, ...rest }) => ({
-              ...rest, role: rest.role || 'USER', updated_at: new Date()
-          }))
+      if (readyRows.length > 0) {
+          if (mode === 'patch') {
+              for (const row of readyRows) {
+                  try {
+                      if (Object.keys(row._updateData).length === 0) continue; 
+                      const { error } = await supabase.from('profiles').update(row._updateData).eq('id', row._dbId)
+                      if (error) throw error
+                      success++
+                  } catch (err) { fail++; addLog(`更新失敗 (${row.full_name}): ${err.message}`, 'error') }
+              }
+          } else {
+              const BATCH = 50
+              const cleanRows = readyRows.map(({ _id, _status, _error, _source, _gender_deduced, _conflictRows, ...rest }) => ({
+                  ...rest, role: rest.role || 'USER', updated_at: new Date()
+              }))
 
-          for (let i = 0; i < cleanRows.length; i += BATCH) {
-              const chunk = cleanRows.slice(i, i + BATCH)
-              try {
-                  const { error } = await supabase.from('profiles').upsert(chunk, { onConflict: 'email' })
-                  if (error) throw error
-                  success += chunk.length
-              } catch (err) { fail += chunk.length; addLog(`批次寫入失敗: (${err.message})`, 'error') }
+              for (let i = 0; i < cleanRows.length; i += BATCH) {
+                  const chunk = cleanRows.slice(i, i + BATCH)
+                  try {
+                      const { error } = await supabase.from('profiles').upsert(chunk, { onConflict: 'email' })
+                      if (error) throw error
+                      success += chunk.length
+                  } catch (err) { fail += chunk.length; addLog(`批次寫入失敗: (${err.message})`, 'error') }
+              }
           }
-          addLog(`完整資料建檔作業完成。成功: ${success} 筆，失敗: ${fail} 筆。`, fail === 0 ? 'success' : 'warning')
+      }
+
+      // 🌟 將異常資料推入待處理區 Stash
+      if (errorRows.length > 0) {
+          try {
+              const existingStash = JSON.parse(localStorage.getItem(ERROR_STASH_KEY) || '[]');
+              const timestamp = new Date().toLocaleString('zh-TW');
+              const newStashItems = errorRows.map(r => ({ ...r, _stashedAt: timestamp }));
+              const updatedStash = [...existingStash, ...newStashItems];
+              localStorage.setItem(ERROR_STASH_KEY, JSON.stringify(updatedStash));
+              addLog(`已將 ${errorRows.length} 筆異常/衝突資料移至待處理區`, 'warning');
+          } catch (e) {
+              addLog(`儲存待處理區失敗: ${e.message}`, 'error');
+          }
+      }
+
+      setProcessing(false)
+      
+      let msg = `作業完成！成功: ${success} 筆，失敗: ${fail} 筆。`;
+      if (errorRows.length > 0) {
+          msg += `\n另外有 ${errorRows.length} 筆異常或內部衝突的資料，已為您安全移至「異常待處理區」，您可稍後再行處理。`;
       }
       
-      setProcessing(false)
-      if (!logs.some(l => l.type === 'error') && fail === 0) {
-          setTimeout(() => { alert("系統匯入作業已成功完成！"); handleModeSwitch(mode); }, 1500)
+      alert(msg);
+      
+      if (errorRows.length > 0) {
+          setMainTab('stash'); // 自動導向待處理區讓使用者看
       } else {
-          alert("作業完成，但有部分資料匯入失敗。請查看「系統日誌」了解原因！")
+          handleModeSwitch(mode);
       }
   }
 
@@ -758,9 +814,6 @@ export default function DataImportCenter() {
       });
   }
 
-  // ==========================================
-  // 🌟 賽事類神經網絡匯入引擎 (精準去重、解析後綴、職位對齊)
-  // ==========================================
   const handleExecuteRaceUpload = async () => {
       if (!raceFile) return alert("請先選擇賽事建檔表！");
       
@@ -790,7 +843,6 @@ export default function DataImportCenter() {
               const keys = Object.keys(row);
               
               try {
-                  // 1. 抓取賽事名稱
                   let name = row['賽事名稱'] || row['賽事或活動名稱'] || '';
                   if (!name && keys.length > 0) {
                        for(let k of keys) {
@@ -805,7 +857,6 @@ export default function DataImportCenter() {
                       continue; 
                   }
 
-                  // 2. 時空日期收束器
                   let rawDate = row['日期(YYYY-MM-DD)'] || row['賽事或活動日期'] || row['日期'] || '';
                   let location = row['地點'] || row['賽事地點'] || '';
                   const imgUrl = row['海報圖片URL'] || row['賽事URL'] || '';
@@ -821,7 +872,6 @@ export default function DataImportCenter() {
                       location = imgUrl ? "詳見賽事連結" : "地點未定";
                   }
 
-                  // 3. 狀態精準映射
                   let rawStatus = String(row['狀態(OPEN/NEGOTIATING/SUBMITTED)'] || row['與主辦單位合作進度'] || '').toUpperCase();
                   let finalStatus = 'OPEN'; 
                   if (rawStatus.includes('洽談') || rawStatus.includes('確認合作') || rawStatus.includes('尚未開放')) finalStatus = 'NEGOTIATING';
@@ -831,21 +881,16 @@ export default function DataImportCenter() {
 
                   const participantsMap = new Map(); 
 
-                  // ===================================
-                  // 🌟 後綴語意智慧解析刀 & 加入名單
-                  // ===================================
                   const addParticipant = (rawStr, forcedRole = null) => {
                       if (!rawStr || String(rawStr).trim() === '') return;
                       let str = String(rawStr).trim();
                       let pSlotName = null;
 
-                      // 處理括號 e.g. 董珮珊(21K)
                       const parenMatch = str.match(/(.*?)[(（](.*?)[)）]/);
                       if (parenMatch) {
                           str = parenMatch[1].trim();
                           pSlotName = parenMatch[2].trim();
                       } else {
-                          // 處理直接黏在一起的後綴 e.g. 曾柏耀d11, 董珮珊da1, 蔡智豪21K
                           const suffixMatch = str.match(/^([\u4e00-\u9fa5]+)\s*([a-zA-Z0-9]+)$/);
                           if (suffixMatch) {
                               str = suffixMatch[1].trim();
@@ -881,16 +926,12 @@ export default function DataImportCenter() {
                       addParticipant(row[`參加人員${j}`]);
                   }
 
-                  // ===================================
-                  // 🌟 職稱智能拆解與去重融合
-                  // ===================================
                   const assignSpecialRole = (rawNameBlock, fallbackRole) => {
                       if (!rawNameBlock) return;
                       const names = String(rawNameBlock).split(/[,，、\n]/);
                       names.forEach(n => {
-                          // 拔除 "1. 帶隊教官：" 這種前綴
                           let cleanN = n.replace(/^[0-9\.\s]+/, '').replace(/.*(?:教官|代表)[：:\s]*/, '').trim();
-                          cleanN = cleanN.replace(/[a-zA-Z0-9]+$/, '').trim(); // 預防性切除後綴
+                          cleanN = cleanN.replace(/[a-zA-Z0-9]+$/, '').trim(); 
                           cleanN = cleanString(cleanN);
                           if (cleanN) addParticipant(cleanN, fallbackRole);
                       });
@@ -923,9 +964,6 @@ export default function DataImportCenter() {
                       sponsor3: row['贊助方（鐵人醫護有限公司）代表3'] || ''
                   };
 
-                  // ===================================
-                  // 🌟 賽段容量語意解析 (Slots NLP)
-                  // ===================================
                   let slotsArray = [];
                   let totalRequiredInput = parseInt(row['參賽總人數'] || row['開放總名額數'] || row['需求人數'], 10);
                   if (isNaN(totalRequiredInput)) totalRequiredInput = 0;
@@ -951,7 +989,6 @@ export default function DataImportCenter() {
                               cap = parseInt(numMatch[1], 10);
                               sName = sName.replace(numMatch[0], '').trim() || `組別${idx+1}`;
                           } else if (sName.includes('不限')) {
-                              // "不限名額" 會在後面動態調整
                               cap = 0; 
                           }
 
@@ -980,7 +1017,6 @@ export default function DataImportCenter() {
                       }
                   }
 
-                  // 🌟 四維度會員綁定與分派
                   Array.from(participantsMap.values()).forEach(pData => {
                       let targetSlot = slotsArray[0];
                       if (pData.pSlotName) {
@@ -1004,7 +1040,6 @@ export default function DataImportCenter() {
                       targetSlot.assignee = assigneesList.join('|');
                       targetSlot.filled = assigneesList.length;
                       
-                      // 動態擴充容量 (如果不限名額，或人數超出預期)
                       if (targetSlot.filled > targetSlot.capacity) {
                           targetSlot.capacity = targetSlot.filled;
                       }
@@ -1082,6 +1117,15 @@ export default function DataImportCenter() {
               <Flag size={18}/> 🚩 賽事批次建檔
               {mainTab === 'races' && <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-amber-500"></div>}
           </button>
+          {/* 🌟 異常待處理區 Tab */}
+          <button 
+              onClick={() => setMainTab('stash')}
+              className={`flex-1 py-4 text-sm font-black flex justify-center items-center gap-2 relative transition-colors ${mainTab === 'stash' ? 'text-rose-600 bg-rose-50/30' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
+          >
+              <AlertTriangle size={18}/> 異常待處理區
+              {stashData.length > 0 && <span className="bg-rose-500 text-white text-[10px] px-1.5 py-0.5 rounded-full animate-pulse">{stashData.length}</span>}
+              {mainTab === 'stash' && <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-rose-500"></div>}
+          </button>
           <button 
               onClick={() => setMainTab('ext_settings')}
               className={`flex-1 py-4 text-sm font-black flex justify-center items-center gap-2 relative transition-colors ${mainTab === 'ext_settings' ? 'text-purple-600 bg-purple-50/30' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
@@ -1091,7 +1135,76 @@ export default function DataImportCenter() {
           </button>
       </div>
 
-      {mainTab === 'ext_settings' ? (
+      {mainTab === 'stash' ? (
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 w-full animate-fade-in-up">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+                  <div>
+                      <h2 className="text-2xl font-black text-rose-600 flex items-center gap-2">
+                          <ArchiveRestore className="text-rose-500"/> 異常待處理區
+                      </h2>
+                      <p className="text-slate-500 text-sm mt-1">匯入時遭遇異常的資料已安全暫存於此，您可以下載並於 Excel 中修復後重新上傳。</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                      <select 
+                          className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-rose-500"
+                          value={stashFilter} onChange={(e) => setStashFilter(e.target.value)}
+                      >
+                          <option value="all">顯示全部 ({stashData.length} 筆)</option>
+                          <option value="invalid">🔴 僅顯示異常/缺漏</option>
+                          <option value="internal_conflict">🟣 僅顯示內部衝突</option>
+                          <option value="duplicate">🟡 僅顯示系統重複</option>
+                      </select>
+                      <button onClick={handleExportStash} className="bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 px-4 py-2 rounded-xl font-bold flex items-center gap-2 transition-colors active:scale-95 shadow-sm">
+                          <Download size={16}/> 匯出 Excel 修復
+                      </button>
+                      <button onClick={handleClearStash} className="bg-slate-100 text-slate-500 hover:bg-red-50 hover:text-red-500 px-4 py-2 rounded-xl font-bold transition-colors active:scale-95">
+                          清空
+                      </button>
+                  </div>
+              </div>
+
+              {stashData.length === 0 ? (
+                  <div className="text-center py-20 bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl text-slate-400 font-bold">
+                      目前待處理區空空如也，天下太平！
+                  </div>
+              ) : (
+                  <div className="w-full overflow-x-auto custom-scrollbar border border-slate-200 rounded-xl">
+                      <table className="w-full text-sm text-left whitespace-nowrap">
+                          <thead className="bg-slate-800 text-white font-bold text-xs">
+                              <tr>
+                                  <th className="px-6 py-4">暫存時間</th>
+                                  <th className="px-6 py-4">異常狀態</th>
+                                  <th className="px-6 py-4">比對基準</th>
+                                  <th className="px-6 py-4">姓名/Email</th>
+                                  <th className="px-6 py-4">錯誤說明</th>
+                              </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                              {(stashFilter === 'all' ? stashData : stashData.filter(r => r._status === stashFilter)).map((row, idx) => (
+                                  <tr key={idx} className="hover:bg-slate-50">
+                                      <td className="px-6 py-4 text-slate-400 text-xs font-mono">{row._stashedAt}</td>
+                                      <td className="px-6 py-4">
+                                          {row._status === 'invalid' && <span className="text-red-600 font-bold bg-red-50 px-2 py-1 rounded">🔴 異常缺漏</span>}
+                                          {row._status === 'internal_conflict' && <span className="text-purple-600 font-bold bg-purple-50 px-2 py-1 rounded">🟣 內部衝突</span>}
+                                          {row._status === 'duplicate' && <span className="text-amber-600 font-bold bg-amber-50 px-2 py-1 rounded">🟡 系統重複</span>}
+                                          {row._status === 'not_found' && <span className="text-slate-500 font-bold bg-slate-100 px-2 py-1 rounded">⚫ 查無此人</span>}
+                                      </td>
+                                      <td className="px-6 py-4 font-bold text-slate-700">{row._rawAnchor || '-'}</td>
+                                      <td className="px-6 py-4">
+                                          <div className="font-bold text-slate-800">{row.full_name || '未提供'}</div>
+                                          <div className="text-xs text-slate-500">{row.email || row.contact_email || '無信箱'}</div>
+                                      </td>
+                                      <td className="px-6 py-4 text-slate-600 max-w-xs truncate" title={row._error || '資料欄位分歧'}>
+                                          {row._error || (row._status === 'internal_conflict' ? 'Excel內有多筆資料指向同一人' : '需人工確認')}
+                                      </td>
+                                  </tr>
+                              ))}
+                          </tbody>
+                      </table>
+                  </div>
+              )}
+          </div>
+      ) : mainTab === 'ext_settings' ? (
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 w-full animate-fade-in-up">
               <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2 mb-2">
                   <Settings2 className="text-purple-600"/> 擴充資料欄位控制中心
@@ -1334,8 +1447,14 @@ export default function DataImportCenter() {
                     
                     <div className="flex items-center gap-3">
                         <button onClick={() => setStep(2)} className="px-5 py-2.5 rounded-xl font-medium text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200 transition-colors">返回修改設定</button>
-                        <button onClick={handleExecute} disabled={processing || previewData.filter(r=>mode==='patch' ? ['perfect','resolved'].includes(r._status) : r._status==='valid').length === 0 || previewData.some(r => r._status === 'internal_conflict')} className="px-8 py-2.5 rounded-xl font-bold text-white shadow-md flex items-center gap-2 disabled:opacity-50 bg-slate-800 hover:bg-slate-700 transition-transform active:scale-95">
-                            {processing ? <><Loader2 className="animate-spin" size={18}/> 系統處理中...</> : <><Save size={18}/> 確認無誤，執行匯入</>}
+                        
+                        {/* 🌟 非阻塞式匯入：只要有正常的就能按 */}
+                        <button 
+                            onClick={handleExecute} 
+                            disabled={processing || (mode === 'patch' ? previewData.filter(r=>['perfect','resolved'].includes(r._status)).length === 0 : previewData.filter(r=>r._status === 'valid').length === 0)} 
+                            className="px-8 py-2.5 rounded-xl font-bold text-white shadow-md flex items-center gap-2 disabled:opacity-50 bg-slate-800 hover:bg-slate-700 transition-transform active:scale-95"
+                        >
+                            {processing ? <><Loader2 className="animate-spin" size={18}/> 系統處理中...</> : <><Save size={18}/> 確認無誤，執行匯入 (異常自動暫存)</>}
                         </button>
                     </div>
                 </div>
@@ -1421,14 +1540,21 @@ export default function DataImportCenter() {
                                         <td className="px-6 py-3 text-slate-600">{row.contact_email || '-'}</td>
                                         <td className="px-6 py-3 text-slate-600">{row.email || '-'}</td>
                                         {mode === 'patch' && <td className={`px-6 py-3 font-bold ${row._status === 'internal_conflict' ? 'text-purple-700 bg-purple-100/50' : 'text-amber-700 bg-amber-50/30 border-l border-amber-100/50'}`}>{row._rawAnchor}</td>}
-                                        {getDynamicMappedFields().map(excelCol => (
+                                        {getDynamicMappedFields().map(excelCol => {
+                                            // 🌟 渲染防爆機制
+                                            let displayVal = row[fieldMapping[excelCol]];
+                                            if (fieldMapping[excelCol] === 'extra_info' && row.extra_info) {
+                                                displayVal = row.extra_info[excelCol];
+                                            }
+                                            if (typeof displayVal === 'object' && displayVal !== null) {
+                                                displayVal = JSON.stringify(displayVal);
+                                            }
+
+                                            return (
                                             <td key={excelCol} className="px-6 py-3 text-blue-700">
-                                                {row._status === 'internal_conflict' ? '待合體...' : 
-                                                    (fieldMapping[excelCol] === 'extra_info' && row.extra_info 
-                                                        ? row.extra_info[excelCol] || '-' 
-                                                        : row[fieldMapping[excelCol]] || '-')}
+                                                {row._status === 'internal_conflict' ? '待合體...' : (displayVal || '-')}
                                             </td>
-                                        ))}
+                                        )})}
                                     </tr>
                                 ))}
                             </tbody>
@@ -1519,56 +1645,108 @@ export default function DataImportCenter() {
       )}
 
       {/* ========================================= */}
-      {/* 🌟 內部資料衝突：比對與合體 Modal */}
+      {/* 🌟 內部資料衝突：比對與合體 Modal (二階段確認進化版) */}
       {/* ========================================= */}
       {conflictModalData && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[150] flex items-center justify-center p-4 animate-fade-in" onClick={() => setConflictModalData(null)}>
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[150] flex items-center justify-center p-4 animate-fade-in" onClick={() => {}}>
             <div className="bg-white rounded-[2rem] w-full max-w-5xl flex flex-col max-h-[90vh] overflow-hidden shadow-2xl animate-bounce-in" onClick={e => e.stopPropagation()}>
                 
+                {/* Modal Header */}
                 <div className="p-6 border-b border-purple-100 flex justify-between items-center bg-purple-50 shrink-0">
-                    <div>
+                    <div className="flex flex-col">
                         <h3 className="text-xl font-black text-purple-800 flex items-center gap-2">
                             <GitMerge className="text-purple-600" size={24}/> 內部資料衝突：比對與合體
+                            {conflictStep === 'preview' && <span className="text-xs bg-purple-600 text-white px-2.5 py-1 rounded-full font-bold ml-2 animate-pulse shadow-sm">最終確認階段</span>}
                         </h3>
-                        <p className="text-sm text-purple-600 font-medium mt-1">
-                            系統發現表單中有 <span className="font-black px-1.5 py-0.5 bg-purple-200 rounded">{conflictModalData._conflictRows.length}</span> 筆資料指向同一個目標（比對基準相同）。
+                        <p className="text-sm text-purple-600 font-medium mt-1.5 flex items-center gap-1.5">
+                            <AlertTriangle size={14}/> 系統發現 <span className="font-black px-1.5 py-0.5 bg-purple-200 rounded">{conflictModalData._conflictRows.length}</span> 筆資料存在分歧，請確認最終合體結果。
                         </p>
                     </div>
-                    <button onClick={() => setConflictModalData(null)} className="text-slate-400 hover:bg-white rounded-full p-2 transition-colors"><X size={24}/></button>
+                    {conflictStep === 'edit' && <button onClick={() => setConflictModalData(null)} className="text-slate-400 hover:bg-white rounded-full p-2 transition-colors"><X size={24}/></button>}
                 </div>
 
+                {/* Modal Body: 智慧高亮差異表格 */}
                 <div className="p-6 overflow-y-auto bg-slate-50 flex-1 custom-scrollbar">
                     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
                         <table className="w-full text-sm text-left whitespace-nowrap">
                             <thead className="bg-slate-800 text-white font-black">
                                 <tr>
-                                    <th className="px-5 py-4 border-r border-slate-700 bg-slate-900 sticky left-0 z-10 w-48">資料欄位</th>
+                                    <th className="px-5 py-4 border-r border-slate-700 bg-slate-900 sticky left-0 z-20 w-48">資料欄位</th>
                                     {conflictModalData._conflictRows.map((r, i) => (
                                         <th key={i} className="px-5 py-4 border-r border-slate-700">來源資料 {i + 1}</th>
                                     ))}
-                                    <th className="px-5 py-4 bg-purple-600 min-w-[250px]">✨ 最終合體結果 (可手動修改)</th>
+                                    <th className={`px-5 py-4 min-w-[250px] transition-colors ${conflictStep === 'preview' ? 'bg-purple-700' : 'bg-purple-600'}`}>
+                                        ✨ 最終合體結果 {conflictStep === 'preview' ? '(確認預覽)' : '(可手動修改)'}
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                                 {[...new Set(Object.values(fieldMapping).filter(f=>f))].map(fieldKey => {
                                     const fieldLabel = FLAT_TARGETS.find(t => t.key === fieldKey)?.label || fieldKey;
+                                    
+                                    // 🌟 異常偵測邏輯：判斷來源資料是否有差異
+                                    const sourceValues = conflictModalData._conflictRows.map(r => {
+                                        const v = mode === 'patch' ? r._updateData[fieldKey] : r[fieldKey];
+                                        if (fieldKey === 'extra_info' && r.extra_info) return JSON.stringify(r.extra_info[fieldKey] || '');
+                                        if (typeof v === 'object' && v !== null) return JSON.stringify(v);
+                                        return v ? String(v).trim() : '';
+                                    });
+                                    const uniqueSourceValues = [...new Set(sourceValues.filter(v => v !== ''))];
+                                    const hasAnomaly = uniqueSourceValues.length > 1;
+
+                                    let finalVal = mergedData[fieldKey];
+                                    if (typeof finalVal === 'object' && finalVal !== null) finalVal = JSON.stringify(finalVal);
+                                    
                                     return (
-                                        <tr key={fieldKey} className="hover:bg-slate-50 transition-colors">
-                                            <td className="px-5 py-3 font-black text-slate-700 border-r border-slate-200 bg-white sticky left-0 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">
-                                                {fieldLabel.split('(')[0]}
+                                        <tr key={fieldKey} className={`transition-colors ${hasAnomaly ? 'bg-rose-50/40 hover:bg-rose-50/80' : 'hover:bg-slate-50'}`}>
+                                            <td className={`px-5 py-3 font-black border-r border-slate-200 sticky left-0 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.02)] ${hasAnomaly ? 'text-rose-700 bg-rose-50' : 'text-slate-700 bg-white'}`}>
+                                                <div className="flex items-center justify-between">
+                                                    <span>{fieldLabel.split('(')[0]}</span>
+                                                    {hasAnomaly && <AlertTriangle size={14} className="text-rose-500 animate-pulse" title="來源資料存在分歧" />}
+                                                </div>
                                             </td>
+                                            
+                                            {/* 渲染來源資料 */}
                                             {conflictModalData._conflictRows.map((r, i) => {
-                                                const val = mode === 'patch' ? r._updateData[fieldKey] : r[fieldKey];
-                                                return <td key={i} className="px-5 py-3 border-r border-slate-200 text-slate-600">{val || <span className="text-slate-300 italic text-xs">空值</span>}</td>
+                                                let val = mode === 'patch' ? r._updateData[fieldKey] : r[fieldKey];
+                                                if (fieldKey === 'extra_info' && r.extra_info) val = r.extra_info[fieldKey];
+                                                
+                                                let displayVal = val;
+                                                if (typeof val === 'object' && val !== null) {
+                                                    displayVal = JSON.stringify(val);
+                                                }
+                                                
+                                                const isDifferentFromFinal = displayVal && finalVal && String(displayVal).trim() !== String(finalVal).trim();
+
+                                                return (
+                                                    <td key={i} className={`px-5 py-3 border-r border-slate-200 ${hasAnomaly ? 'text-rose-900/70' : 'text-slate-600'}`}>
+                                                        {displayVal ? (
+                                                            <span className={`${conflictStep === 'preview' && isDifferentFromFinal ? 'line-through opacity-40 text-slate-400' : ''}`}>
+                                                                {displayVal}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-slate-300 italic text-xs">空值</span>
+                                                        )}
+                                                    </td>
+                                                )
                                             })}
-                                            <td className="px-3 py-2 bg-purple-50/30">
-                                                <input 
-                                                    type="text"
-                                                    value={mergedData[fieldKey] || ''}
-                                                    onChange={e => setMergedData({...mergedData, [fieldKey]: e.target.value})}
-                                                    className="w-full p-2.5 border border-purple-200 rounded-xl outline-none focus:ring-2 focus:ring-purple-500 font-bold text-purple-800 bg-white shadow-sm transition-all focus:border-purple-500"
-                                                    placeholder="最終空值"
-                                                />
+                                            
+                                            {/* 渲染最終結果 (編輯框 vs 預覽確認框) */}
+                                            <td className={`px-3 py-2 ${conflictStep === 'preview' ? 'bg-purple-100/50' : 'bg-purple-50/30'}`}>
+                                                {conflictStep === 'edit' ? (
+                                                    <input 
+                                                        type="text"
+                                                        value={typeof mergedData[fieldKey] === 'object' && mergedData[fieldKey] !== null ? JSON.stringify(mergedData[fieldKey]) : (mergedData[fieldKey] || '')}
+                                                        onChange={e => setMergedData({...mergedData, [fieldKey]: e.target.value})}
+                                                        className={`w-full p-2.5 border rounded-xl outline-none focus:ring-2 focus:ring-purple-500 font-bold text-purple-800 bg-white shadow-sm transition-all focus:border-purple-500 ${hasAnomaly ? 'border-rose-300 ring-2 ring-rose-500/20' : 'border-purple-200'}`}
+                                                        placeholder="最終空值"
+                                                    />
+                                                ) : (
+                                                    <div className="w-full p-2.5 border border-purple-300 rounded-xl bg-white font-black text-purple-900 shadow-inner flex items-center gap-2 overflow-hidden">
+                                                        <CheckCircle size={16} className="text-purple-500 shrink-0"/>
+                                                        <span className="truncate">{finalVal || <span className="text-purple-300 italic text-xs font-medium">最終空值</span>}</span>
+                                                    </div>
+                                                )}
                                             </td>
                                         </tr>
                                     )
@@ -1578,11 +1756,25 @@ export default function DataImportCenter() {
                     </div>
                 </div>
 
-                <div className="p-6 border-t border-slate-100 bg-white flex justify-end gap-3 shrink-0">
-                    <button onClick={() => setConflictModalData(null)} className="px-6 py-3 rounded-xl font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 transition-colors">取消</button>
-                    <button onClick={handleSaveConflict} className="px-8 py-3 rounded-xl font-black text-white bg-purple-600 hover:bg-purple-700 shadow-lg shadow-purple-600/20 flex items-center gap-2 transition-transform active:scale-95">
-                        <CheckCircle size={20}/> 確認合體並儲存
-                    </button>
+                {/* Modal Footer: 二階段確認按鈕 */}
+                <div className="p-6 border-t border-slate-100 bg-white flex justify-end gap-3 shrink-0 shadow-[0_-10px_20px_rgba(0,0,0,0.03)]">
+                    {conflictStep === 'edit' ? (
+                        <>
+                            <button onClick={() => setConflictModalData(null)} className="px-6 py-3 rounded-xl font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 transition-colors">取消合體</button>
+                            <button onClick={() => setConflictStep('preview')} className="px-8 py-3 rounded-xl font-black text-white bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-600/20 flex items-center gap-2 transition-transform active:scale-95">
+                                <ListOrdered size={20}/> 暫存並預覽比對結果
+                            </button>
+                        </>
+                    ) : (
+                        <>
+                            <button onClick={() => setConflictStep('edit')} className="px-6 py-3 rounded-xl font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 transition-colors flex items-center gap-2">
+                                <Edit size={18}/> 返回修改
+                            </button>
+                            <button onClick={() => { setConflictStep('edit'); handleSaveConflict(); }} className="px-8 py-3 rounded-xl font-black text-white bg-purple-600 hover:bg-purple-700 shadow-lg shadow-purple-600/30 flex items-center gap-2 transition-transform active:scale-95">
+                                <Save size={20}/> 確認無誤，寫入合體資料
+                            </button>
+                        </>
+                    )}
                 </div>
             </div>
         </div>
