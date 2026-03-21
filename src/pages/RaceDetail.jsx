@@ -117,9 +117,9 @@ export default function RaceDetail() {
       const phase = getRegistrationPhase(activeRace.openTime);
       const userTier = getUserTier(currentUser);
       
-      const newbiePasses = currentUser.newbie_passes !== undefined ? currentUser.newbie_passes : 3;
+      // 🌟 修復點：嚴謹的空值防呆 (??) 取代原本的 (!== undefined)
+      const newbiePasses = currentUser.newbie_passes ?? 3;
 
-      // 🌟 時序封印攔截點
       if (isPastRace) {
           checks.isTimeOpenForMe = false;
           openMessage = "本賽事已經結束，報名已截止。";
@@ -246,7 +246,9 @@ export default function RaceDetail() {
       };
 
       let willBurnNewbiePass = false;
-      let newbiePassesLeft = currentUser.newbie_passes !== undefined ? currentUser.newbie_passes : 3;
+      // 🌟 修復點：嚴謹的空值防呆 (??) 取代原本的 (!== undefined)
+      let newbiePassesLeft = currentUser.newbie_passes ?? 3;
+      
       if (phase === 1 && userTier === 3 && !isGodMode) {
           willBurnNewbiePass = true;
       }

@@ -322,17 +322,29 @@ export default function RaceEvents() {
 
   const getInitial = (name) => name ? name.replace(/[^a-zA-Z\u4e00-\u9fa5]/g, '').charAt(0) || '?' : '?'
 
+  // 🌟 動態歸類過濾器 (核心修改：過期與結案賽事強制導流到 SUBMITTED 分類)
   const filteredRaces = races.filter(race => {
       if (!race.date) return false;
-      const raceYear = new Date(race.date).getFullYear();
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      const raceDate = new Date(race.date);
+      const raceYear = raceDate.getFullYear();
+      
       let matchTime = false;
       if (timeFilter === 'CURRENT_YEAR') matchTime = raceYear === CURRENT_YEAR;
       else if (timeFilter === 'PAST') matchTime = raceYear < CURRENT_YEAR;
       else if (timeFilter === 'FUTURE') matchTime = raceYear > CURRENT_YEAR;
 
+      // 只要是過期賽事，或是狀態為已完賽/取消/關閉，一律將「系統視覺狀態」視為 SUBMITTED (已送名單/其他結案)
+      const isPastRace = raceDate < today || ['COMPLETED', 'CANCELLED', 'CLOSED'].includes(race.status);
+      let effectiveStatus = race.status;
+      if (isPastRace) {
+          effectiveStatus = 'SUBMITTED';
+      }
+
       let matchStatus = false;
       if (statusFilter === 'ALL') matchStatus = true;
-      else matchStatus = race.status === statusFilter;
+      else matchStatus = effectiveStatus === statusFilter;
 
       return matchTime && matchStatus;
   });
@@ -348,8 +360,9 @@ export default function RaceEvents() {
 
   const unreadCountReal = notifications.filter(n => !(n.isRead || n.is_read)).length;
 
-  const isSuperAdmin = ['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR'].includes(userRole);
+  const isSuperAdmin = ['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN'].includes(userRole);
 
+  // 🌟 動態統計卡片修正：確保過期/結案賽事的數字正確灌入 SUBMITTED
   const raceStats = useMemo(() => {
     let total = races.length;
     let currentYearCount = 0;
@@ -360,17 +373,27 @@ export default function RaceEvents() {
     let submittedCount = 0;
     let upcomingCount = 0;
 
+    const today = new Date();
+    today.setHours(0,0,0,0);
+
     races.forEach(race => {
       if (!race.date) return;
-      const raceYear = new Date(race.date).getFullYear();
+      const raceDate = new Date(race.date);
+      const raceYear = raceDate.getFullYear();
       if (raceYear === CURRENT_YEAR) currentYearCount++;
       else if (raceYear < CURRENT_YEAR) pastCount++;
       else if (raceYear > CURRENT_YEAR) futureCount++;
 
-      if (race.status === 'OPEN') openCount++;
-      else if (race.status === 'NEGOTIATING') negotiatingCount++;
-      else if (race.status === 'SUBMITTED') submittedCount++;
-      else if (race.status === 'UPCOMING') upcomingCount++;
+      const isPastRace = raceDate < today || ['COMPLETED', 'CANCELLED', 'CLOSED'].includes(race.status);
+      let effectiveStatus = race.status;
+      if (isPastRace) {
+          effectiveStatus = 'SUBMITTED';
+      }
+
+      if (effectiveStatus === 'OPEN') openCount++;
+      else if (effectiveStatus === 'NEGOTIATING') negotiatingCount++;
+      else if (effectiveStatus === 'SUBMITTED') submittedCount++;
+      else if (effectiveStatus === 'UPCOMING') upcomingCount++;
     });
 
     return { total, currentYearCount, pastCount, futureCount, openCount, negotiatingCount, submittedCount, upcomingCount };
@@ -393,7 +416,8 @@ export default function RaceEvents() {
       return { phase: 2, label: '全面開放' }; 
   }
 
-  const isNewbieUser = currentUserProfile?.is_new_member === 'Y' || currentUserProfile?.total_races < 2;
+  const isNewbieUser = !['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN'].includes(userRole) && 
+                       (currentUserProfile?.is_new_member === 'Y' || currentUserProfile?.total_races < 2);
   const newbiePassesLeft = currentUserProfile?.newbie_passes ?? 3;
 
   return (
@@ -426,7 +450,7 @@ export default function RaceEvents() {
           </div>
 
           <div className="absolute top-4 right-4 md:top-6 md:right-8 z-40 flex items-center gap-2 md:gap-3">
-              {(['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN'].includes(userRole)) && (
+              {isSuperAdmin && (
                   <div className="relative" ref={adminMenuRef}>
                       <button 
                           onClick={() => setShowAdminMenu(!showAdminMenu)}
@@ -506,7 +530,7 @@ export default function RaceEvents() {
               )}
 
               {isNewbieUser && newbiePassesLeft > 0 && (
-                  <div className="bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-[2rem] p-4 md:p-5 shadow-xl shadow-emerald-500/20 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-fade-in-down border border-emerald-400/50">
+                  <div className="bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-2xl p-4 md:p-5 shadow-xl shadow-emerald-500/20 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-fade-in-down border border-emerald-400/50">
                       <div className="flex items-center gap-3">
                           <div className="bg-white/20 p-2.5 rounded-xl backdrop-blur-sm shrink-0">
                               <Sprout size={24} className="text-emerald-50 drop-shadow-sm" />
@@ -520,7 +544,7 @@ export default function RaceEvents() {
                               </p>
                           </div>
                       </div>
-                      <button onClick={() => { setStatusFilter('OPEN'); setTimeFilter('CURRENT_YEAR'); }} className="shrink-0 bg-white text-emerald-600 hover:bg-emerald-50 px-5 py-2.5 rounded-xl font-black text-sm transition-colors shadow-sm active:scale-95 w-full sm:w-auto text-center border-b-2 border-emerald-200">
+                      <button onClick={() => { setStatusFilter('OPEN'); setTimeFilter('CURRENT_YEAR'); }} className="shrink-0 bg-white text-emerald-600 hover:bg-emerald-50 px-5 py-2.5 rounded-xl font-black text-sm transition-colors shadow-sm active:scale-95 w-full sm:w-auto border border-emerald-100">
                           立即尋找招募賽事
                       </button>
                   </div>
@@ -532,7 +556,9 @@ export default function RaceEvents() {
                   <button onClick={() => setStatusFilter('ALL')} className={`shrink-0 px-4 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all whitespace-nowrap snap-start ${statusFilter === 'ALL' ? 'bg-slate-800 text-white shadow-md' : 'text-slate-500 hover:bg-slate-100 bg-slate-50/50'}`}>全部賽事</button>
                   <button onClick={() => setStatusFilter('OPEN')} className={`shrink-0 px-4 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all whitespace-nowrap flex items-center gap-1.5 snap-start ${statusFilter === 'OPEN' ? 'bg-green-500 text-white shadow-md shadow-green-500/20' : 'text-slate-500 hover:bg-slate-100 bg-slate-50/50'}`}><Activity size={14} className="hidden sm:block"/> 招募中</button>
                   <button onClick={() => setStatusFilter('NEGOTIATING')} className={`shrink-0 px-4 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all whitespace-nowrap flex items-center gap-1.5 snap-start ${statusFilter === 'NEGOTIATING' ? 'bg-amber-500 text-white shadow-md shadow-amber-500/20' : 'text-slate-500 hover:bg-slate-100 bg-slate-50/50'}`}><Handshake size={14} className="hidden sm:block"/> 洽談中</button>
-                  <button onClick={() => setStatusFilter('SUBMITTED')} className={`shrink-0 px-4 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all whitespace-nowrap flex items-center gap-1.5 snap-start ${statusFilter === 'SUBMITTED' ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 hover:bg-slate-100 bg-slate-50/50'}`}><Send size={14} className="hidden sm:block"/> 已送名單</button>
+                  
+                  {/* 🌟 修改點 1：按鈕文字改為「已送名單/其他結案」 */}
+                  <button onClick={() => setStatusFilter('SUBMITTED')} className={`shrink-0 px-4 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all whitespace-nowrap flex items-center gap-1.5 snap-start ${statusFilter === 'SUBMITTED' ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 hover:bg-slate-100 bg-slate-50/50'}`}><Send size={14} className="hidden sm:block"/> 已送名單/其他結案</button>
               </div>
 
               <div className="flex bg-slate-100/80 p-1 md:p-1.5 rounded-xl md:rounded-2xl w-full xl:w-auto border border-slate-200 shadow-inner">
@@ -571,7 +597,10 @@ export default function RaceEvents() {
                           <div className="flex flex-col gap-2">
                               <div className="flex justify-between items-center text-sm"><span className="text-green-600 font-bold flex items-center gap-1"><Activity size={12}/> 招募中</span><span className="font-black text-green-700">{raceStats.openCount}</span></div>
                               <div className="flex justify-between items-center text-sm"><span className="text-amber-600 font-bold flex items-center gap-1"><Handshake size={12}/> 洽談中</span><span className="font-black text-amber-700">{raceStats.negotiatingCount}</span></div>
-                              <div className="flex justify-between items-center text-sm"><span className="text-slate-600 font-bold flex items-center gap-1"><Send size={12}/> 已送名單</span><span className="font-black text-slate-800">{raceStats.submittedCount}</span></div>
+                              
+                              {/* 🌟 修改點 2：統計文字改為「已送名單/其他結案」 */}
+                              <div className="flex justify-between items-center text-sm"><span className="text-slate-600 font-bold flex items-center gap-1"><Send size={12}/> 已送名單/其他結案</span><span className="font-black text-slate-800">{raceStats.submittedCount}</span></div>
+                              
                               <div className="flex justify-between items-center text-sm"><span className="text-slate-400 font-bold flex items-center gap-1"><Timer size={12}/> 預備中</span><span className="font-black text-slate-500">{raceStats.upcomingCount}</span></div>
                           </div>
                       </div>
@@ -600,10 +629,9 @@ export default function RaceEvents() {
                       const isFull = totalRegistered >= required && required > 0;
                       const waitlistCount = race.waitlist_data ? race.waitlist_data.length : 0;
                       
-                      // 🌟 過期賽事時間判定邏輯
                       const today = new Date();
                       today.setHours(0,0,0,0);
-                      const isPastRace = new Date(race.date) < today;
+                      const isPastRace = new Date(race.date) < today || ['COMPLETED', 'CANCELLED', 'CLOSED'].includes(race.status);
 
                       const getButtonConfig = () => {
                           if (isPastRace) return { text: '賽事已結束 / 檢視名單', class: 'bg-slate-200 text-slate-500 border border-slate-300' }
