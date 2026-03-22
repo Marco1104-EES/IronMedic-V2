@@ -18,7 +18,6 @@ export default function RaceDetail() {
   const [insertModalOpen, setInsertModalOpen] = useState(false)
   const [insertData, setInsertData] = useState({ slotId: null, name: '', roleTag: '' })
   
-  // 🌟 智能安插：存放所有當年度有效會員
   const [allMembers, setAllMembers] = useState([])
 
   useEffect(() => { 
@@ -48,7 +47,6 @@ export default function RaceDetail() {
           setCurrentUser(fetchedUser);
           setIsGodMode(godModeCheck);
 
-          // 🌟 智能安插：如果身分是總監，自動抓取所有「當年度」會員清單作為輸入提示
           if (godModeCheck) {
               const { data: membersData } = await supabase.from('profiles').select('*').eq('is_current_member', 'Y');
               if (membersData) {
@@ -131,6 +129,22 @@ export default function RaceDetail() {
       
       const newbiePasses = currentUser.newbie_passes ?? 3;
 
+      let hasTeamLeaderAlready = false;
+      if (activeRace && activeRace.slots) {
+          for (const slot of activeRace.slots) {
+              if (slot.assignee) {
+                  const assignees = slot.assignee.split('|');
+                  for (const item of assignees) {
+                      if (!item) continue;
+                      try {
+                          const p = JSON.parse(item);
+                          if (p.roleTag === '帶隊教官') hasTeamLeaderAlready = true;
+                      } catch (e) {}
+                  }
+              }
+          }
+      }
+
       if (isPastRace) {
           checks.isTimeOpenForMe = false;
           openMessage = "本賽事已經結束，報名已截止。";
@@ -143,7 +157,15 @@ export default function RaceDetail() {
       } else if (userTier === 1) { 
           checks.isTimeOpenForMe = true;
       } else if (phase === 0) {
-          if (userTier === 2) checks.isTimeOpenForMe = true; 
+          if (userTier === 2) {
+              // 🌟 智能直觀防呆：Day 1 若已有教官，直接鎖死按鈕
+              if (hasTeamLeaderAlready) {
+                  checks.isTimeOpenForMe = false;
+                  openMessage = "本場【帶隊教官】已登記額滿！請於明日開放階段，以一般身分報名。";
+              } else {
+                  checks.isTimeOpenForMe = true;
+              }
+          } 
           else {
               checks.isTimeOpenForMe = false;
               openMessage = "今日僅開放「帶隊教官」報名，您的身分將於明日 00:00 解鎖";
@@ -231,10 +253,12 @@ export default function RaceDetail() {
           return alert(`❌ 系統攔截：您已經報名【${existingSlotName}】！\n一個人無法同時報名多個組別 (禁止分身)。若要更改組別，請先至數位 ID 卡「取消報名」後再重新操作。`);
       }
 
+      // 🌟 修正點：移除畫蛇添足的彈窗。僅在 Phase 0 (Day 1) 自動賦予帶隊教官標籤，且被搶走時攔截。
+      // Day 2 之後，帶隊教官就是一般身分報名，安靜無干擾！
       let assignedRoleTag = null;
       if (phase === 0 && userTier === 2 && !isGodMode) {
           if (hasTeamLeaderAlready) {
-              return alert(`⚠️ 報名失敗：本場賽事之【帶隊教官】名額已被登記！\n請於下一階段以一般身分報名，或聯繫賽事總監。`);
+              return alert(`⚠️ 報名失敗：本場賽事之【帶隊教官】名額已被登記！\n請於明日開放階段，以一般身分報名。`);
           } else {
               assignedRoleTag = '帶隊教官';
           }
@@ -243,6 +267,14 @@ export default function RaceDetail() {
       const now = new Date();
       const timestamp = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
       
+      let willBurnNewbiePass = false;
+      let newbiePassesLeft = currentUser.newbie_passes ?? 3;
+      
+      // 🌟 絕對扣抵機制：只要是新人註冊且有額度，一律扣除
+      if (userTier === 3 && newbiePassesLeft > 0 && !isGodMode) {
+          willBurnNewbiePass = true;
+      }
+
       const participantInfo = {
           id: currentUser.id,
           name: currentUser.full_name || currentUser.email.split('@')[0],
@@ -250,18 +282,12 @@ export default function RaceDetail() {
           tier: userTier,
           isVip: currentUser.is_vip === 'Y',
           isNew: currentUser.is_new_member === 'Y' || currentUser.total_races < 2,
+          usedPass: willBurnNewbiePass, 
           timestamp: timestamp,
           slot: selectedSlot,
           roleTag: assignedRoleTag,
           isMe: true 
       };
-
-      let willBurnNewbiePass = false;
-      let newbiePassesLeft = currentUser.newbie_passes ?? 3;
-      
-      if (phase === 1 && userTier === 3 && !isGodMode) {
-          willBurnNewbiePass = true;
-      }
 
       if (!isSelectedSlotFull) {
           const updatedSlots = activeRace.slots.map(s => {
@@ -350,13 +376,21 @@ export default function RaceDetail() {
       if(!isGodMode) return;
       if(!window.confirm(`⚠️ 賽事總監警告 ⚠️\n確定要強制將【${userName}】從此賽段踢除嗎？`)) return;
 
+      let kickedUserUsedPass = false;
+
       const updatedSlots = activeRace.slots.map(s => {
           if (s.id === slotId && s.assignee) {
               const assigneesArray = s.assignee.split('|').map(str => {
                   try { return JSON.parse(str); } catch(e) { return { id: str, name: str, isLegacy: true }; }
               });
               
-              const newAssigneesArray = assigneesArray.filter(p => p.id !== userIdToKick && p.name !== userIdToKick);
+              const newAssigneesArray = assigneesArray.filter(p => {
+                  if (p.id === userIdToKick || p.name === userIdToKick) {
+                      if (p.usedPass) kickedUserUsedPass = true;
+                      return false;
+                  }
+                  return true;
+              });
               
               const newAssigneeString = newAssigneesArray.map(p => p.isLegacy ? p.name : JSON.stringify(p)).join('|');
               
@@ -375,6 +409,16 @@ export default function RaceDetail() {
           const { error } = await supabase.from('races').update({ slots_data: updatedSlots }).eq('id', activeRace.id);
           if (error) throw error;
           
+          if (kickedUserUsedPass && userIdToKick && !String(userIdToKick).startsWith('force_')) {
+              try {
+                  const { data: kUser } = await supabase.from('profiles').select('newbie_passes').eq('id', userIdToKick).single();
+                  if (kUser) {
+                      const restoredPasses = Math.min(3, (kUser.newbie_passes ?? 3) + 1);
+                      await supabase.from('profiles').update({ newbie_passes: restoredPasses }).eq('id', userIdToKick);
+                  }
+              } catch(e) { console.error("退還次數失敗", e) }
+          }
+
           if (userIdToKick && !String(userIdToKick).startsWith('force_')) {
               try {
                   await supabase.from('user_notifications').insert([{
@@ -395,18 +439,15 @@ export default function RaceDetail() {
       setInsertModalOpen(true);
   }
 
-  // 🌟 智能安插核心邏輯升級：身分驗證與衝突預警
   const handleForceInsert = async () => {
       const trimmedName = insertData.name.trim();
       if(!trimmedName) return alert("請輸入或選擇要安插的人員姓名！");
       
-      // 1. 嚴格驗證：必須是系統內的當年度有效會員
       const matchedMember = allMembers.find(m => m.full_name === trimmedName);
       if (!matchedMember) {
           return alert("❌ 系統防呆攔截：請從下拉提示清單中選擇「當年度有效會員」。查無此人或非當屆會員無法安插！");
       }
 
-      // 2. 衝突預警：檢查是否已經在任何賽段中
       let isAlreadyInRace = false;
       let existingSlotName = "";
       for (const slot of activeRace.slots) {
@@ -431,7 +472,6 @@ export default function RaceDetail() {
           }
       }
 
-      // 如果有重複，給予總監最後的「上帝權限確認」
       if (isAlreadyInRace) {
           const confirmTest = window.confirm(`⚠️ 系統提醒：【${matchedMember.full_name}】已經在【${existingSlotName}】名單中了！\n\n請問這是一次「測試報名」或「特殊重複安插」嗎？\n點擊「確定」將無視限制強制安插，點擊「取消」放棄操作。`);
           if (!confirmTest) return;
@@ -440,7 +480,10 @@ export default function RaceDetail() {
       const now = new Date();
       const timestamp = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
       
-      // 3. 完整繼承真實身分資料
+      const isNewbie = matchedMember.is_new_member === 'Y' || matchedMember.total_races < 2;
+      const newbiePassesLeft = matchedMember.newbie_passes ?? 3;
+      const willBurnNewbiePass = isNewbie && newbiePassesLeft > 0;
+
       const newParticipant = {
           id: matchedMember.id,
           name: matchedMember.full_name,
@@ -449,7 +492,8 @@ export default function RaceDetail() {
           timestamp: timestamp,
           roleTag: insertData.roleTag || null,
           isVip: matchedMember.is_vip === 'Y',
-          isNew: matchedMember.is_new_member === 'Y' || matchedMember.total_races < 2,
+          isNew: isNewbie,
+          usedPass: willBurnNewbiePass, 
           isMe: false
       };
 
@@ -467,6 +511,13 @@ export default function RaceDetail() {
       try {
           const { error } = await supabase.from('races').update({ slots_data: updatedSlots }).eq('id', activeRace.id);
           if (error) throw error;
+
+          if (willBurnNewbiePass) {
+              const newPasses = Math.max(0, newbiePassesLeft - 1);
+              await supabase.from('profiles').update({ newbie_passes: newPasses }).eq('id', matchedMember.id);
+              setAllMembers(prev => prev.map(m => m.id === matchedMember.id ? { ...m, newbie_passes: newPasses } : m));
+          }
+
           alert(`✅ 已成功將【${matchedMember.full_name}】安插至名單內。`);
       } catch(e) { alert("安插寫入失敗：" + e.message) }
   }
@@ -874,7 +925,6 @@ export default function RaceDetail() {
                   <h3 className="font-black text-xl text-slate-800 mb-4 flex items-center gap-2"><Zap className="text-amber-500"/> 賽事總監：強制安插人員</h3>
                   <div className="space-y-4">
                       
-                      {/* 🌟 智能輸入：使用 HTML5 Datalist 保留完美原生 UXUI */}
                       <div>
                           <label className="block text-sm font-bold text-slate-700 mb-1">人員姓名 (智能比對)</label>
                           <input 
