@@ -17,6 +17,9 @@ export default function RaceDetail() {
   const [isGodMode, setIsGodMode] = useState(false)
   const [insertModalOpen, setInsertModalOpen] = useState(false)
   const [insertData, setInsertData] = useState({ slotId: null, name: '', roleTag: '' })
+  
+  // 🌟 智能安插：存放所有當年度有效會員
+  const [allMembers, setAllMembers] = useState([])
 
   useEffect(() => { 
       fetchCurrentUserAndRace() 
@@ -35,7 +38,6 @@ export default function RaceDetail() {
               if (profile) {
                   fetchedUser = { ...profile, auth_user_id: user.id };
                   
-                  // 🌟 修復：去除空白與雙語權限兼容判定 God Mode
                   const rawRole = profile.role ? profile.role.toUpperCase().trim() : 'USER';
                   const adminRoles = ['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN', '賽事總監', '系統管理員', '管理員'];
                   if (adminRoles.some(r => rawRole.includes(r))) {
@@ -45,6 +47,14 @@ export default function RaceDetail() {
           }
           setCurrentUser(fetchedUser);
           setIsGodMode(godModeCheck);
+
+          // 🌟 智能安插：如果身分是總監，自動抓取所有「當年度」會員清單作為輸入提示
+          if (godModeCheck) {
+              const { data: membersData } = await supabase.from('profiles').select('*').eq('is_current_member', 'Y');
+              if (membersData) {
+                  setAllMembers(membersData);
+              }
+          }
 
           const { data, error } = await supabase.from('races').select('*').eq('id', id).single()
           if (error) throw error
@@ -385,19 +395,62 @@ export default function RaceDetail() {
       setInsertModalOpen(true);
   }
 
+  // 🌟 智能安插核心邏輯升級：身分驗證與衝突預警
   const handleForceInsert = async () => {
-      if(!insertData.name.trim()) return alert("請輸入要安插的人員姓名！");
+      const trimmedName = insertData.name.trim();
+      if(!trimmedName) return alert("請輸入或選擇要安插的人員姓名！");
       
+      // 1. 嚴格驗證：必須是系統內的當年度有效會員
+      const matchedMember = allMembers.find(m => m.full_name === trimmedName);
+      if (!matchedMember) {
+          return alert("❌ 系統防呆攔截：請從下拉提示清單中選擇「當年度有效會員」。查無此人或非當屆會員無法安插！");
+      }
+
+      // 2. 衝突預警：檢查是否已經在任何賽段中
+      let isAlreadyInRace = false;
+      let existingSlotName = "";
+      for (const slot of activeRace.slots) {
+          if (slot.assignee) {
+              const assignees = slot.assignee.split('|');
+              for (const item of assignees) {
+                  if (!item) continue;
+                  try {
+                      const p = JSON.parse(item);
+                      if (p.id === matchedMember.id || p.name === matchedMember.full_name) {
+                          isAlreadyInRace = true;
+                          existingSlotName = slot.name;
+                      }
+                  } catch (e) {
+                      const legacyName = item.split('#')[0].trim();
+                      if (legacyName === matchedMember.full_name) {
+                          isAlreadyInRace = true;
+                          existingSlotName = slot.name;
+                      }
+                  }
+              }
+          }
+      }
+
+      // 如果有重複，給予總監最後的「上帝權限確認」
+      if (isAlreadyInRace) {
+          const confirmTest = window.confirm(`⚠️ 系統提醒：【${matchedMember.full_name}】已經在【${existingSlotName}】名單中了！\n\n請問這是一次「測試報名」或「特殊重複安插」嗎？\n點擊「確定」將無視限制強制安插，點擊「取消」放棄操作。`);
+          if (!confirmTest) return;
+      }
+
       const now = new Date();
       const timestamp = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
       
+      // 3. 完整繼承真實身分資料
       const newParticipant = {
-          id: `force_${Date.now()}`,
-          name: insertData.name,
+          id: matchedMember.id,
+          name: matchedMember.full_name,
+          email: matchedMember.email,
+          tier: getUserTier(matchedMember),
           timestamp: timestamp,
           roleTag: insertData.roleTag || null,
-          isVip: false,
-          isNew: false
+          isVip: matchedMember.is_vip === 'Y',
+          isNew: matchedMember.is_new_member === 'Y' || matchedMember.total_races < 2,
+          isMe: false
       };
 
       const updatedSlots = activeRace.slots.map(s => {
@@ -414,7 +467,7 @@ export default function RaceDetail() {
       try {
           const { error } = await supabase.from('races').update({ slots_data: updatedSlots }).eq('id', activeRace.id);
           if (error) throw error;
-          alert(`✅ 已強制將【${insertData.name}】安插至名單內。`);
+          alert(`✅ 已成功將【${matchedMember.full_name}】安插至名單內。`);
       } catch(e) { alert("安插寫入失敗：" + e.message) }
   }
 
@@ -820,10 +873,26 @@ export default function RaceDetail() {
               <div className="bg-white rounded-[2rem] shadow-2xl max-w-sm w-full p-6 animate-bounce-in" onClick={e => e.stopPropagation()}>
                   <h3 className="font-black text-xl text-slate-800 mb-4 flex items-center gap-2"><Zap className="text-amber-500"/> 賽事總監：強制安插人員</h3>
                   <div className="space-y-4">
+                      
+                      {/* 🌟 智能輸入：使用 HTML5 Datalist 保留完美原生 UXUI */}
                       <div>
-                          <label className="block text-sm font-bold text-slate-700 mb-1">人員姓名</label>
-                          <input type="text" className="w-full border border-slate-300 p-3 rounded-xl outline-none font-bold" placeholder="輸入要安插的姓名" value={insertData.name} onChange={e => setInsertData({...insertData, name: e.target.value})} autoFocus/>
+                          <label className="block text-sm font-bold text-slate-700 mb-1">人員姓名 (智能比對)</label>
+                          <input 
+                              type="text" 
+                              list="member-autocomplete"
+                              className="w-full border border-slate-300 p-3 rounded-xl outline-none font-bold bg-white focus:ring-2 focus:ring-amber-500 transition-all" 
+                              placeholder="請輸入或選擇當年度會員姓名" 
+                              value={insertData.name} 
+                              onChange={e => setInsertData({...insertData, name: e.target.value})} 
+                              autoFocus
+                          />
+                          <datalist id="member-autocomplete">
+                              {allMembers.map(m => (
+                                  <option key={m.id} value={m.full_name}>{m.email}</option>
+                              ))}
+                          </datalist>
                       </div>
+
                       <div>
                           <label className="block text-sm font-bold text-slate-700 mb-1">賦予特殊身分 (選填)</label>
                           <select className="w-full border border-slate-300 p-3 rounded-xl outline-none font-bold bg-white" value={insertData.roleTag} onChange={e => setInsertData({...insertData, roleTag: e.target.value})}>
