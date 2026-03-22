@@ -20,6 +20,23 @@ export default function RaceDetail() {
   
   const [allMembers, setAllMembers] = useState([])
 
+  // 🌟 全局無塵室字串淨化解析器：過濾一切幽靈空白、無效字串
+  const parseAssignees = (assigneeString) => {
+      if (!assigneeString || typeof assigneeString !== 'string') return [];
+      const rawAssignees = assigneeString.split('|').filter(s => s.trim() !== '');
+      return rawAssignees.map(item => {
+          try {
+              const obj = JSON.parse(item);
+              if (obj && obj.name && String(obj.name).trim() !== '') return obj;
+              return null;
+          } catch (e) {
+              const trimmed = item.trim();
+              if (!trimmed) return null;
+              return { id: trimmed, name: trimmed, timestamp: '舊資料匯入', isLegacy: true };
+          }
+      }).filter(Boolean);
+  }
+
   useEffect(() => { 
       fetchCurrentUserAndRace() 
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -132,15 +149,9 @@ export default function RaceDetail() {
       let hasTeamLeaderAlready = false;
       if (activeRace && activeRace.slots) {
           for (const slot of activeRace.slots) {
-              if (slot.assignee) {
-                  const assignees = slot.assignee.split('|');
-                  for (const item of assignees) {
-                      if (!item) continue;
-                      try {
-                          const p = JSON.parse(item);
-                          if (p.roleTag === '帶隊教官') hasTeamLeaderAlready = true;
-                      } catch (e) {}
-                  }
+              const parsedAssignees = parseAssignees(slot.assignee);
+              if (parsedAssignees.some(p => p.roleTag === '帶隊教官')) {
+                  hasTeamLeaderAlready = true;
               }
           }
       }
@@ -158,7 +169,6 @@ export default function RaceDetail() {
           checks.isTimeOpenForMe = true;
       } else if (phase === 0) {
           if (userTier === 2) {
-              // 🌟 智能直觀防呆：Day 1 若已有教官，直接鎖死按鈕
               if (hasTeamLeaderAlready) {
                   checks.isTimeOpenForMe = false;
                   openMessage = "本場【帶隊教官】已登記額滿！請於明日開放階段，以一般身分報名。";
@@ -218,43 +228,28 @@ export default function RaceDetail() {
       let existingSlotName = "";
       let hasTeamLeaderAlready = false;
 
-      if (!isGodMode) { 
-          for (const slot of activeRace.slots) {
-              if (slot.assignee) {
-                  const assignees = slot.assignee.split('|');
-                  for (const item of assignees) {
-                      if (!item) continue;
-                      try {
-                          const p = JSON.parse(item);
-                          if (p.id === currentUser.id || p.name === currentUser.full_name) {
-                              isAlreadyInRace = true;
-                              existingSlotName = slot.name;
-                          }
-                          if (p.roleTag === '帶隊教官') {
-                              hasTeamLeaderAlready = true;
-                          }
-                      } catch (e) {
-                          const legacyName = item.split('#')[0].trim();
-                          if (legacyName === currentUser.full_name) {
-                              isAlreadyInRace = true;
-                              existingSlotName = slot.name;
-                          }
-                      }
-                  }
+      // 🌟 修復 2：取消 !isGodMode 限制。即使是總監自己報名，也必須受到重複報名的防呆限制！
+      for (const slot of activeRace.slots) {
+          const parsedAssignees = parseAssignees(slot.assignee);
+          for (const p of parsedAssignees) {
+              if (p.id === currentUser.id || p.name === currentUser.full_name) {
+                  isAlreadyInRace = true;
+                  existingSlotName = slot.name;
+              }
+              if (p.roleTag === '帶隊教官') {
+                  hasTeamLeaderAlready = true;
               }
           }
-          if (waitlist.some(w => w.id === currentUser.id || w.name === currentUser.full_name)) {
-              isAlreadyInRace = true;
-              existingSlotName = "候補區";
-          }
+      }
+      if (waitlist.some(w => w.id === currentUser.id || w.name === currentUser.full_name)) {
+          isAlreadyInRace = true;
+          existingSlotName = "候補區";
       }
 
       if (isAlreadyInRace) {
           return alert(`❌ 系統攔截：您已經報名【${existingSlotName}】！\n一個人無法同時報名多個組別 (禁止分身)。若要更改組別，請先至數位 ID 卡「取消報名」後再重新操作。`);
       }
 
-      // 🌟 修正點：移除畫蛇添足的彈窗。僅在 Phase 0 (Day 1) 自動賦予帶隊教官標籤，且被搶走時攔截。
-      // Day 2 之後，帶隊教官就是一般身分報名，安靜無干擾！
       let assignedRoleTag = null;
       if (phase === 0 && userTier === 2 && !isGodMode) {
           if (hasTeamLeaderAlready) {
@@ -270,31 +265,31 @@ export default function RaceDetail() {
       let willBurnNewbiePass = false;
       let newbiePassesLeft = currentUser.newbie_passes ?? 3;
       
-      // 🌟 絕對扣抵機制：只要是新人註冊且有額度，一律扣除
       if (userTier === 3 && newbiePassesLeft > 0 && !isGodMode) {
           willBurnNewbiePass = true;
       }
 
+      // 🌟 修復 1：移除 isMe: true。身分必須在渲染時動態判定！
       const participantInfo = {
           id: currentUser.id,
           name: currentUser.full_name || currentUser.email.split('@')[0],
           email: currentUser.email,
           tier: userTier,
           isVip: currentUser.is_vip === 'Y',
-          isNew: currentUser.is_new_member === 'Y' || currentUser.total_races < 2,
+          isNew: !isGodMode && (currentUser.is_new_member === 'Y' || currentUser.total_races < 2),
           usedPass: willBurnNewbiePass, 
           timestamp: timestamp,
           slot: selectedSlot,
-          roleTag: assignedRoleTag,
-          isMe: true 
+          roleTag: assignedRoleTag
       };
 
       if (!isSelectedSlotFull) {
           const updatedSlots = activeRace.slots.map(s => {
               if (s.id === selectedSlot) {
-                  const currentFilled = s.filled || 0;
-                  const newAssignee = s.assignee ? `${s.assignee}|${JSON.stringify(participantInfo)}` : JSON.stringify(participantInfo);
-                  return { ...s, filled: currentFilled + 1, assignee: newAssignee };
+                  const assigneesArray = parseAssignees(s.assignee);
+                  assigneesArray.push(participantInfo);
+                  const newAssigneeString = assigneesArray.map(p => p.isLegacy ? p.name : JSON.stringify(p)).join('|');
+                  return { ...s, filled: assigneesArray.length, assignee: newAssigneeString };
               }
               return s;
           });
@@ -380,10 +375,7 @@ export default function RaceDetail() {
 
       const updatedSlots = activeRace.slots.map(s => {
           if (s.id === slotId && s.assignee) {
-              const assigneesArray = s.assignee.split('|').map(str => {
-                  try { return JSON.parse(str); } catch(e) { return { id: str, name: str, isLegacy: true }; }
-              });
-              
+              const assigneesArray = parseAssignees(s.assignee);
               const newAssigneesArray = assigneesArray.filter(p => {
                   if (p.id === userIdToKick || p.name === userIdToKick) {
                       if (p.usedPass) kickedUserUsedPass = true;
@@ -393,8 +385,7 @@ export default function RaceDetail() {
               });
               
               const newAssigneeString = newAssigneesArray.map(p => p.isLegacy ? p.name : JSON.stringify(p)).join('|');
-              
-              return { ...s, filled: Math.max(0, s.filled - 1), assignee: newAssigneeString };
+              return { ...s, filled: newAssigneesArray.length, assignee: newAssigneeString };
           }
           return s;
       });
@@ -451,25 +442,18 @@ export default function RaceDetail() {
       let isAlreadyInRace = false;
       let existingSlotName = "";
       for (const slot of activeRace.slots) {
-          if (slot.assignee) {
-              const assignees = slot.assignee.split('|');
-              for (const item of assignees) {
-                  if (!item) continue;
-                  try {
-                      const p = JSON.parse(item);
-                      if (p.id === matchedMember.id || p.name === matchedMember.full_name) {
-                          isAlreadyInRace = true;
-                          existingSlotName = slot.name;
-                      }
-                  } catch (e) {
-                      const legacyName = item.split('#')[0].trim();
-                      if (legacyName === matchedMember.full_name) {
-                          isAlreadyInRace = true;
-                          existingSlotName = slot.name;
-                      }
-                  }
+          const parsedAssignees = parseAssignees(slot.assignee);
+          for (const p of parsedAssignees) {
+              if (p.id === matchedMember.id || p.name === matchedMember.full_name) {
+                  isAlreadyInRace = true;
+                  existingSlotName = slot.name;
               }
           }
+      }
+
+      if (waitlist.some(w => w.id === matchedMember.id || w.name === matchedMember.full_name)) {
+          isAlreadyInRace = true;
+          existingSlotName = "候補區";
       }
 
       if (isAlreadyInRace) {
@@ -480,10 +464,15 @@ export default function RaceDetail() {
       const now = new Date();
       const timestamp = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
       
-      const isNewbie = matchedMember.is_new_member === 'Y' || matchedMember.total_races < 2;
+      const rawRole = matchedMember.role ? matchedMember.role.toUpperCase().trim() : 'USER';
+      const adminRoles = ['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN', '賽事總監', '系統管理員', '管理員'];
+      const isMatchedAdmin = adminRoles.some(r => rawRole.includes(r));
+      
+      const isNewbie = !isMatchedAdmin && (matchedMember.is_new_member === 'Y' || matchedMember.total_races < 2);
       const newbiePassesLeft = matchedMember.newbie_passes ?? 3;
       const willBurnNewbiePass = isNewbie && newbiePassesLeft > 0;
 
+      // 🌟 修復 1：移除 isMe: false
       const newParticipant = {
           id: matchedMember.id,
           name: matchedMember.full_name,
@@ -493,23 +482,28 @@ export default function RaceDetail() {
           roleTag: insertData.roleTag || null,
           isVip: matchedMember.is_vip === 'Y',
           isNew: isNewbie,
-          usedPass: willBurnNewbiePass, 
-          isMe: false
+          usedPass: willBurnNewbiePass
       };
 
       const updatedSlots = activeRace.slots.map(s => {
           if (s.id === insertData.slotId) {
-              const newAssignee = s.assignee ? `${s.assignee}|${JSON.stringify(newParticipant)}` : JSON.stringify(newParticipant);
-              return { ...s, filled: (s.filled || 0) + 1, assignee: newAssignee };
+              const assigneesArray = parseAssignees(s.assignee);
+              assigneesArray.push(newParticipant);
+              const newAssigneeString = assigneesArray.map(p => p.isLegacy ? p.name : JSON.stringify(p)).join('|');
+              return { ...s, filled: assigneesArray.length, assignee: newAssigneeString };
           }
           return s;
       });
 
-      setActiveRace({ ...activeRace, slots: updatedSlots });
+      // 🌟 修復 3：強制安插到正式賽段時，如果該員原本在候補區，必須將其從候補區剃除，避免成為雙胞胎！
+      const newWaitlist = waitlist.filter(w => w.id !== matchedMember.id && w.name !== matchedMember.full_name);
+
+      setActiveRace({ ...activeRace, slots: updatedSlots, waitlist_data: newWaitlist });
+      setWaitlist(newWaitlist);
       setInsertModalOpen(false);
 
       try {
-          const { error } = await supabase.from('races').update({ slots_data: updatedSlots }).eq('id', activeRace.id);
+          const { error } = await supabase.from('races').update({ slots_data: updatedSlots, waitlist_data: newWaitlist }).eq('id', activeRace.id);
           if (error) throw error;
 
           if (willBurnNewbiePass) {
@@ -524,11 +518,16 @@ export default function RaceDetail() {
 
   const handleApproveFromWaitlist = async (user) => {
       if (!isGodMode) return;
+      
+      const targetSlot = activeRace.slots.find(s => s.id === user.slot);
+      if (!targetSlot) return alert("❌ 系統攔截：此賽段已不存在！請先請該員取消候補後重新報名。");
+
       const updatedSlots = activeRace.slots.map(s => {
           if (s.id === user.slot) {
-              const currentFilled = s.filled || 0;
-              const newAssignee = s.assignee ? `${s.assignee}|${JSON.stringify(user)}` : JSON.stringify(user);
-              return { ...s, filled: currentFilled + 1, assignee: newAssignee } 
+              const assigneesArray = parseAssignees(s.assignee);
+              assigneesArray.push(user);
+              const newAssigneeString = assigneesArray.map(p => p.isLegacy ? p.name : JSON.stringify(p)).join('|');
+              return { ...s, filled: assigneesArray.length, assignee: newAssigneeString } 
           }
           return s;
       })
@@ -561,18 +560,6 @@ export default function RaceDetail() {
       acc[groupName].push(slot);
       return acc;
   }, {});
-
-  const parseAssignees = (assigneeString) => {
-      if (!assigneeString) return [];
-      const rawAssignees = assigneeString.split('|');
-      return rawAssignees.map(item => {
-          try {
-              return JSON.parse(item); 
-          } catch (e) {
-              return { id: item.trim(), name: item.trim(), timestamp: '舊資料匯入', isLegacy: true };
-          }
-      });
-  }
 
   const renderRoleBadge = (roleTag) => {
       if (!roleTag) return null;
@@ -678,7 +665,7 @@ export default function RaceDetail() {
                                                       {slot.genderLimit === 'F' && <span className="bg-pink-50 text-pink-600 text-[10px] px-2.5 py-1 rounded-full border border-pink-200 font-black tracking-widest">限定女性</span>}
                                                   </div>
                                                   
-                                                  {assignees.length > 0 && (
+                                                  {assignees.length > 0 && filledCount > 0 && (
                                                       <div className="mt-4">
                                                           <div className="text-xs font-bold text-slate-500 mb-2 flex items-center gap-1">
                                                               <CheckCircle size={14} className="text-green-500"/> 已報名名單:
@@ -750,9 +737,12 @@ export default function RaceDetail() {
                           ) : (
                               waitlist.map((user, idx) => {
                                   const targetSlot = activeRace.slots.find(s => s.id === user.slot);
+                                  // 🌟 修正：我標籤的即時動態運算
+                                  const isMe = currentUser && (user.id === currentUser.id || user.name === currentUser.full_name);
+                                  
                                   return (
                                   <div key={user.id} className={`flex flex-col sm:flex-row sm:items-center justify-between p-5 rounded-2xl border transition-all gap-4 
-                                      ${user.isMe ? 'bg-amber-50 border-amber-300 shadow-md ring-4 ring-amber-500/10' : 'bg-white border-slate-200 hover:bg-slate-50 hover:shadow-md'}`}>
+                                      ${isMe ? 'bg-amber-50 border-amber-300 shadow-md ring-4 ring-amber-500/10' : 'bg-white border-slate-200 hover:bg-slate-50 hover:shadow-md'}`}>
                                       
                                       <div className="flex items-start gap-4 w-full sm:w-auto">
                                           <div className={`w-12 h-12 shrink-0 rounded-full flex items-center justify-center font-black text-xl shadow-inner border-2 border-white
@@ -765,7 +755,7 @@ export default function RaceDetail() {
                                           <div className="flex-1 min-w-0 pt-0.5">
                                               <div className="font-black text-slate-800 flex flex-wrap items-center gap-2 text-lg mb-1">
                                                   <span className="truncate">{user.name}</span>
-                                                  {user.isMe && <span className="text-[10px] bg-amber-200 text-amber-900 px-2 py-0.5 rounded-md border border-amber-400 shrink-0 font-bold shadow-sm">我</span>}
+                                                  {isMe && <span className="text-[10px] bg-amber-200 text-amber-900 px-2 py-0.5 rounded-md border border-amber-400 shrink-0 font-bold shadow-sm">我</span>}
                                                   {user.isVip && <span className="flex items-center text-[10px] bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded font-black shrink-0"><Crown size={12} className="mr-1"/> VIP</span>}
                                               </div>
                                               
