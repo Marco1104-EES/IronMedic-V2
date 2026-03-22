@@ -4,7 +4,6 @@ import { supabase } from '../supabaseClient'
 import * as XLSX from 'xlsx' 
 import { Search, Trash2, Edit, User, X, Shield, CheckSquare, Square, FileSpreadsheet, Upload, Download, Save, AlertCircle, Settings, ExternalLink, Zap, Crown, Flame, Cloud, Loader2, Ban, ShieldAlert, ShoppingCart, PlusCircle, ArrowUpDown, ChevronUp, ChevronDown, Users, Award, CheckCircle, XCircle, HeartPulse, Activity, UserCheck } from 'lucide-react'
 
-// 微型 AI 字典：將中文通知翻譯成系統欄位 Key
 const FIELD_TRANSLATION_MAP = {
     '姓名': 'full_name',
     '英文姓名': 'english_name',
@@ -26,7 +25,6 @@ const FIELD_TRANSLATION_MAP = {
     '緊急電話': 'emergency_phone'
 };
 
-// 終極防跳動解法：獨立在外的 FieldEditor 元件
 const FieldEditor = ({ label, name, type = "text", options = [], value, onChange, isHighlighted }) => {
     const [localValue, setLocalValue] = useState(value || '');
 
@@ -206,6 +204,7 @@ export default function MemberCRM() {
       if (sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc'
       setSortConfig({ key, direction })
   }
+  
   const sortedMembers = useMemo(() => {
       if (!sortConfig.key) return members
       return [...members].sort((a, b) => {
@@ -250,14 +249,29 @@ export default function MemberCRM() {
       return score
   }
 
+  // 🌟 修復點：廢除模糊積分判定，改用絕對欄位對應，並支援多標籤顯示
   const renderPriorityIcon = (m) => {
-      const score = getPriorityScore(m)
-      if (score >= 9000) return <span className="flex items-center text-amber-500 font-black bg-amber-50 px-2 py-1 rounded"><Crown size={16} className="mr-1"/> VIP</span>
-      if (score >= 40) return <span className="flex items-center text-red-500 font-bold bg-red-50 px-2 py-1 rounded"><Flame size={16} className="mr-1"/> 帶隊官</span>
-      if (score >= 30) return <span className="flex items-center text-emerald-500 font-bold bg-emerald-50 px-2 py-1 rounded"><Activity size={16} className="mr-1"/> 新人</span>
-      if (score >= 20) return <span className="flex items-center text-blue-500 font-bold bg-blue-50 px-2 py-1 rounded"><Zap size={16} className="mr-1"/> 訓練</span>
-      if (score >= 10) return <span className="flex items-center text-slate-500 font-bold bg-slate-50 px-2 py-1 rounded"><CheckCircle size={16} className="mr-1"/> 當屆</span>
-      return <span className="flex items-center text-slate-400"><Cloud size={16} className="mr-1"/> 一般</span>
+      const tags = [];
+      if (m.is_vip === 'Y') {
+          tags.push(<span key="vip" className="flex items-center text-[10px] text-amber-600 font-black bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap"><Crown size={12} className="mr-1"/> VIP</span>);
+      }
+      if (m.is_team_leader === 'Y') {
+          tags.push(<span key="leader" className="flex items-center text-[10px] text-red-600 font-black bg-red-50 border border-red-200 px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap"><Flame size={12} className="mr-1"/> 帶隊官</span>);
+      }
+      if (m.is_new_member === 'Y') {
+          tags.push(<span key="newbie" className="flex items-center text-[10px] text-emerald-600 font-bold bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap"><Activity size={12} className="mr-1"/> 新人</span>);
+      }
+      if (m.training_status === 'Y') {
+          tags.push(<span key="training" className="flex items-center text-[10px] text-blue-600 font-bold bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap"><Zap size={12} className="mr-1"/> 訓練</span>);
+      }
+      if (m.is_current_member === 'Y' && tags.length === 0) {
+          tags.push(<span key="current" className="flex items-center text-[10px] text-slate-500 font-bold bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded whitespace-nowrap"><CheckCircle size={12} className="mr-1"/> 當屆</span>);
+      }
+      if (tags.length === 0) {
+          tags.push(<span key="normal" className="flex items-center text-[10px] text-slate-400 whitespace-nowrap"><Cloud size={12} className="mr-1"/> 一般</span>);
+      }
+
+      return <div className="flex flex-wrap items-center gap-1.5">{tags}</div>;
   }
 
   const addToCart = () => {
@@ -471,16 +485,14 @@ export default function MemberCRM() {
           </div>
       )}
 
-      {/* 資料表格 🌟 升級緊湊與左側凍結 */}
+      {/* 資料表格 */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden overflow-x-auto relative">
          <table className="w-full text-left whitespace-nowrap">
             <thead className="bg-slate-50 border-b border-slate-200 text-xs uppercase text-slate-500 font-bold cursor-pointer select-none">
                 <tr>
-                    {/* 🌟 凍結：核取方塊 */}
                     <th className="px-4 py-2.5 w-12 text-center sticky left-0 z-20 bg-slate-50 shadow-[1px_0_0_#e2e8f0]">
                         <button onClick={toggleSelectAll}><CheckSquare size={18}/></button>
                     </th>
-                    {/* 🌟 凍結：管理作業移至左側 */}
                     <th className="px-4 py-2.5 w-24 text-center sticky left-[48px] z-20 bg-slate-50 shadow-[2px_0_5px_rgba(0,0,0,0.06)]">
                         管理作業
                     </th>
@@ -507,18 +519,15 @@ export default function MemberCRM() {
                     const isInCart = exportCart.has(member.id)
                     const isBlacklisted = member.is_blacklisted === 'Y'
 
-                    // 計算列背景色，以套用給 sticky cells
                     const rowBgClass = isBlacklisted ? 'bg-slate-50 opacity-60 hover:opacity-100' : isSelected ? 'bg-blue-50' : isInCart ? 'bg-green-50/50' : 'bg-white hover:bg-slate-50';
                     const stickyBgClass = isBlacklisted ? 'bg-slate-50' : isSelected ? 'bg-blue-50' : isInCart ? 'bg-green-50' : 'bg-white group-hover:bg-slate-50';
 
                     return (
                     <tr key={member.id} className={`group transition-colors ${rowBgClass}`}>
-                         {/* 🌟 凍結：核取方塊 */}
                          <td className={`px-4 py-2.5 text-center sticky left-0 z-10 shadow-[1px_0_0_#e2e8f0] transition-colors ${stickyBgClass}`}>
                              <button onClick={() => toggleSelection(member.id)}><CheckSquare size={20} className={isSelected ? 'text-blue-600' : 'text-slate-300 hover:text-blue-400'}/></button>
                          </td>
                          
-                         {/* 🌟 凍結：管理作業 (編輯/刪除) */}
                          <td className={`px-4 py-2.5 text-center sticky left-[48px] z-10 shadow-[2px_0_5px_rgba(0,0,0,0.04)] transition-colors ${stickyBgClass}`}>
                              <div className="flex justify-center gap-2">
                                  <button onClick={() => handleEditClick(member)} className="p-1.5 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors border border-transparent hover:border-blue-200 shadow-sm bg-white/80" title="編輯會員紀錄"><Edit size={16}/></button>
@@ -554,14 +563,6 @@ export default function MemberCRM() {
                                  <>
                                      <div className="mb-1">{renderPriorityIcon(member)}</div>
                                      <div className="flex gap-2 items-center mt-1 flex-wrap">
-                                         {member.is_current_member === 'Y' ? (
-                                             <span className="text-[10px] text-green-700 bg-green-100 px-1.5 py-0.5 rounded flex items-center gap-0.5 font-bold"><CheckCircle size={10}/>當屆</span>
-                                         ) : (
-                                             <span className="text-[10px] text-slate-500 bg-slate-200 px-1.5 py-0.5 rounded flex items-center gap-0.5 font-medium"><XCircle size={10}/>非當屆</span>
-                                         )}
-                                         {member.training_status === 'Y' && (
-                                             <span className="text-[10px] text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded flex items-center gap-0.5 font-bold"><Activity size={10}/>訓練</span>
-                                         )}
                                          <span className="text-[10px] font-bold text-slate-500 bg-white border border-slate-200 px-1.5 py-0.5 rounded">
                                              {member.role === 'VERIFIED_MEDIC' ? '醫護鐵人' : member.role === 'USER' ? '一般會員' : member.role}
                                          </span>
@@ -583,7 +584,6 @@ export default function MemberCRM() {
                              <div className="text-[10px] text-slate-400 truncate w-40 mt-1" title={member.address}>{member.address || '無聯絡地址'}</div>
                          </td>}
 
-                         {/* Admin note 可以允許換行，避免太長 */}
                          {columnGroups.group4_ext && <td className="px-4 py-2.5 text-xs text-purple-600 font-medium whitespace-normal min-w-[200px]">
                              <div className="bg-purple-50 p-2 rounded-lg line-clamp-2" title={member.admin_note}>{member.admin_note || '無註記資訊'}</div>
                          </td>}
