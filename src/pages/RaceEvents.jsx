@@ -33,6 +33,9 @@ export default function RaceEvents() {
   const notifChannelRef = useRef(null)
   const adminMenuRef = useRef(null)
 
+  // 🌟 全域雙語權限判定陣列
+  const ADMIN_ROLES = ['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN', '賽事總監', '系統管理員', '管理員'];
+
   useEffect(() => {
     const cachedRaces = localStorage.getItem('iron_medic_races_cache');
     if (cachedRaces) {
@@ -46,7 +49,8 @@ export default function RaceEvents() {
     setupRealtimePresence()
     
     const role = localStorage.getItem('iron_medic_user_role') || 'USER';
-    if (['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN'].includes(role)) {
+    
+    if (ADMIN_ROLES.some(r => role.toUpperCase().includes(r))) {
         checkServerHealth();
         const healthInterval = setInterval(checkServerHealth, 300000);
         return () => clearInterval(healthInterval);
@@ -158,7 +162,7 @@ export default function RaceEvents() {
           try {
               const { data: profile } = await supabase.from('profiles').select('id, role, full_name, is_new_member, is_current_member, license_expiry, newbie_passes, total_races').eq('email', user.email).maybeSingle()
               if (profile) {
-                  const role = profile.role ? profile.role.toUpperCase() : 'USER';
+                  const role = profile.role ? profile.role.toUpperCase().trim() : 'USER';
                   setUserRole(role);
                   setCurrentUserProfile(profile); 
                   localStorage.setItem('iron_medic_user_role', role); 
@@ -244,9 +248,15 @@ export default function RaceEvents() {
       }
   }
 
+  // 🌟 修復：雙語權限綜合判定
+  const isSuperAdmin = ADMIN_ROLES.some(r => userRole.toUpperCase().includes(r));
+
+  // 🌟 修復點：找回遺失的未讀通知計算變數
+  const unreadCountReal = notifications.filter(n => !(n.isRead || n.is_read)).length;
+
   const showWarning = useMemo(() => {
       if (!currentUserProfile) return null;
-      if (userRole === 'SUPER_ADMIN' || userRole === 'TOURNAMENT_DIRECTOR') return null; 
+      if (isSuperAdmin) return null; 
       
       if (currentUserProfile.is_current_member !== 'Y') {
           return { type: 'danger', title: '尚未開通當屆身分', msg: '您目前為非當屆會員，無法報名賽事。' };
@@ -270,7 +280,7 @@ export default function RaceEvents() {
       }
 
       return null;
-  }, [currentUserProfile, userRole]);
+  }, [currentUserProfile, isSuperAdmin]);
 
   const renderStatusBadge = (status, isHot, isFull, isPast) => {
     if (isPast) return <div className="absolute top-3 left-3 md:top-4 md:left-4 flex gap-2"><span className="bg-slate-500/90 backdrop-blur text-white text-[10px] md:text-xs font-black px-2.5 py-1 md:px-3 rounded-full shadow-md flex items-center gap-1"><CheckCircle size={12} /> 賽事已結束</span></div>
@@ -322,7 +332,6 @@ export default function RaceEvents() {
 
   const getInitial = (name) => name ? name.replace(/[^a-zA-Z\u4e00-\u9fa5]/g, '').charAt(0) || '?' : '?'
 
-  // 🌟 動態歸類過濾器 (核心修改：過期與結案賽事強制導流到 SUBMITTED 分類)
   const filteredRaces = races.filter(race => {
       if (!race.date) return false;
       const today = new Date();
@@ -335,7 +344,6 @@ export default function RaceEvents() {
       else if (timeFilter === 'PAST') matchTime = raceYear < CURRENT_YEAR;
       else if (timeFilter === 'FUTURE') matchTime = raceYear > CURRENT_YEAR;
 
-      // 只要是過期賽事，或是狀態為已完賽/取消/關閉，一律將「系統視覺狀態」視為 SUBMITTED (已送名單/其他結案)
       const isPastRace = raceDate < today || ['COMPLETED', 'CANCELLED', 'CLOSED'].includes(race.status);
       let effectiveStatus = race.status;
       if (isPastRace) {
@@ -358,11 +366,6 @@ export default function RaceEvents() {
       return null;
   }
 
-  const unreadCountReal = notifications.filter(n => !(n.isRead || n.is_read)).length;
-
-  const isSuperAdmin = ['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN'].includes(userRole);
-
-  // 🌟 動態統計卡片修正：確保過期/結案賽事的數字正確灌入 SUBMITTED
   const raceStats = useMemo(() => {
     let total = races.length;
     let currentYearCount = 0;
@@ -416,8 +419,7 @@ export default function RaceEvents() {
       return { phase: 2, label: '全面開放' }; 
   }
 
-  const isNewbieUser = !['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN'].includes(userRole) && 
-                       (currentUserProfile?.is_new_member === 'Y' || currentUserProfile?.total_races < 2);
+  const isNewbieUser = !isSuperAdmin && (currentUserProfile?.is_new_member === 'Y' || currentUserProfile?.total_races < 2);
   const newbiePassesLeft = currentUserProfile?.newbie_passes ?? 3;
 
   return (
@@ -530,7 +532,7 @@ export default function RaceEvents() {
               )}
 
               {isNewbieUser && newbiePassesLeft > 0 && (
-                  <div className="bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-2xl p-4 md:p-5 shadow-xl shadow-emerald-500/20 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-fade-in-down border border-emerald-400/50">
+                  <div className="bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-[2rem] p-4 md:p-5 shadow-xl shadow-emerald-500/20 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-fade-in-down border border-emerald-400/50">
                       <div className="flex items-center gap-3">
                           <div className="bg-white/20 p-2.5 rounded-xl backdrop-blur-sm shrink-0">
                               <Sprout size={24} className="text-emerald-50 drop-shadow-sm" />
@@ -544,7 +546,7 @@ export default function RaceEvents() {
                               </p>
                           </div>
                       </div>
-                      <button onClick={() => { setStatusFilter('OPEN'); setTimeFilter('CURRENT_YEAR'); }} className="shrink-0 bg-white text-emerald-600 hover:bg-emerald-50 px-5 py-2.5 rounded-xl font-black text-sm transition-colors shadow-sm active:scale-95 w-full sm:w-auto border border-emerald-100">
+                      <button onClick={() => { setStatusFilter('OPEN'); setTimeFilter('CURRENT_YEAR'); }} className="shrink-0 bg-white text-emerald-600 hover:bg-emerald-50 px-5 py-2.5 rounded-xl font-black text-sm transition-colors shadow-sm active:scale-95 w-full sm:w-auto text-center border-b-2 border-emerald-200">
                           立即尋找招募賽事
                       </button>
                   </div>
@@ -556,8 +558,6 @@ export default function RaceEvents() {
                   <button onClick={() => setStatusFilter('ALL')} className={`shrink-0 px-4 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all whitespace-nowrap snap-start ${statusFilter === 'ALL' ? 'bg-slate-800 text-white shadow-md' : 'text-slate-500 hover:bg-slate-100 bg-slate-50/50'}`}>全部賽事</button>
                   <button onClick={() => setStatusFilter('OPEN')} className={`shrink-0 px-4 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all whitespace-nowrap flex items-center gap-1.5 snap-start ${statusFilter === 'OPEN' ? 'bg-green-500 text-white shadow-md shadow-green-500/20' : 'text-slate-500 hover:bg-slate-100 bg-slate-50/50'}`}><Activity size={14} className="hidden sm:block"/> 招募中</button>
                   <button onClick={() => setStatusFilter('NEGOTIATING')} className={`shrink-0 px-4 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all whitespace-nowrap flex items-center gap-1.5 snap-start ${statusFilter === 'NEGOTIATING' ? 'bg-amber-500 text-white shadow-md shadow-amber-500/20' : 'text-slate-500 hover:bg-slate-100 bg-slate-50/50'}`}><Handshake size={14} className="hidden sm:block"/> 洽談中</button>
-                  
-                  {/* 🌟 修改點 1：按鈕文字改為「已送名單/其他結案」 */}
                   <button onClick={() => setStatusFilter('SUBMITTED')} className={`shrink-0 px-4 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all whitespace-nowrap flex items-center gap-1.5 snap-start ${statusFilter === 'SUBMITTED' ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 hover:bg-slate-100 bg-slate-50/50'}`}><Send size={14} className="hidden sm:block"/> 已送名單/其他結案</button>
               </div>
 
@@ -597,10 +597,7 @@ export default function RaceEvents() {
                           <div className="flex flex-col gap-2">
                               <div className="flex justify-between items-center text-sm"><span className="text-green-600 font-bold flex items-center gap-1"><Activity size={12}/> 招募中</span><span className="font-black text-green-700">{raceStats.openCount}</span></div>
                               <div className="flex justify-between items-center text-sm"><span className="text-amber-600 font-bold flex items-center gap-1"><Handshake size={12}/> 洽談中</span><span className="font-black text-amber-700">{raceStats.negotiatingCount}</span></div>
-                              
-                              {/* 🌟 修改點 2：統計文字改為「已送名單/其他結案」 */}
                               <div className="flex justify-between items-center text-sm"><span className="text-slate-600 font-bold flex items-center gap-1"><Send size={12}/> 已送名單/其他結案</span><span className="font-black text-slate-800">{raceStats.submittedCount}</span></div>
-                              
                               <div className="flex justify-between items-center text-sm"><span className="text-slate-400 font-bold flex items-center gap-1"><Timer size={12}/> 預備中</span><span className="font-black text-slate-500">{raceStats.upcomingCount}</span></div>
                           </div>
                       </div>
@@ -760,7 +757,7 @@ export default function RaceEvents() {
                       <button onClick={() => setNotifTab('personal')} className={`flex-1 pb-3 text-sm font-bold border-b-2 transition-colors ${notifTab === 'personal' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>個人提醒</button>
                   </div>
                   
-                  {notifTab === 'system' && userRole === 'SUPER_ADMIN' && (
+                  {notifTab === 'system' && ['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN', '賽事總監', '系統管理員', '管理員'].some(r => userRole.toUpperCase().includes(r)) && (
                       <div className="px-4 pt-4 shrink-0">
                           <div className="bg-red-50/80 border border-red-200 rounded-xl p-3.5 flex gap-3 shadow-sm">
                               <AlertTriangle size={18} className="text-red-500 shrink-0 mt-0.5"/>

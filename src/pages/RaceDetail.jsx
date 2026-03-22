@@ -34,8 +34,11 @@ export default function RaceDetail() {
               const { data: profile } = await supabase.from('profiles').select('*').eq('email', user.email).maybeSingle()
               if (profile) {
                   fetchedUser = { ...profile, auth_user_id: user.id };
-                  const role = profile.role?.toUpperCase() || 'USER';
-                  if (role === 'SUPER_ADMIN' || role === 'TOURNAMENT_DIRECTOR') {
+                  
+                  // 🌟 修復：去除空白與雙語權限兼容判定 God Mode
+                  const rawRole = profile.role ? profile.role.toUpperCase().trim() : 'USER';
+                  const adminRoles = ['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN', '賽事總監', '系統管理員', '管理員'];
+                  if (adminRoles.some(r => rawRole.includes(r))) {
                       godModeCheck = true;
                   }
               }
@@ -88,7 +91,6 @@ export default function RaceDetail() {
       return 2; 
   }
 
-  // 🌟 時序封印機制核心
   const today = new Date();
   today.setHours(0,0,0,0);
   const isPastRace = activeRace ? new Date(activeRace.date) < today : false;
@@ -117,7 +119,6 @@ export default function RaceDetail() {
       const phase = getRegistrationPhase(activeRace.openTime);
       const userTier = getUserTier(currentUser);
       
-      // 🌟 修復點：嚴謹的空值防呆 (??) 取代原本的 (!== undefined)
       const newbiePasses = currentUser.newbie_passes ?? 3;
 
       if (isPastRace) {
@@ -246,7 +247,6 @@ export default function RaceDetail() {
       };
 
       let willBurnNewbiePass = false;
-      // 🌟 修復點：嚴謹的空值防呆 (??) 取代原本的 (!== undefined)
       let newbiePassesLeft = currentUser.newbie_passes ?? 3;
       
       if (phase === 1 && userTier === 3 && !isGodMode) {
