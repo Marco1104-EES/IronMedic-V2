@@ -34,6 +34,17 @@ const EditInputRow = ({ label, name, type = "text", options = [], formData, hand
     </div>
 )
 
+// 🌟 欄位中文翻譯對照表
+const FIELD_NAMES_MAP = {
+    full_name: '中文姓名', english_name: '英文姓名', national_id: '身分證字號',
+    gender: '生理性別', birthday: '出生年月日', phone: '手機號碼',
+    contact_email: '聯絡信箱', address: '通訊地址', emergency_name: '緊急聯絡人',
+    emergency_relation: '關係', emergency_phone: '緊急電話',
+    medical_license: '醫護證照種類', license_expiry: '證照有效期限',
+    blood_type: '血型', shirt_size: '賽事衣服尺寸', medical_history: '特殊病史註記',
+    transport_pref: '交通需求', stay_pref: '住宿安排'
+};
+
 export default function DigitalID() {
   const navigate = useNavigate()
   const [showQR, setShowQR] = useState(false)
@@ -62,19 +73,41 @@ export default function DigitalID() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const setupRealtimeNotifications = (userId) => {
-      const channel = supabase.channel('digital-id-notifs')
-          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'user_notifications', filter: `user_id=eq.${userId}` }, (payload) => {
-              setNotifications(prev => [{...payload.new, date: payload.new.created_at}, ...prev]);
-          })
-          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'user_notifications', filter: `user_id=eq.${userId}` }, (payload) => {
-              setNotifications(prev => prev.map(n => n.id === payload.new.id ? {...payload.new, date: payload.new.created_at} : n));
-          })
-          .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'user_notifications', filter: `user_id=eq.${userId}` }, (payload) => {
-              setNotifications(prev => prev.filter(n => n.id !== payload.old.id));
-          })
-          .subscribe()
-      notifChannelRef.current = channel;
+  // 🌟 雙引擎抓取個人與全域通報
+  const fetchNotifs = async () => {
+      try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (!user) return;
+
+          const { data: pData } = await supabase.from('user_notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(50);
+          let allNotifs = pData ? pData.map(n => ({...n, date: n.created_at})) : [];
+
+          const { data: prof } = await supabase.from('profiles').select('role').eq('email', user.email).maybeSingle();
+          const isAdmin = prof && ['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN', '管理員', '總監'].some(r => (prof.role || '').toUpperCase().includes(r));
+
+          if (isAdmin) {
+              const { data: aData } = await supabase.from('admin_notifications').select('*').order('created_at', { ascending: false }).limit(50);
+              if (aData) {
+                  const adminMapped = aData.map(n => ({
+                      id: `admin_${n.id}`, 
+                      user_id: user.id, 
+                      tab: 'system',
+                      category: 'bell',
+                      message: n.message,
+                      date: n.created_at,
+                      is_read: false 
+                  }));
+                  allNotifs = [...allNotifs, ...adminMapped].sort((a,b) => new Date(b.date) - new Date(a.date));
+              }
+          }
+          setNotifications(allNotifs);
+
+          // Realtime 監聽
+          const channel = supabase.channel('digital-id-notifs')
+              .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'user_notifications', filter: `user_id=eq.${user.id}` }, () => { fetchNotifs(); })
+              .subscribe()
+          notifChannelRef.current = channel;
+      } catch (e) { console.log('通知載入異常', e) }
   }
 
   const fetchData = async () => {
@@ -96,26 +129,8 @@ export default function DigitalID() {
         const { data, error } = await supabase.from('profiles').select('*').eq('email', user.email.toLowerCase()).maybeSingle()
         if (data) {
             currentUserProfile = { ...currentUserProfile, ...data }
-            console.log("📥 成功載入使用者資料: ", data); // 測試用：可以在瀏覽器 F12 看到到底回傳了什麼
         }
-
-        const eightMonthsAgo = new Date();
-        eightMonthsAgo.setMonth(eightMonthsAgo.getMonth() - 8);
-
-        try {
-            const { data: notifs } = await supabase
-                .from('user_notifications')
-                .select('*')
-                .eq('user_id', user.id)
-                .gte('created_at', eightMonthsAgo.toISOString())
-                .order('created_at', { ascending: false })
-            
-            if (notifs) {
-                const mappedNotifs = notifs.map(n => ({ ...n, date: n.created_at }))
-                setNotifications(mappedNotifs)
-            }
-            setupRealtimeNotifications(user.id);
-        } catch(e) { console.log("user_notifications 表格可能尚未建立", e) }
+        await fetchNotifs();
       } 
       
       setProfile(currentUserProfile)
@@ -205,8 +220,15 @@ export default function DigitalID() {
 
           let updatedSlots = currentRace.slots_data || [];
           let updatedWaitlist = currentRace.waitlist_data || [];
+          let usedPass = false; 
 
-          updatedWaitlist = updatedWaitlist.filter(w => w.id !== profile.id && w.name !== profile.full_name);
+          updatedWaitlist = updatedWaitlist.filter(w => {
+              if (w.id === profile.id || w.name === profile.full_name) {
+                  if (w.usedPass) usedPass = true;
+                  return false;
+              }
+              return true;
+          });
 
           updatedSlots = updatedSlots.map(s => {
               if (s.assignee) {
@@ -215,7 +237,13 @@ export default function DigitalID() {
                   });
                   
                   const initialLength = assigneesArray.length;
-                  const newAssigneesArray = assigneesArray.filter(p => p.id !== profile.id && p.name !== profile.full_name);
+                  const newAssigneesArray = assigneesArray.filter(p => {
+                      if (p.id === profile.id || p.name === profile.full_name) {
+                          if (p.usedPass) usedPass = true;
+                          return false;
+                      }
+                      return true;
+                  });
                   
                   if (newAssigneesArray.length < initialLength) {
                       const newAssigneeString = newAssigneesArray.map(p => p.isLegacy ? p.name : JSON.stringify(p)).join('|');
@@ -230,25 +258,24 @@ export default function DigitalID() {
 
           setMyRaces(myRaces.filter(r => r.id !== raceId))
           
+          if (usedPass) {
+              const restoredPasses = Math.min(3, (profile.newbie_passes ?? 3) + 1);
+              await supabase.from('profiles').update({ newbie_passes: restoredPasses }).eq('id', profile.id);
+              setProfile(prev => ({ ...prev, newbie_passes: restoredPasses }));
+          }
+
           try {
-              // 確保 profile.id 有效才寫入通知，避免外鍵報錯
               if (profile && profile.id && profile.id !== 'unknown') {
                   const { error: notifError } = await supabase.from('user_notifications').insert({
                       user_id: profile.id,
                       tab: 'personal',
                       category: 'race',
-                      message: `您已成功取消報名【${raceName}】，名額已釋出。`,
+                      message: `您已成功取消報名【${raceName}】，名額已釋出。${usedPass ? '(已退還 1 次新人優先報名權利)' : ''}`,
                       is_read: false
                   })
-                  if (notifError) {
-                      console.error("Supabase 通知寫入失敗:", notifError);
-                  }
-              } else {
-                  console.warn("會員 ID 未知，略過通知寫入。");
+                  if (notifError) console.error("通知寫入失敗:", notifError);
               }
-          } catch(e) { 
-              console.error("發送退賽通知異常", e);
-          }
+          } catch(e) { console.error("發送退賽通知異常", e); }
 
           alert("✅ 退賽成功，名額已釋出！")
 
@@ -270,46 +297,89 @@ export default function DigitalID() {
       setFormData(prev => ({ ...prev, [name]: value }))
   }
 
+  // 🌟 智能差異比對引擎：精準產生異動日誌字串，包含換行符號
+  const generateDiffMessage = (oldData, newData, section) => {
+      let changes = [];
+      const keysToCheck = section === 'basic' 
+          ? ['full_name', 'english_name', 'national_id', 'gender', 'birthday', 'phone', 'contact_email', 'address', 'emergency_name', 'emergency_relation', 'emergency_phone']
+          : ['medical_license', 'license_expiry', 'blood_type', 'shirt_size', 'medical_history', 'transport_pref', 'stay_pref'];
+      
+      keysToCheck.forEach(key => {
+          const oldVal = String(oldData[key] || '').trim();
+          const newVal = String(newData[key] || '').trim();
+          if (oldVal !== newVal) {
+              const displayOld = oldVal === '' ? '(空)' : oldVal;
+              const displayNew = newVal === '' ? '(空)' : newVal;
+              changes.push(`[${FIELD_NAMES_MAP[key] || key}] ${displayOld} ➔ ${displayNew}`);
+          }
+      });
+      return changes.length > 0 ? `\n\n📝 異動明細：\n${changes.join('\n')}` : '';
+  };
+
   const handleSaveChanges = async (section) => {
       setSaving(true)
       try {
           const updatePayload = { ...formData }
-          let notifyMsg = ''
           let sectionName = section === 'basic' ? '核心基本資料' : '醫護與裝備';
 
-          if (section === 'basic') {
-              updatePayload.basic_edit_count = (profile.basic_edit_count || 0) + 1;
-              notifyMsg = `人員 [${profile.full_name}] 修改了「核心基本資料」`;
-          } else if (section === 'medical') {
-              updatePayload.med_edit_count = (profile.med_edit_count || 0) + 1;
-              notifyMsg = `人員 [${profile.full_name}] 修改了「醫護與裝備」`;
-          }
+          // 產生差異比對字串
+          const diffString = generateDiffMessage(profile, formData, section);
 
           const { data: { user } } = await supabase.auth.getUser()
+          
           if (user && user.email) { 
+              // 🌟 【給管理員的機密通知】加上 [🔒 僅管理員可見] 讓使用者安心
+              let adminNotifyMsg = `[🔒 僅管理員可見] 人員 [${profile.full_name}] (ID: ${user.id}) 申請修改「${sectionName}」${diffString}`;
+              if (!diffString) adminNotifyMsg += `\n(系統未偵測到實質欄位變更)`;
+
+              // 🌟 【給會員本人的通知】也附上明細讓他自己留底
+              let personalNotifyMsg = `您的「${sectionName}」已成功更新並送出審核。${diffString ? diffString : ''}`;
+
+              if (section === 'basic') updatePayload.basic_edit_count = (profile.basic_edit_count || 0) + 1;
+              else if (section === 'medical') updatePayload.med_edit_count = (profile.med_edit_count || 0) + 1;
+
               const { basic_edit_count, med_edit_count, ...safeDbPayload } = updatePayload;
 
               const { error: upsertError } = await supabase.from('profiles').upsert({ ...safeDbPayload, email: user.email.toLowerCase() }, { onConflict: 'email' })
               if (upsertError) throw upsertError;
 
               try {
-                  await supabase.from('admin_notifications').insert({
-                      user_id: user.id, 
-                      user_name: profile.full_name || safeDbPayload.full_name,
-                      type: 'PROFILE_UPDATE', 
-                      message: notifyMsg
-                  })
+                  // 1. 強制派發給所有管理員的系統通報
+                  const { data: adminProfiles } = await supabase.from('profiles').select('id, role');
+                  const admins = (adminProfiles || []).filter(p => {
+                      const r = (p.role || '').toUpperCase();
+                      return ['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN', '賽事總監', '系統管理員', '管理員'].some(k => r.includes(k));
+                  });
                   
-                  const { error: notifError } = await supabase.from('user_notifications').insert({
+                  if (admins && admins.length > 0) {
+                      const adminNotifs = admins.map(a => ({
+                          user_id: a.id,
+                          tab: 'system',
+                          category: 'bell',
+                          message: adminNotifyMsg,
+                          is_read: false
+                      }));
+                      await supabase.from('user_notifications').insert(adminNotifs);
+                  }
+                  
+                  // 同時寫入傳統的 admin_notifications 備查 (相容後台系統狀態牆)
+                  try {
+                      await supabase.from('admin_notifications').insert({
+                          user_id: user.id, 
+                          user_name: profile.full_name || safeDbPayload.full_name,
+                          type: 'PROFILE_UPDATE', 
+                          message: adminNotifyMsg
+                      });
+                  } catch (e) { /* 若表不存在則略過 */ }
+
+                  // 2. 給會員本人專屬的成功通知 (放在「個人提醒」)
+                  await supabase.from('user_notifications').insert({
                       user_id: user.id,
                       tab: 'personal',
                       category: 'bell',
-                      message: `您的「${sectionName}」已成功更新並送出審核。`,
+                      message: personalNotifyMsg,
                       is_read: false
-                  })
-                   if (notifError) {
-                      console.error("Supabase 通知寫入失敗:", notifError);
-                  }
+                  });
               } catch (e) {
                   console.error("發送通知失敗", e)
               }
@@ -317,7 +387,7 @@ export default function DigitalID() {
 
           setProfile(updatePayload)
           setIsEditing(false)
-          alert(`✅ 資料更新成功！\n系統已發送修改通知給超級管理員。`)
+          alert(`✅ 資料更新成功！\n系統已發送詳細修改通知給超級管理員。`)
 
       } catch (error) {
           alert('儲存失敗：' + error.message)
@@ -328,7 +398,13 @@ export default function DigitalID() {
 
   const deleteNotification = async (id) => { 
       setNotifications(prev => prev.filter(n => n.id !== id)); 
-      try { await supabase.from('user_notifications').delete().eq('id', id) } catch(e){}
+      try { 
+          if (String(id).startsWith('admin_')) {
+              await supabase.from('admin_notifications').delete().eq('id', id.replace('admin_', ''));
+          } else {
+              await supabase.from('user_notifications').delete().eq('id', id);
+          }
+      } catch(e){}
   }
   
   const markAllAsRead = async () => { 
@@ -366,10 +442,8 @@ export default function DigitalID() {
   const genderTag = getGenderFromID(displayUser.national_id);
   const today = new Date();
   today.setHours(0,0,0,0);
-  // 🌟 將原來的已完賽判定 logic 保留，並塞入 Modal 中
   const pastRaces = myRaces.filter(r => new Date(r.date) < today);
   
-  // 🌟 修正點 1: 此區塊「我報名的賽事」嚴格判定僅顯示未來的賽事
   const futureRaces = myRaces.filter(r => new Date(r.date) >= today);
 
   const finishedCount = pastRaces.length;
@@ -380,7 +454,6 @@ export default function DigitalID() {
 
   const hasTrainingStatus = ['Y', 'y', 'true', true, '1', 1].includes(displayUser.training_status);
 
-  // 🌟 參賽明細判定：僅顯示過往紀錄，並按時間倒序
   const detailedRaces = [...pastRaces].sort((a,b) => new Date(b.date) - new Date(a.date));
 
   return (
@@ -394,7 +467,7 @@ export default function DigitalID() {
               </button>
               <h1 className="text-xl md:text-2xl font-black text-white tracking-widest">個人數位 ID 卡</h1>
               
-              <button onClick={() => setShowNotifPanel(true)} className="p-2.5 bg-white/10 hover:bg-white/20 rounded-full text-white backdrop-blur-sm transition-colors cursor-pointer group active:scale-95 relative">
+              <button onClick={() => { fetchNotifs(); setShowNotifPanel(true); }} className="p-2.5 bg-white/10 hover:bg-white/20 rounded-full text-white backdrop-blur-sm transition-colors cursor-pointer group active:scale-95 relative">
                   <Bell size={22} className="group-hover:animate-wiggle"/>
                   {unreadCountReal > 0 && (
                       <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-black text-white border-2 border-slate-900 shadow-sm animate-pulse">
@@ -463,7 +536,6 @@ export default function DigitalID() {
                   <h3 className="font-black text-slate-800 flex items-center gap-1.5"><Flag className="text-blue-600" size={18}/> 我報名的賽事 (當前任務)</h3>
               </div>
               <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar snap-x">
-                  {/* 🌟 修正點 1: 僅顯示未來的賽事，香川馬等歷史賽事不再顯示於此 */}
                   {futureRaces.length > 0 ? (
                       futureRaces.map(race => (
                           <div key={race.id} className="bg-white min-w-[260px] md:min-w-[300px] p-4 rounded-[1.5rem] shadow-sm border border-slate-200 hover:shadow-md transition-all snap-start flex flex-col justify-between">
@@ -532,7 +604,6 @@ export default function DigitalID() {
                   </div>
               </div>
 
-              {/* 🌟 此區塊：參賽明細，將作為歷史紀錄的 Modal 入口 */}
               <div onClick={() => handleOpenModal('system')} className="bg-white p-4 md:p-5 rounded-[1.5rem] shadow-sm border border-slate-200 cursor-pointer active:scale-95 hover:border-blue-400 transition-all flex flex-col items-center justify-center text-center gap-2 relative">
                   <div className="absolute top-3 right-3 text-slate-300"><MousePointerClick size={16} className="animate-bounce" /></div>
                   <div className="w-12 h-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mb-1"><ListOrdered size={24}/></div>
@@ -549,6 +620,7 @@ export default function DigitalID() {
           </button>
       </div>
 
+      {/* 🌟 雷達連動通知面板 */}
       {showNotifPanel && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex justify-end animate-fade-in" onClick={() => setShowNotifPanel(false)}>
               <div className="bg-slate-50 w-full sm:w-[400px] h-full flex flex-col shadow-2xl animate-slide-left" onClick={e => e.stopPropagation()}>
@@ -587,8 +659,17 @@ export default function DigitalID() {
                           notifications.filter(n => n.tab === notifTab).map(notif => {
                               const isItemRead = notif.isRead || notif.is_read;
                               return (
-                              <div key={notif.id} className={`p-4 rounded-2xl border transition-all relative group ${isItemRead ? 'bg-slate-100/50 border-slate-200 opacity-80' : 'bg-white border-blue-200 shadow-sm'}`}>
-                                  <button onClick={() => deleteNotification(notif.id)} className="absolute top-2 right-2 p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all">
+                              <div key={notif.id} 
+                                   // 🌟 雷達定位：只要點擊包含 ID 的通知，瞬間飛躍到 MemberCRM
+                                   onClick={() => {
+                                       const match = notif.message.match(/\(ID:\s*(.*?)\)/);
+                                       if (match) {
+                                           navigate(`/admin/members?view=ALL&targetId=${match[1]}`);
+                                           setShowNotifPanel(false);
+                                       }
+                                   }}
+                                   className={`p-4 rounded-2xl border transition-all relative group ${notif.message.includes('(ID:') ? 'cursor-pointer hover:border-blue-400 hover:shadow-md' : ''} ${isItemRead ? 'bg-slate-100/50 border-slate-200 opacity-80' : 'bg-white border-blue-200 shadow-sm'}`}>
+                                  <button onClick={(e) => { e.stopPropagation(); deleteNotification(notif.id); }} className="absolute top-2 right-2 p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all">
                                       <Trash2 size={14}/>
                                   </button>
                                   <div className="flex gap-3">
@@ -599,9 +680,13 @@ export default function DigitalID() {
                                           <div className="text-[10px] text-slate-400 font-medium mb-1 flex items-center gap-1">
                                               <Clock size={10}/> {new Date(notif.date).toLocaleDateString()}
                                           </div>
-                                          <p className={`text-sm leading-relaxed ${isItemRead ? 'text-slate-600' : 'text-slate-800 font-bold'}`}>
+                                          {/* 🌟 核心：套用 whitespace-pre-wrap 讓人類可讀的排版與換行生效 */}
+                                          <p className={`text-sm leading-relaxed whitespace-pre-wrap break-words ${isItemRead ? 'text-slate-600' : 'text-slate-800 font-bold'}`}>
                                               {notif.message}
                                           </p>
+                                          {notif.message.includes('(ID:') && (
+                                              <div className="mt-2 text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-1 rounded inline-block">👆 點擊前往審核異動</div>
+                                          )}
                                       </div>
                                   </div>
                               </div>
@@ -615,7 +700,7 @@ export default function DigitalID() {
       )}
 
       {activeModal && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center sm:p-4 animate-fade-in" onClick={() => !isEditing && setActiveModal(null)}>
+          <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center sm:p-4 animate-fade-in backdrop-blur-sm" onClick={() => !isEditing && setActiveModal(null)}>
               <div className="bg-white rounded-t-[2rem] sm:rounded-[2rem] shadow-2xl w-full max-w-xl flex flex-col max-h-[85vh] sm:max-h-[90vh] overflow-hidden animate-slide-up sm:animate-bounce-in" onClick={e => e.stopPropagation()}>
                   
                   <div className="w-full flex justify-center pt-3 pb-1 sm:hidden">
@@ -627,7 +712,6 @@ export default function DigitalID() {
                           {activeModal === 'stats' && <><Activity className="text-blue-600"/> 賽事參與統計</>}
                           {activeModal === 'basic' && <><User className="text-indigo-600"/> 核心基本資料</>}
                           {activeModal === 'medical' && <><HeartPulse className="text-rose-600"/> 醫護與裝備</>}
-                          {/* 🌟 修正點：參賽明細，不再共用編輯框架 */}
                           {activeModal === 'system' && <><ListOrdered className="text-amber-600"/> 參賽明細 (歷史紀錄)</>}
                       </h3>
                       {!isEditing && <button onClick={() => setActiveModal(null)} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors active:scale-95"><X size={20}/></button>}
@@ -646,7 +730,6 @@ export default function DigitalID() {
                           </div>
                       )}
 
-                      {/* 🌟 修正點 2: 參賽明細核心渲染區，僅顯示過往紀錄 */}
                       {activeModal === 'system' && (
                           <div className="space-y-3">
                               {detailedRaces.length > 0 ? detailedRaces.map(race => (
@@ -759,12 +842,10 @@ export default function DigitalID() {
                               </button>
                           </div>
                       ) : activeModal === 'system' ? (
-                          // 🌟 修正點 3: 若為參賽明細 Modal，徹底閹割編輯按鈕，僅提供關閉
                           <button onClick={() => setActiveModal(null)} className="w-full py-4 bg-slate-100 text-slate-600 font-bold rounded-xl transition-colors active:scale-95 flex justify-center items-center gap-1">
                               <X size={16}/> 關閉歷史紀錄大賽
                           </button>
                       ) : (
-                          // 其餘 Modal 保留編輯按鈕
                           <div className="flex flex-col gap-3">
                               <button onClick={() => setIsEditing(true)} className="w-full py-4 bg-slate-900 text-white font-black rounded-xl hover:bg-slate-800 shadow-lg shadow-slate-900/20 flex justify-center items-center gap-2 transition-transform active:scale-95">
                                   <Edit3 size={18}/> 開放修改
@@ -779,32 +860,6 @@ export default function DigitalID() {
           </div>
       )}
 
-      {showQR && (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[110] flex items-center justify-center p-4 animate-fade-in" onClick={() => setShowQR(false)}>
-              <div className="bg-white rounded-[2rem] p-8 md:p-10 w-full max-w-sm flex flex-col items-center animate-bounce-in shadow-2xl" onClick={e => e.stopPropagation()}>
-                  <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-4">
-                      <QrCode size={32}/>
-                  </div>
-                  <h3 className="text-xl font-black text-slate-800 mb-1">專屬報到碼</h3>
-                  <p className="text-slate-500 text-sm mb-8 text-center">請於賽事現場出示此條碼進行簽到</p>
-                  
-                  <div className="bg-white p-4 rounded-2xl shadow-inner border-2 border-slate-100 w-full aspect-square mb-6 relative">
-                      <img src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${displayUser.ironmedic_no || displayUser.full_name}`} alt="QR" className="w-full h-full object-contain" />
-                      <div className="absolute inset-0 border-4 border-blue-500/20 rounded-2xl pointer-events-none"></div>
-                  </div>
-                  
-                  <div className="text-center w-full">
-                      <div className="text-lg font-black text-slate-800 tracking-widest bg-slate-50 py-3 rounded-xl border border-slate-100">
-                          {displayUser.ironmedic_no || 'IM-XXXX-XXX'}
-                      </div>
-                  </div>
-                  
-                  <button onClick={() => setShowQR(false)} className="mt-4 w-full py-4 bg-slate-900 text-white rounded-xl font-black active:scale-95 transition-transform shadow-lg shadow-slate-900/20">
-                      關閉視窗
-                  </button>
-              </div>
-          </div>
-      )}
     </div>
   )
 }
