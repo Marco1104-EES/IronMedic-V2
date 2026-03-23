@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../supabaseClient'
-import { Database, Cpu, HardDrive, CheckCircle, AlertTriangle, Activity, ExternalLink, Loader2, RefreshCw, Cloud, Globe, FileSignature, ChevronRight, Flag, Bell, Users, Github, Bot } from 'lucide-react'
+import { Database, Cpu, HardDrive, CheckCircle, AlertTriangle, Activity, ExternalLink, Loader2, RefreshCw, Cloud, Globe, ChevronRight, Flag, Bell, Users, Github, Bot, FileText, Download } from 'lucide-react'
 
 export default function SystemStatus() {
   const [metrics, setMetrics] = useState({
@@ -8,48 +8,38 @@ export default function SystemStatus() {
     totalMembers: 0,
     totalRaces: 0,
     totalNotifications: 0,
-    latency: 0,
+    authLatency: 0,
+    dbLatency: 0,
     status: 'checking'
   })
   const [loading, setLoading] = useState(true)
   
-  const [modRequests, setModRequests] = useState([])
   const [cronJobStatus, setCronJobStatus] = useState(null)
+  const [systemLogs, setSystemLogs] = useState([]) 
+  const logsEndRef = useRef(null)
 
   useEffect(() => { 
-      // 🏎️ 引擎啟動：初始彈射起步 (只執行一次)
       fetchAllSystemData();
 
-      // 🏎️ 第三顆馬達：靜默心跳 (每 30 秒自動測量延遲與機器人，不顯示轉圈圈)
       const heartbeat = setInterval(() => {
           fetchSilentHeartbeat();
       }, 30000);
 
-      // 🏎️ 第二 & 第四顆馬達：Rimac 全時四驅 Websocket 即時雷達！
       const radarChannel = supabase.channel('rimac_system_radar')
-          // 監聽會員增減
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'profiles' }, () => {
               setMetrics(prev => ({ ...prev, totalMembers: prev.totalMembers + 1 }))
           })
           .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'profiles' }, () => {
               setMetrics(prev => ({ ...prev, totalMembers: Math.max(0, prev.totalMembers - 1) }))
           })
-          // 監聽賽事增減
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'races' }, () => {
               setMetrics(prev => ({ ...prev, totalRaces: prev.totalRaces + 1 }))
           })
           .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'races' }, () => {
               setMetrics(prev => ({ ...prev, totalRaces: Math.max(0, prev.totalRaces - 1) }))
           })
-          // 監聽全域小鈴鐺推播量
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'user_notifications' }, () => {
               setMetrics(prev => ({ ...prev, totalNotifications: prev.totalNotifications + 1 }))
-          })
-          // 監聽戰情室：即時攔截新的變更申請單！
-          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'admin_notifications' }, (payload) => {
-              if (payload.new.type === 'MODIFICATION_REQUEST') {
-                  setModRequests(prev => [payload.new, ...prev].slice(0, 5));
-              }
           })
           .subscribe();
 
@@ -60,81 +50,112 @@ export default function SystemStatus() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 🏎️ 第一顆馬達：極速並發引擎 (僅供手動刷新或初次載入使用)
-  const fetchAllSystemData = async () => {
-      setLoading(true)
-      const start = performance.now()
+  const addLog = (msg, type = 'info') => {
+      const time = new Date().toLocaleTimeString('zh-TW', { hour12: false })
+      setSystemLogs(prev => [...prev, { time, msg, type }].slice(0, 50)) 
+      setTimeout(() => logsEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100)
+  }
+
+  const measurePerformance = async () => {
+      const t0 = performance.now();
+      let authLatency = 0;
+      let dbLatency = 0;
+      let dbError = null;
 
       try {
-          const [
-              pingRes,
-              mCountRes,
-              rCountRes,
-              nCountRes,
-              notifsRes,
-              cronRes
-          ] = await Promise.all([
-              supabase.from('profiles').select('id', { count: 'exact', head: true }).limit(1),
+          await supabase.auth.getSession();
+          authLatency = Math.round(performance.now() - t0);
+      } catch(e) { authLatency = -1; }
+
+      const t1 = performance.now();
+      try {
+          const res = await supabase.from('profiles').select('id').limit(1);
+          dbLatency = Math.round(performance.now() - t1);
+          dbError = res.error;
+      } catch(e) { dbLatency = -1; dbError = e; }
+
+      return { authLatency, dbLatency, dbError };
+  }
+
+  const fetchAllSystemData = async () => {
+      setLoading(true)
+      addLog('啟動全域系統掃描...', 'info')
+
+      try {
+          const { authLatency, dbLatency, dbError } = await measurePerformance();
+          
+          const [mCountRes, rCountRes, nCountRes, cronRes] = await Promise.all([
               supabase.from('profiles').select('*', { count: 'exact', head: true }),
               supabase.from('races').select('*', { count: 'exact', head: true }),
               supabase.from('user_notifications').select('*', { count: 'exact', head: true }),
-              supabase.from('admin_notifications').select('*').order('created_at', { ascending: false }).limit(20),
               supabase.from('vw_system_cron_jobs').select('*').eq('jobname', 'auto-broadcast-job').maybeSingle()
           ]);
 
-          const end = performance.now()
-          const latency = Math.round(end - start)
+          const overallLatency = Math.max(authLatency, dbLatency);
+          let currentStatus = dbError ? 'error' : (overallLatency > 500 ? 'warning' : 'healthy');
 
           setMetrics({
               dbSizeMB: 15.5,
               totalMembers: mCountRes.count || 0,
               totalRaces: rCountRes.count || 0,
               totalNotifications: nCountRes.count || 0,
-              latency,
-              status: pingRes.error ? 'error' : (latency > 500 ? 'warning' : 'healthy')
+              authLatency,
+              dbLatency,
+              status: currentStatus
           })
 
-          if (notifsRes.data) {
-              setModRequests(notifsRes.data.filter(n => n.type === 'MODIFICATION_REQUEST').slice(0, 5))
+          if (currentStatus === 'warning') {
+              addLog(`系統稍有延遲 (Auth: ${authLatency}ms, DB: ${dbLatency}ms)`, 'warning')
+          } else if (currentStatus === 'error') {
+              addLog(`資料庫連線異常!`, 'error')
           } else {
-              setModRequests([])
+              addLog(`全域掃描完成 (Auth: ${authLatency}ms, DB: ${dbLatency}ms)`, 'success')
           }
 
-          if (cronRes.data) {
-              setCronJobStatus(cronRes.data);
-          } else {
-              if (cronRes.error) console.warn("機器人雷達讀取異常:", cronRes.error.message);
-              setCronJobStatus(null);
-          }
+          if (cronRes.data) setCronJobStatus(cronRes.data);
+          else setCronJobStatus(null);
+
       } catch (error) {
           console.error("系統監控讀取異常:", error);
           setMetrics(prev => ({ ...prev, status: 'error' }))
+          addLog(`發生未預期錯誤: ${error.message}`, 'error')
       } finally {
           setLoading(false)
       }
   }
 
-  // 🏎️ 第三顆馬達的核心：無感靜默更新延遲與機器人狀態
   const fetchSilentHeartbeat = async () => {
-      const start = performance.now()
       try {
-          const [pingRes, cronRes] = await Promise.all([
-              supabase.from('profiles').select('id').limit(1),
-              supabase.from('vw_system_cron_jobs').select('*').eq('jobname', 'auto-broadcast-job').maybeSingle()
-          ]);
+          const { authLatency, dbLatency, dbError } = await measurePerformance();
+          const cronRes = await supabase.from('vw_system_cron_jobs').select('*').eq('jobname', 'auto-broadcast-job').maybeSingle();
           
-          const latency = Math.round(performance.now() - start)
+          const overallLatency = Math.max(authLatency, dbLatency);
+          let currentStatus = dbError ? 'error' : (overallLatency > 500 ? 'warning' : 'healthy');
           
           setMetrics(prev => ({
               ...prev,
-              latency,
-              status: pingRes.error ? 'error' : (latency > 500 ? 'warning' : 'healthy')
+              authLatency,
+              dbLatency,
+              status: currentStatus
           }))
 
+          if (currentStatus === 'warning') addLog(`[心跳] 偵測到延遲 (Auth: ${authLatency}ms, DB: ${dbLatency}ms)`, 'warning')
           if (cronRes.data) setCronJobStatus(cronRes.data);
       } catch (e) {
           console.warn('靜默心跳異常', e);
       }
+  }
+
+  const handleExportLog = () => {
+      if(systemLogs.length === 0) return alert("目前沒有日誌可匯出");
+      const textContent = systemLogs.map(l => `[${l.time}] [${l.type.toUpperCase()}] ${l.msg}`).join('\n');
+      const blob = new Blob([textContent], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `System_Diagnostics_${new Date().toISOString().slice(0,10)}.txt`;
+      link.click();
+      URL.revokeObjectURL(url);
   }
 
   const getStatusColor = (status) => {
@@ -183,13 +204,19 @@ export default function SystemStatus() {
                   </div>
               </div>
 
-              <div className="p-5 rounded-2xl border border-slate-100 bg-slate-50 flex flex-col justify-center gap-2 transition-all duration-300">
-                  <div className="flex justify-between items-center text-slate-500">
-                      <span className="text-xs font-black uppercase tracking-wider">資料庫延遲</span>
-                      <Activity size={20} className={metrics.latency > 0 ? "text-blue-500 animate-pulse" : ""} />
+              {/* 🌟 微觀延遲顯示區 */}
+              <div className="p-5 rounded-2xl border border-slate-100 bg-slate-50 flex flex-col justify-center gap-1 transition-all duration-300">
+                  <div className="flex justify-between items-center text-slate-500 mb-1">
+                      <span className="text-xs font-black uppercase tracking-wider">微觀延遲 (Ping)</span>
+                      <Activity size={18} className={metrics.dbLatency > 500 ? "text-amber-500 animate-pulse" : "text-blue-500"} />
                   </div>
-                  <div className="text-2xl font-black text-slate-800 mt-1 flex items-baseline gap-1">
-                      {metrics.latency} <span className="text-sm text-slate-500 font-bold">ms</span>
+                  <div className="text-sm font-black text-slate-700 flex justify-between">
+                      <span className="opacity-70">資料庫 (DB):</span>
+                      <span className={metrics.dbLatency > 500 ? 'text-amber-600' : ''}>{metrics.dbLatency} ms</span>
+                  </div>
+                  <div className="text-sm font-black text-slate-700 flex justify-between">
+                      <span className="opacity-70">驗證層 (Auth):</span>
+                      <span className={metrics.authLatency > 500 ? 'text-amber-600' : ''}>{metrics.authLatency} ms</span>
                   </div>
               </div>
 
@@ -243,28 +270,27 @@ export default function SystemStatus() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
-              <div className="bg-amber-50/50 p-4 border-b border-amber-100 flex items-center gap-2">
-                  <div className="p-1.5 bg-amber-100 text-amber-600 rounded-lg"><FileSignature size={18}/></div>
-                  <h3 className="font-black text-amber-900">資料變更申請單</h3>
-                  <span className="ml-auto bg-amber-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm">{modRequests.length} 件待審</span>
+          {/* 🌟 取代舊版異動單，升級為：效能觀測站日誌 */}
+          <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-800 overflow-hidden flex flex-col">
+              <div className="bg-slate-800/80 p-4 border-b border-slate-700 flex items-center gap-2">
+                  <div className="p-1.5 bg-slate-700 text-blue-400 rounded-lg"><Activity size={18}/></div>
+                  <h3 className="font-black text-white">系統效能觀測站 (Diagnostics)</h3>
+                  <button onClick={handleExportLog} className="ml-auto flex items-center gap-1 hover:text-white text-slate-400 transition-colors border border-slate-600 px-2 py-1.5 rounded text-xs font-bold bg-slate-800 hover:bg-slate-700">
+                      <Download size={12}/> 匯出日誌
+                  </button>
               </div>
-              <div className="p-4 flex-1 overflow-y-auto max-h-[350px] custom-scrollbar space-y-3">
-                  {modRequests.length > 0 ? modRequests.map((req, i) => (
-                      <div key={i} className="flex flex-col gap-2 p-3 rounded-xl border border-amber-100 bg-amber-50/30 hover:bg-amber-50 transition-colors cursor-pointer group animate-fade-in">
-                          <div className="flex justify-between items-center">
-                              <span className="text-sm font-black text-slate-800">{req.user_name}</span>
-                              <ChevronRight size={14} className="text-amber-400 group-hover:translate-x-1 transition-transform"/>
-                          </div>
-                          <div className="text-xs text-slate-600 font-medium line-clamp-2">原因：{req.message}</div>
-                          <div className="text-[10px] text-slate-400 font-mono mt-0.5">{new Date(req.created_at).toLocaleDateString()}</div>
+              <div className="p-4 flex-1 overflow-y-auto max-h-[350px] custom-scrollbar font-mono text-[11px] space-y-2 bg-black">
+                  {systemLogs.length > 0 ? systemLogs.map((l, i) => (
+                      <div key={i} className={`flex gap-3 leading-relaxed ${l.type === 'error' ? 'text-rose-400' : l.type === 'success' ? 'text-emerald-400' : l.type === 'warning' ? 'text-amber-400' : 'text-blue-300'}`}>
+                          <span className="opacity-50 shrink-0 select-none">[{l.time}]</span>
+                          <span className="break-all">{l.msg}</span>
                       </div>
                   )) : (
-                      <div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-70 py-10">
-                          <CheckCircle size={32} className="mb-2 text-green-400/50"/>
-                          <span className="text-sm font-bold">目前無待審核申請單</span>
+                      <div className="h-full flex flex-col items-center justify-center text-slate-600 opacity-50 py-10">
+                          <span className="text-sm font-bold">系統載入中，日誌準備就緒...</span>
                       </div>
                   )}
+                  <div ref={logsEndRef}/>
               </div>
           </div>
           

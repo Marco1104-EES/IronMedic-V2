@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { Calendar, MapPin, Users, Clock, ChevronRight, Activity, Flame, ShieldAlert, Timer, CheckCircle, X, Loader2, UsersRound, Crown, Sprout, Handshake, Send, Flag, Settings, Bell, ChevronDown, ChevronUp, Trash2, AlertTriangle, Medal, ServerCrash, Server, Menu, User } from 'lucide-react'
+import { Calendar, MapPin, Users, Clock, ChevronRight, Activity, Flame, ShieldAlert, Timer, CheckCircle, X, Loader2, UsersRound, Crown, Sprout, Handshake, Send, Flag, Settings, Bell, ChevronDown, ChevronUp, Trash2, AlertTriangle, Medal, ServerCrash, Server, Menu, User, Edit3, Zap, Plus, Save } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 
@@ -10,6 +10,13 @@ export default function RaceEvents() {
   const [timeFilter, setTimeFilter] = useState('CURRENT_YEAR') 
 
   const [previewRace, setPreviewRace] = useState(null)
+  
+  // 🌟 上帝捷徑：快速編輯狀態
+  const [quickEditRace, setQuickEditRace] = useState(null)
+  const [isQuickSaving, setIsQuickSaving] = useState(false)
+  const [insertForms, setInsertForms] = useState({})
+  const [allMembers, setAllMembers] = useState([])
+
   const [userRole, setUserRole] = useState(() => localStorage.getItem('iron_medic_user_role') || 'USER') 
   const [currentUserProfile, setCurrentUserProfile] = useState(null)
 
@@ -33,8 +40,34 @@ export default function RaceEvents() {
   const notifChannelRef = useRef(null)
   const adminMenuRef = useRef(null)
 
-  // 🌟 全域雙語權限判定陣列
   const ADMIN_ROLES = ['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN', '賽事總監', '系統管理員', '管理員'];
+
+  // 🌟 全局無塵室字串淨化解析器
+  const parseAssignees = (assigneeString) => {
+      if (!assigneeString || typeof assigneeString !== 'string') return [];
+      const rawAssignees = assigneeString.split('|').filter(s => s.trim() !== '');
+      return rawAssignees.map(item => {
+          try {
+              const obj = JSON.parse(item);
+              if (obj && obj.name && String(obj.name).trim() !== '') return obj;
+              return null;
+          } catch (e) {
+              const trimmed = item.trim();
+              if (!trimmed) return null;
+              return { id: trimmed, name: trimmed, timestamp: '舊資料匯入', isLegacy: true };
+          }
+      }).filter(Boolean);
+  }
+
+  const getUserTier = (user) => {
+      if (!user) return 6;
+      if (user.is_vip === 'Y') return 1;
+      if (user.is_team_leader === 'Y') return 2;
+      if (user.is_new_member === 'Y' || user.total_races < 2) return 3;
+      if (user.training_status === 'Y' || user.training_status === true || user.training_status === 'true' || user.training_status === 1) return 4;
+      if (user.is_current_member === 'Y') return 5;
+      return 6;
+  }
 
   useEffect(() => {
     const cachedRaces = localStorage.getItem('iron_medic_races_cache');
@@ -167,6 +200,12 @@ export default function RaceEvents() {
                   setCurrentUserProfile(profile); 
                   localStorage.setItem('iron_medic_user_role', role); 
 
+                  // 🌟 如果是管理員，自動抓取當屆會員名單供「快速安插」使用
+                  if (ADMIN_ROLES.some(r => role.includes(r))) {
+                      const { data: membersData } = await supabase.from('profiles').select('*').eq('is_current_member', 'Y');
+                      if (membersData) setAllMembers(membersData);
+                  }
+
                   if (channelRef.current) {
                       channelRef.current.track({
                           online_at: new Date().toISOString(),
@@ -248,10 +287,7 @@ export default function RaceEvents() {
       }
   }
 
-  // 🌟 修復：雙語權限綜合判定
   const isSuperAdmin = ADMIN_ROLES.some(r => userRole.toUpperCase().includes(r));
-
-  // 🌟 修復點：找回遺失的未讀通知計算變數
   const unreadCountReal = notifications.filter(n => !(n.isRead || n.is_read)).length;
 
   const showWarning = useMemo(() => {
@@ -305,24 +341,20 @@ export default function RaceEvents() {
               if (slot.filled && slot.filled > 0) {
                   totalRegistered += slot.filled;
                   if (slot.assignee) {
-                      const names = slot.assignee.split('|').map(n => n.trim());
-                      names.forEach(item => {
-                          if(!item) return; 
-                          try {
-                              const parsedUser = JSON.parse(item);
-                              if (parsedUser.name === '測試者' || parsedUser.id === 'test') return;
-                              if(parsedUser && parsedUser.name) {
-                                  if (parsedUser.isNew) newcomerCount++; 
-                                  participantDetails.push({ name: parsedUser.name, timestamp: parsedUser.timestamp || '10:00:00:000', isVip: parsedUser.isVip || false, isNew: parsedUser.isNew || false, roleTag: parsedUser.roleTag || null, slotGroup: slot.group, slotName: slot.name });
-                              }
-                          } catch (e) {
-                              if (item.length > 0 && !item.startsWith('{')) { 
-                                  if (item.includes('測試者')) return;
-                                  if (item.includes('新人')) newcomerCount++; 
-                                  participantDetails.push({ name: item, timestamp: `10:00:00:000`, isVip: item.includes('管理員') || item.includes('VIP'), isNew: item.includes('新人'), slotGroup: slot.group, slotName: slot.name });
-                              }
-                          }
-                      })
+                      const parsedAssignees = parseAssignees(slot.assignee);
+                      parsedAssignees.forEach(parsedUser => {
+                          if (parsedUser.name === '測試者' || parsedUser.id === 'test') return;
+                          if (parsedUser.isNew) newcomerCount++; 
+                          participantDetails.push({ 
+                              name: parsedUser.name, 
+                              timestamp: parsedUser.timestamp || '10:00:00:000', 
+                              isVip: parsedUser.isVip || false, 
+                              isNew: parsedUser.isNew || false, 
+                              roleTag: parsedUser.roleTag || null, 
+                              slotGroup: slot.group, 
+                              slotName: slot.name 
+                          });
+                      });
                   }
               }
           });
@@ -421,6 +453,194 @@ export default function RaceEvents() {
 
   const isNewbieUser = !isSuperAdmin && (currentUserProfile?.is_new_member === 'Y' || currentUserProfile?.total_races < 2);
   const newbiePassesLeft = currentUserProfile?.newbie_passes ?? 3;
+
+  // ==========================================
+  // ⚡ 快速編輯 (Quick Edit) 上帝捷徑引擎功能
+  // ==========================================
+  
+  const handleOpenQuickEdit = (e, race) => {
+      e.stopPropagation();
+      setQuickEditRace(JSON.parse(JSON.stringify(race))); 
+      setInsertForms({});
+  }
+
+  const handleQuickSlotChange = (slotId, field, value) => {
+      const updatedSlots = quickEditRace.slots_data.map(s => s.id === slotId ? { ...s, [field]: value } : s);
+      setQuickEditRace({ ...quickEditRace, slots_data: updatedSlots });
+  }
+
+  const handleAddQuickSlot = () => {
+      const newSlot = { id: Date.now(), group: '一般組別', name: '新賽段', capacity: 1, filled: 0, assignee: '' };
+      setQuickEditRace({ ...quickEditRace, slots_data: [...(quickEditRace.slots_data || []), newSlot] });
+  }
+
+  const handleDeleteQuickSlot = (slotId) => {
+      const targetSlot = quickEditRace.slots_data.find(s => s.id === slotId);
+      if (targetSlot && targetSlot.filled > 0) {
+          return alert('❌ 防呆攔截：該賽段已有人員報名，無法刪除！請先將人員移出。');
+      }
+      if (window.confirm('確定要刪除此賽段嗎？')) {
+          setQuickEditRace({ ...quickEditRace, slots_data: quickEditRace.slots_data.filter(s => s.id !== slotId) });
+      }
+  }
+
+  const handleQuickSaveAll = async () => {
+      setIsQuickSaving(true);
+      try {
+          const { error } = await supabase.from('races').update({ 
+              status: quickEditRace.status,
+              slots_data: quickEditRace.slots_data 
+          }).eq('id', quickEditRace.id);
+
+          if (error) throw error;
+          
+          setRaces(prev => prev.map(r => r.id === quickEditRace.id ? quickEditRace : r));
+          setQuickEditRace(null);
+          alert('✅ 賽事狀態與名額配置已儲存成功！');
+      } catch (err) {
+          alert('儲存失敗：' + err.message);
+      } finally {
+          setIsQuickSaving(false);
+      }
+  }
+
+  // ⚡ 快速編輯：智能安插人員 (完美繼承 RaceDetail 邏輯與扣底機制)
+  const handleQuickInsert = async (slotId) => {
+      const formData = insertForms[slotId] || { name: '', roleTag: '' };
+      const trimmedName = formData.name.trim();
+      if(!trimmedName) return alert("請輸入或選擇要安插的人員姓名！");
+      
+      const matchedMember = allMembers.find(m => m.full_name === trimmedName);
+      if (!matchedMember) {
+          return alert("❌ 系統防呆攔截：請從下拉提示清單中選擇「當年度有效會員」。查無此人或非當屆會員無法安插！");
+      }
+
+      let isAlreadyInRace = false;
+      let existingSlotName = "";
+      for (const slot of quickEditRace.slots_data) {
+          const parsedAssignees = parseAssignees(slot.assignee);
+          for (const p of parsedAssignees) {
+              if (p.id === matchedMember.id || p.name === matchedMember.full_name) {
+                  isAlreadyInRace = true;
+                  existingSlotName = slot.name;
+              }
+          }
+      }
+
+      if (isAlreadyInRace) {
+          const confirmTest = window.confirm(`⚠️ 系統提醒：【${matchedMember.full_name}】已經在【${existingSlotName}】名單中了！\n\n請問這是一次「測試報名」或「特殊重複安插」嗎？\n點擊「確定」將無視限制強制安插，點擊「取消」放棄操作。`);
+          if (!confirmTest) return;
+      }
+
+      const now = new Date();
+      const timestamp = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
+      
+      const rawRole = matchedMember.role ? matchedMember.role.toUpperCase().trim() : 'USER';
+      const isMatchedAdmin = ADMIN_ROLES.some(r => rawRole.includes(r));
+      
+      const isNewbie = !isMatchedAdmin && (matchedMember.is_new_member === 'Y' || matchedMember.total_races < 2);
+      const newbiePassesLeft = matchedMember.newbie_passes ?? 3;
+      const willBurnNewbiePass = isNewbie && newbiePassesLeft > 0;
+
+      const newParticipant = {
+          id: matchedMember.id,
+          name: matchedMember.full_name,
+          email: matchedMember.email,
+          tier: getUserTier(matchedMember),
+          timestamp: timestamp,
+          roleTag: formData.roleTag || null,
+          isVip: matchedMember.is_vip === 'Y',
+          isNew: isNewbie,
+          usedPass: willBurnNewbiePass, 
+          isMe: false
+      };
+
+      const updatedSlots = quickEditRace.slots_data.map(s => {
+          if (s.id === slotId) {
+              const assigneesArray = parseAssignees(s.assignee);
+              assigneesArray.push(newParticipant);
+              const newAssigneeString = assigneesArray.map(p => p.isLegacy ? p.name : JSON.stringify(p)).join('|');
+              return { ...s, filled: assigneesArray.length, assignee: newAssigneeString };
+          }
+          return s;
+      });
+
+      const updatedRace = { ...quickEditRace, slots_data: updatedSlots };
+      setQuickEditRace(updatedRace);
+
+      try {
+          const { error } = await supabase.from('races').update({ slots_data: updatedSlots }).eq('id', quickEditRace.id);
+          if (error) throw error;
+
+          if (willBurnNewbiePass) {
+              const newPasses = Math.max(0, newbiePassesLeft - 1);
+              await supabase.from('profiles').update({ newbie_passes: newPasses }).eq('id', matchedMember.id);
+              setAllMembers(prev => prev.map(m => m.id === matchedMember.id ? { ...m, newbie_passes: newPasses } : m));
+          }
+          
+          setRaces(prevRaces => prevRaces.map(r => r.id === quickEditRace.id ? updatedRace : r));
+          setInsertForms(prev => ({...prev, [slotId]: {name: '', roleTag: ''}}));
+          alert(`✅ 已成功將【${matchedMember.full_name}】安插至名單內。`);
+      } catch(e) { alert("安插寫入失敗：" + e.message) }
+  }
+
+  // ⚡ 快速編輯：一鍵踢除人員 (完美繼承退還機制)
+  const handleQuickKick = async (slotId, userIdToKick, userName) => {
+      if(!window.confirm(`⚠️ 賽事總監警告 ⚠️\n確定要強制將【${userName}】從此賽段踢除嗎？`)) return;
+
+      let kickedUserUsedPass = false;
+
+      const updatedSlots = quickEditRace.slots_data.map(s => {
+          if (s.id === slotId && s.assignee) {
+              const assigneesArray = parseAssignees(s.assignee);
+              const newAssigneesArray = assigneesArray.filter(p => {
+                  if (p.id === userIdToKick || p.name === userIdToKick) {
+                      if (p.usedPass) kickedUserUsedPass = true;
+                      return false;
+                  }
+                  return true;
+              });
+              
+              const newAssigneeString = newAssigneesArray.map(p => p.isLegacy ? p.name : JSON.stringify(p)).join('|');
+              return { ...s, filled: newAssigneesArray.length, assignee: newAssigneeString };
+          }
+          return s;
+      });
+
+      const updatedRace = { ...quickEditRace, slots_data: updatedSlots };
+      setQuickEditRace(updatedRace);
+
+      try {
+          const { error } = await supabase.from('races').update({ slots_data: updatedSlots }).eq('id', quickEditRace.id);
+          if (error) throw error;
+          
+          if (kickedUserUsedPass && userIdToKick && !String(userIdToKick).startsWith('force_')) {
+              try {
+                  const { data: kUser } = await supabase.from('profiles').select('newbie_passes').eq('id', userIdToKick).single();
+                  if (kUser) {
+                      const restoredPasses = Math.min(3, (kUser.newbie_passes ?? 3) + 1);
+                      await supabase.from('profiles').update({ newbie_passes: restoredPasses }).eq('id', userIdToKick);
+                      setAllMembers(prev => prev.map(m => m.id === userIdToKick ? { ...m, newbie_passes: restoredPasses } : m));
+                  }
+              } catch(e) { console.error("退還次數失敗", e) }
+          }
+
+          if (userIdToKick && !String(userIdToKick).startsWith('force_')) {
+              try {
+                  await supabase.from('user_notifications').insert([{
+                      user_id: userIdToKick,
+                      tab: 'personal',
+                      category: 'alert',
+                      message: `您在【${quickEditRace.name}】的名額已被賽事總監異動，如有疑問請聯繫賽事總監。`,
+                      is_read: false
+                  }]);
+              } catch(e) { console.error("發送踢除通知失敗", e) }
+          }
+          
+          setRaces(prevRaces => prevRaces.map(r => r.id === quickEditRace.id ? updatedRace : r));
+      } catch(e) { alert("踢除寫入失敗：" + e.message) }
+  }
+
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans pb-24 flex flex-col relative overflow-x-hidden">
@@ -532,7 +752,7 @@ export default function RaceEvents() {
               )}
 
               {isNewbieUser && newbiePassesLeft > 0 && (
-                  <div className="bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-[2rem] p-4 md:p-5 shadow-xl shadow-emerald-500/20 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-fade-in-down border border-emerald-400/50">
+                  <div className="bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-2xl p-4 md:p-5 shadow-xl shadow-emerald-500/20 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-fade-in-down border border-emerald-400/50">
                       <div className="flex items-center gap-3">
                           <div className="bg-white/20 p-2.5 rounded-xl backdrop-blur-sm shrink-0">
                               <Sprout size={24} className="text-emerald-50 drop-shadow-sm" />
@@ -662,6 +882,18 @@ export default function RaceEvents() {
                               />
                               <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-slate-900/20 to-transparent"></div>
                               {renderStatusBadge(race.status, race.is_hot, isFull, isPastRace)}
+                              
+                              {/* 🌟 快速編輯 (Quick Edit) 上帝按鈕 */}
+                              {isSuperAdmin && (
+                                  <button 
+                                      onClick={(e) => handleOpenQuickEdit(e, race)}
+                                      className="absolute top-3 right-3 md:top-4 md:right-4 bg-amber-500 hover:bg-amber-400 text-white p-2 rounded-full shadow-lg z-20 transition-transform active:scale-95"
+                                      title="⚡ 賽事快速編輯"
+                                  >
+                                      <Edit3 size={16} />
+                                  </button>
+                              )}
+
                               <div className="absolute bottom-3 left-3 md:bottom-4 md:left-4 flex items-center gap-2">
                                   <span className="bg-white/20 backdrop-blur-md text-white text-[10px] md:text-xs font-bold px-2.5 md:px-3 py-1 md:py-1.5 rounded-lg border border-white/30">{race.type}</span>
                               </div>
@@ -832,6 +1064,134 @@ export default function RaceEvents() {
                   </div>
                   <button onClick={() => setPreviewRace(null)} className="w-full mt-6 py-3.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl transition-colors active:scale-95">關閉名單</button>
               </div>
+          </div>
+      )}
+
+      {/* ========================================== */}
+      {/* ⚡ 快速編輯 (Quick Edit) 上帝捷徑彈窗      */}
+      {/* ========================================== */}
+      {quickEditRace && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4 animate-fade-in" onClick={() => setQuickEditRace(null)}>
+              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-4xl flex flex-col max-h-[90vh] animate-bounce-in" onClick={e => e.stopPropagation()}>
+                  
+                  <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center rounded-t-[2rem] shrink-0">
+                      <h3 className="text-xl font-black text-slate-800 flex items-center gap-2"><Zap className="text-amber-500"/> 賽事快速編輯 (Quick Edit)</h3>
+                      <button onClick={() => setQuickEditRace(null)} className="p-2 text-slate-400 hover:bg-slate-200 rounded-full transition-colors"><X size={20}/></button>
+                  </div>
+
+                  <div className="p-6 overflow-y-auto custom-scrollbar flex-1 bg-slate-50 space-y-6">
+                      
+                      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-2">
+                          <div className="text-sm font-bold text-slate-500 flex items-center gap-2"><Flag size={14} className="text-blue-500"/> {quickEditRace.name}</div>
+                          <div className="flex gap-4 text-xs font-bold text-slate-400">
+                              <span className="flex items-center gap-1"><Calendar size={12}/> {quickEditRace.date}</span>
+                              <span className="flex items-center gap-1"><Clock size={12}/> {quickEditRace.gather_time}</span>
+                              <span className="flex items-center gap-1"><MapPin size={12}/> {quickEditRace.location}</span>
+                          </div>
+                      </div>
+
+                      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                          <label className="block text-sm font-black text-slate-700 mb-2">賽事狀態切換</label>
+                          <select
+                              className="w-full border border-slate-300 p-2.5 rounded-lg font-bold bg-white focus:ring-2 focus:ring-amber-500 outline-none transition-shadow"
+                              value={quickEditRace.status}
+                              onChange={e => setQuickEditRace({...quickEditRace, status: e.target.value})}
+                          >
+                              <option value="OPEN">🟢 招募中 (OPEN)</option>
+                              <option value="NEGOTIATING">🟡 洽談中 (NEGOTIATING)</option>
+                              <option value="SUBMITTED">🔵 已送名單 (SUBMITTED)</option>
+                              <option value="FULL">🔴 滿編 (FULL)</option>
+                              <option value="UPCOMING">🟠 預備中 (UPCOMING)</option>
+                              <option value="COMPLETED">✅ 已完賽 (COMPLETED)</option>
+                              <option value="CANCELLED">❌ 取消/停辦 (CANCELLED)</option>
+                              <option value="CLOSED">🔒 關閉 (CLOSED)</option>
+                          </select>
+                      </div>
+
+                      <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                          <div className="flex justify-between items-center mb-2">
+                              <h4 className="font-black text-slate-800 flex items-center gap-2"><Users size={18} className="text-blue-500"/> 賽事組別與人員變動</h4>
+                              <button onClick={handleAddQuickSlot} className="text-xs font-bold bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg border border-blue-200 hover:bg-blue-100 flex items-center gap-1 transition-colors">
+                                  <Plus size={14}/> 新增組別
+                              </button>
+                          </div>
+
+                          {quickEditRace.slots_data?.map((slot, index) => (
+                              <div key={slot.id} className="border-2 border-slate-100 rounded-xl p-4 bg-slate-50/50 relative">
+                                  <div className="flex flex-wrap gap-3 mb-4 pr-10">
+                                      <div className="flex-1 min-w-[120px]">
+                                          <label className="text-[10px] font-bold text-slate-500 block mb-1">組別名稱</label>
+                                          <input type="text" value={slot.name} onChange={e => handleQuickSlotChange(slot.id, 'name', e.target.value)} className="w-full border border-slate-300 p-2 rounded-lg bg-white text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none"/>
+                                      </div>
+                                      <div className="w-24">
+                                          <label className="text-[10px] font-bold text-slate-500 block mb-1">需求人數</label>
+                                          <input type="number" value={slot.capacity} onChange={e => handleQuickSlotChange(slot.id, 'capacity', parseInt(e.target.value)||1)} className="w-full border border-slate-300 p-2 rounded-lg bg-white text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none text-center"/>
+                                      </div>
+                                  </div>
+                                  
+                                  <div className="absolute top-4 right-4">
+                                      <button onClick={() => handleDeleteQuickSlot(slot.id)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg border border-transparent hover:border-red-200 transition-colors" title="刪除此組別">
+                                          <Trash2 size={16}/>
+                                      </button>
+                                  </div>
+
+                                  <div className="space-y-2 mb-4 bg-slate-100 p-3 rounded-xl border border-slate-200 shadow-inner">
+                                      {parseAssignees(slot.assignee).map((p, i) => (
+                                          <div key={i} className="flex justify-between items-center bg-white p-2.5 rounded-lg shadow-sm border border-slate-100">
+                                              <div className="flex items-center gap-2">
+                                                  <span className="font-bold text-sm text-slate-800">{p.name.split('#')[0].trim()}</span>
+                                                  {p.roleTag && <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-black border border-indigo-200">{p.roleTag}</span>}
+                                                  {!p.roleTag && p.isVip && <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-black border border-amber-200">VIP</span>}
+                                                  {p.isNew && <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-black border border-green-200">新人</span>}
+                                              </div>
+                                              <button onClick={() => handleQuickKick(slot.id, p.id || p.name, p.name)} className="text-slate-400 hover:text-red-500 hover:bg-red-50 p-1.5 rounded-md transition-colors"><X size={14}/></button>
+                                          </div>
+                                      ))}
+                                      {parseAssignees(slot.assignee).length === 0 && <div className="text-xs text-slate-400 font-bold text-center py-2">該組別目前無人員</div>}
+                                  </div>
+
+                                  <div className="flex flex-wrap gap-2 items-center bg-amber-50 p-3 rounded-xl border border-amber-200 shadow-sm">
+                                      <input 
+                                          type="text" 
+                                          list="member-autocomplete"
+                                          className="flex-1 min-w-[150px] border border-amber-300 p-2 rounded-lg text-sm font-bold focus:ring-2 focus:ring-amber-500 outline-none"
+                                          placeholder="輸入當年度會員姓名"
+                                          value={insertForms[slot.id]?.name || ''}
+                                          onChange={e => setInsertForms(prev => ({...prev, [slot.id]: {...(prev[slot.id]||{}), name: e.target.value}}))}
+                                      />
+                                      <select 
+                                          className="w-32 border border-amber-300 p-2 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-amber-500"
+                                          value={insertForms[slot.id]?.roleTag || ''}
+                                          onChange={e => setInsertForms(prev => ({...prev, [slot.id]: {...(prev[slot.id]||{}), roleTag: e.target.value}}))}
+                                      >
+                                          <option value="">一般參賽</option>
+                                          <option value="帶隊教官">帶隊教官</option>
+                                          <option value="賽道教官">賽道教官</option>
+                                          <option value="醫護教官">醫護教官</option>
+                                          <option value="官方代表">官方代表</option>
+                                      </select>
+                                      <button onClick={() => handleQuickInsert(slot.id)} className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg font-black text-xs transition-colors shadow-md active:scale-95 whitespace-nowrap">
+                                          確認安插
+                                      </button>
+                                  </div>
+                              </div>
+                          ))}
+                      </div>
+                  </div>
+
+                  <div className="p-5 border-t border-slate-200 bg-white shrink-0 flex gap-3 rounded-b-[2rem]">
+                      <button onClick={handleQuickSaveAll} disabled={isQuickSaving} className="flex-[2] bg-blue-600 text-white font-black py-4 rounded-xl shadow-lg shadow-blue-600/30 hover:bg-blue-700 transition-colors flex justify-center items-center gap-2 active:scale-95">
+                          {isQuickSaving ? <Loader2 className="animate-spin" size={18}/> : <Save size={18}/>} 儲存所有變更並關閉
+                      </button>
+                      <button onClick={() => setQuickEditRace(null)} disabled={isQuickSaving} className="flex-1 bg-slate-100 text-slate-600 font-bold py-4 rounded-xl hover:bg-slate-200 transition-colors active:scale-95">取消</button>
+                  </div>
+              </div>
+              
+              <datalist id="member-autocomplete">
+                  {allMembers.map(m => (
+                      <option key={m.id} value={m.full_name}>{m.email}</option>
+                  ))}
+              </datalist>
           </div>
       )}
     </div>

@@ -34,6 +34,7 @@ const FieldEditor = ({ label, name, type = "text", options = [], value, onChange
 
     const baseClass = "w-full border p-2.5 rounded-lg outline-none transition-all duration-500 text-slate-800 font-medium";
     const normalClass = "border-slate-300 focus:ring-2 focus:ring-blue-500 bg-white";
+    // 🌟 智慧異動高亮：加上明顯的橘黃色光暈
     const highlightClass = "border-amber-400 ring-4 ring-amber-500/50 bg-amber-50 shadow-[0_0_15px_rgba(245,158,11,0.3)]";
     const combinedClass = `${baseClass} ${isHighlighted ? highlightClass : normalClass}`;
 
@@ -45,7 +46,7 @@ const FieldEditor = ({ label, name, type = "text", options = [], value, onChange
         <div className="relative">
             <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1">
                 {label} 
-                {isHighlighted && <span className="text-[10px] bg-amber-500 text-white px-1.5 py-0.5 rounded font-black animate-bounce">變更</span>}
+                {isHighlighted && <span className="text-[10px] bg-amber-500 text-white px-1.5 py-0.5 rounded font-black animate-bounce">異動待確認</span>}
             </label>
             {type === 'select' ? (
                 <select 
@@ -72,7 +73,6 @@ const FieldEditor = ({ label, name, type = "text", options = [], value, onChange
     );
 };
 
-
 export default function MemberCRM() {
   const [members, setMembers] = useState([])
   const [loading, setLoading] = useState(true)
@@ -98,6 +98,9 @@ export default function MemberCRM() {
   const navigate = useNavigate()
   const searchParams = new URLSearchParams(location.search)
   const currentView = searchParams.get('view') || 'ALL'
+  
+  // 🌟 URL 雷達定位目標 ID
+  const targetId = searchParams.get('targetId')
 
   const [isColumnConfigOpen, setIsColumnConfigOpen] = useState(false)
   const [columnGroups, setColumnGroups] = useState({
@@ -107,6 +110,7 @@ export default function MemberCRM() {
       group4_ext: false       
   })
 
+  // 🌟 高亮欄位陣列
   const [highlightFields, setHighlightFields] = useState([])
 
   const fileInputRef = useRef(null)
@@ -131,6 +135,22 @@ export default function MemberCRM() {
       fetchGlobalStats() 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, searchTerm, currentView])
+
+  // 🌟 雷達定位引擎 (Radar Ping) + 觸發高亮
+  useEffect(() => {
+      if (targetId && members.length > 0 && !isEditModalOpen) {
+          const targetMember = members.find(m => m.id === targetId);
+          if (targetMember) {
+              handleEditClick(targetMember, true); // 🌟 傳入 true 強制觸發高亮
+              // 清除 URL 中的 targetId 避免重整一直彈出
+              navigate(`/admin/members?view=${currentView}`, { replace: true });
+          } else {
+              // 如果這頁找不到，自動用 search 去找他
+              setSearchTerm(targetId.substring(0,8)); 
+          }
+      }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetId, members])
 
   const handleCloseEditModal = () => {
       setIsEditModalOpen(false);
@@ -186,7 +206,7 @@ export default function MemberCRM() {
       else if (currentView === 'BLACKLIST') query = query.eq('is_blacklisted', 'Y')
 
       if (searchTerm) {
-          query = query.or(`email.ilike.%${searchTerm}%,full_name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%`)
+          query = query.or(`email.ilike.%${searchTerm}%,full_name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%,id.ilike.%${searchTerm}%`)
       }
       
       const from = (page - 1) * ITEMS_PER_PAGE
@@ -217,21 +237,39 @@ export default function MemberCRM() {
       })
   }, [members, sortConfig])
 
-  const handleEditClick = (member) => { setEditingMember({ ...member }); setIsEditModalOpen(true) }
+  // 🌟 點開編輯視窗時，執行智慧異動比對 (支援從雷達觸發)
+  const handleEditClick = (member, fromRadar = false) => { 
+      setEditingMember({ ...member });
+      
+      let fieldsToHighlight = [];
+      // 只要是從通知中心(雷達)導引過來，或是他原本就帶有異動標記，就會自動高亮核心區域
+      if (fromRadar || member.basic_edit_count > 0 || member.med_edit_count > 0) {
+          fieldsToHighlight = [
+              'full_name', 'english_name', 'national_id', 'gender', 'birthday', 'phone', 'contact_email', 'address',
+              'emergency_name', 'emergency_relation', 'emergency_phone',
+              'medical_license', 'license_expiry', 'blood_type', 'shirt_size', 'medical_history', 'transport_pref', 'stay_pref'
+          ];
+      }
+      setHighlightFields(fieldsToHighlight);
+      
+      setIsEditModalOpen(true); 
+  }
   
   const handleSaveMember = async () => {
       if (!editingMember) return
       setSavingMember(true)
       try {
-          const { count, _exact, ...cleanData } = editingMember;
+          // 🌟 終極防爆：精準剝離前端專用變數 (basic_edit_count, med_edit_count 等)
+          // 絕對不將這些不存在於資料庫的欄位送出，避免 Schema 報錯！
+          const { count, _exact, basic_edit_count, med_edit_count, ...safeDbPayload } = editingMember;
 
-          const { error } = await supabase.from('profiles').update(cleanData).eq('id', editingMember.id)
+          const { error } = await supabase.from('profiles').update(safeDbPayload).eq('id', editingMember.id)
           if (error) throw error
           
           handleCloseEditModal()
           await fetchGlobalStats() 
           await fetchMembers()
-          alert("系統提示：會員資料更新成功。")
+          alert("系統提示：會員資料審核與更新成功。")
       } catch (err) { 
           alert("資料更新失敗: " + err.message) 
       } finally {
@@ -249,7 +287,6 @@ export default function MemberCRM() {
       return score
   }
 
-  // 🌟 修復點：廢除模糊積分判定，改用絕對欄位對應，並支援多標籤顯示
   const renderPriorityIcon = (m) => {
       const tags = [];
       if (m.is_vip === 'Y') {
