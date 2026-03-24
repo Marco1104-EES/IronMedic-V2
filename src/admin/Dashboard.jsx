@@ -5,8 +5,8 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { MapContainer, TileLayer, Marker, Popup, CircleMarker } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
-// 🌟 確保新增了需要的圖示包含 Info
-import { Users, Activity, Award, ShieldAlert, Map as MapIcon, Loader2, Flag, Mountain, Bike, Footprints, User, MapPin, Bell, UserCheck, Calendar, Clock, History, ChevronUp, ChevronDown, Handshake, Send, Timer, ArrowRight, X, UserMinus, Mail, Phone, Info } from 'lucide-react'
+// 🌟 確保新增了需要的圖示包含 Info, Sprout
+import { Users, Activity, Award, ShieldAlert, Map as MapIcon, Loader2, Flag, Mountain, Bike, Footprints, User, MapPin, Bell, UserCheck, Calendar, Clock, History, ChevronUp, ChevronDown, Handshake, Send, Timer, ArrowRight, X, UserMinus, Mail, Phone, Info, Sprout } from 'lucide-react'
 
 // 修正 Leaflet icon 消失問題
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -45,7 +45,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const CURRENT_YEAR = new Date().getFullYear();
 
-  // 頂部四大指標 + 新增的轉換率指標
+  // 頂部四大指標 + 轉換率指標
   const [stats, setStats] = useState({
       totalMembers: 0,
       currentMembers: 0,
@@ -56,9 +56,14 @@ export default function Dashboard() {
       unloggedMembersCount: 0    
   })
   
-  // 🌟 追蹤獵殺名單狀態
+  // 🌟 追蹤名單狀態 (包含未登入、已登入、新人名單)
   const [unloggedList, setUnloggedList] = useState([])
+  const [loggedList, setLoggedList] = useState([])
+  const [newcomersList, setNewcomersList] = useState([]) // 🌟 新增：新人名單
+  
   const [showUnloggedModal, setShowUnloggedModal] = useState(false)
+  const [showLoggedModal, setShowLoggedModal] = useState(false)
+  const [showNewcomersModal, setShowNewcomersModal] = useState(false) // 🌟 新增：新人彈窗控制
 
   // 原本的賽事地圖分類資料
   const [raceStats, setRaceStats] = useState({
@@ -102,42 +107,58 @@ export default function Dashboard() {
               supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_vip', 'Y')
           ]);
 
-          // 🌟 2. 獨立抓取「當屆會員」明細，以進行新舊系統轉換率比對
-          // 必須撈出 basic_edit_count 與 med_edit_count 作為活躍足跡的判定依據
-          const { data: currentMembersList } = await supabase.from('profiles')
-              .select('id, full_name, email, phone, basic_edit_count, med_edit_count')
-              .eq('is_current_member', 'Y')
-              .limit(5000);
+          // 2. 後端 API 直連：呼叫 PostgreSQL 函數，取得最真實的 auth.users 交叉比對資料
+          const { data: activationData, error: rpcError } = await supabase.rpc('get_member_activation_stats');
           
           let loggedInCount = 0;
           let unloggedArray = [];
-          
-          if (currentMembersList) {
-              currentMembersList.forEach(m => {
-                  // 🌟 終極足跡獵殺法：只要他在新系統有存過任何一次數位 ID (edit_count > 0)，就判定為已開通！
-                  const hasFootprint = (m.basic_edit_count > 0) || (m.med_edit_count > 0);
+          let loggedArray = [];
 
-                  if (hasFootprint) {
-                      loggedInCount++;
-                  } else {
-                      unloggedArray.push(m);
-                  }
-              });
+          if (!rpcError && activationData) {
+              loggedInCount = activationData.logged_count || 0;
+              unloggedArray = activationData.unlogged_list || [];
+
+              // 獲取已登入名單：從 profile 抓取所有當屆會員，扣除未登入名單
+              const { data: allCurrentMembers } = await supabase.from('profiles')
+                  .select('id, full_name, email, phone')
+                  .eq('is_current_member', 'Y')
+                  .limit(5000);
+
+              if (allCurrentMembers) {
+                  loggedArray = allCurrentMembers.filter(m => !unloggedArray.some(u => u.id === m.id));
+              }
+          } else {
+              console.error("後端 RPC 呼叫失敗", rpcError);
           }
           
           setUnloggedList(unloggedArray);
+          setLoggedList(loggedArray);
+
+          // 🌟 3. 獨立抓取「當屆新人名單」並附帶 newbie_passes 欄位
+          const { data: newMembersData } = await supabase.from('profiles')
+              .select('id, full_name, email, phone, newbie_passes')
+              .eq('is_current_member', 'Y')
+              .eq('is_new_member', 'Y')
+              .limit(1000);
+          
+          let sortedNewcomers = [];
+          if (newMembersData) {
+              // 🌟 智能排序：依據剩餘權利次數「由少到多 (Ascending)」排序
+              sortedNewcomers = newMembersData.sort((a, b) => (a.newbie_passes || 0) - (b.newbie_passes || 0));
+          }
+          setNewcomersList(sortedNewcomers);
           
           setStats({
               totalMembers: total || 0, 
               currentMembers: current || 0,
-              newMembers: newM || 0,
+              newMembers: sortedNewcomers.length || newM || 0, // 確保數據一致性
               teamLeaders: leaders || 0,
               vipMembers: vips || 0,
               loggedMembers: loggedInCount,
               unloggedMembersCount: unloggedArray.length
           })
 
-          // 3. 抓取賽事資料
+          // 4. 抓取賽事資料
           const { data: races } = await supabase.from('races').select('id, name, date, type, location, status, medic_required, medic_registered').order('created_at', { ascending: false })
           let rMarathon = 0, rTrail = 0, rBike = 0, rTri = 0;
           let locations = []
@@ -167,7 +188,7 @@ export default function Dashboard() {
               setRaceLocations(locations)
           }
 
-          // 4. 抓取地圖與性別分佈
+          // 5. 抓取地圖與性別分佈
           const { data: memberData } = await supabase.from('profiles').select('gender, address')
           if (memberData) {
               let mMale = 0, mFemale = 0;
@@ -191,7 +212,7 @@ export default function Dashboard() {
               })
           }
 
-          // 5. 抓取通知
+          // 6. 抓取通知
           try {
               const { data: notifs } = await supabase.from('admin_notifications').select('*').eq('type', 'PROFILE_UPDATE').order('created_at', { ascending: false }).limit(20)
               if (notifs) {
@@ -297,7 +318,6 @@ export default function Dashboard() {
                       </div>
                       <div className="p-4 flex-1 overflow-y-auto max-h-[500px] custom-scrollbar space-y-3">
                           {profileUpdates.length > 0 ? profileUpdates.map((log, i) => (
-                              // 🌟 點擊時觸發包裹發送
                               <div 
                                   key={i} 
                                   onClick={() => handleReviewClick(log)}
@@ -337,7 +357,7 @@ export default function Dashboard() {
           <p className="text-slate-500 font-medium">即時掌握全台醫護鐵人會員與賽事分佈</p>
       </div>
 
-      {/* 🌟 擴充為 5 格排版，並將轉換率狀態框置於中央 */}
+      {/* 🌟 擴充為 5 格排版，包含當屆轉換追蹤 */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 md:gap-6">
           <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow group">
               <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform"><Users size={24}/></div>
@@ -352,22 +372,34 @@ export default function Dashboard() {
               <div className="text-2xl md:text-3xl font-black text-slate-800 mt-1 flex items-baseline gap-1 relative z-10">
                   <span className="text-green-600">{stats.currentMembers}</span>
                   <span className="text-lg text-slate-400">/</span>
-                  <span className="text-xl text-emerald-500" title="當屆新人總人數">{stats.newMembers}</span>
+                  {/* 🌟 修改為可點擊的按鈕，觸發新人名單彈窗 */}
+                  <button 
+                      onClick={() => setShowNewcomersModal(true)}
+                      className="text-xl md:text-2xl text-emerald-500 hover:text-emerald-600 hover:scale-110 transition-transform underline decoration-emerald-300 decoration-2 underline-offset-4 cursor-pointer"
+                      title="點擊查看當屆新人名單與剩餘權利"
+                  >
+                      {stats.newMembers}
+                  </button>
               </div>
           </div>
 
-          {/* 🌟 全新模組：新系統轉換狀態 (點擊數字可看未登入名單) */}
           <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow group relative overflow-hidden md:col-span-1 lg:col-span-1 col-span-2">
-              <div className="absolute top-0 right-0 w-24 h-24 bg-rose-50 rounded-bl-full -z-10 transition-transform group-hover:scale-125"></div>
-              <div className="w-12 h-12 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform relative z-10"><UserCheck size={24}/></div>
-              <h3 className="text-slate-500 font-bold text-[13px] md:text-sm whitespace-nowrap">當屆開通 / 未開通追蹤</h3>
+              <div className="absolute top-0 right-0 w-24 h-24 bg-blue-50 rounded-bl-full -z-10 transition-transform group-hover:scale-125"></div>
+              <div className="w-12 h-12 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform relative z-10"><UserCheck size={24}/></div>
+              <h3 className="text-slate-500 font-bold text-[13px] md:text-sm whitespace-nowrap">當屆登入 / 未登入追蹤</h3>
               <div className="text-2xl md:text-3xl font-black text-slate-800 mt-1 flex items-baseline gap-1 relative z-10">
-                  <span className="text-blue-600" title="已成功登入新系統並儲存資料">{stats.loggedMembers}</span>
+                  <button 
+                      onClick={() => setShowLoggedModal(true)}
+                      className="text-xl md:text-2xl text-blue-600 hover:text-blue-700 hover:scale-110 transition-transform underline decoration-blue-300 decoration-2 underline-offset-4 cursor-pointer"
+                      title="點擊查看已登入新系統名單"
+                  >
+                      {stats.loggedMembers}
+                  </button>
                   <span className="text-lg text-slate-400">/</span>
                   <button 
                       onClick={() => setShowUnloggedModal(true)}
-                      className="text-xl text-rose-500 hover:text-rose-600 hover:scale-110 transition-transform underline decoration-rose-300 decoration-2 underline-offset-4 cursor-pointer"
-                      title="點擊查看尚未開通名單"
+                      className="text-xl md:text-2xl text-rose-500 hover:text-rose-600 hover:scale-110 transition-transform underline decoration-rose-300 decoration-2 underline-offset-4 cursor-pointer"
+                      title="點擊查看尚未登入新系統名單"
                   >
                       {stats.unloggedMembersCount}
                   </button>
@@ -557,24 +589,23 @@ export default function Dashboard() {
 
       </div>
 
-      {/* 🌟 追蹤獵殺名單：當屆尚未登入新系統名單 Modal */}
+      {/* 🌟 追蹤名單：當屆未登入新系統名單 Modal */}
       {showUnloggedModal && (
           <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[200] p-4 animate-fade-in backdrop-blur-sm" onClick={() => setShowUnloggedModal(false)}>
               <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-2xl flex flex-col max-h-[85vh] overflow-hidden animate-bounce-in" onClick={e => e.stopPropagation()}>
                   
                   <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
                       <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
-                          <UserMinus className="text-rose-500"/> 當屆未開通新系統名單
+                          <UserMinus className="text-rose-500"/> 當屆未登入新系統名單
                           <span className="bg-rose-100 text-rose-700 text-[10px] font-black px-2 py-0.5 rounded-full ml-2">共 {unloggedList.length} 人</span>
                       </h3>
                       <button onClick={() => setShowUnloggedModal(false)} className="p-2 text-slate-400 hover:bg-slate-200 rounded-full transition-colors active:scale-95"><X size={20}/></button>
                   </div>
                   
-                  {/* 🌟 新增貼心提示面板，解說判定邏輯 */}
                   <div className="bg-blue-50 text-blue-700 text-[11px] p-4 font-bold flex items-start gap-2 border-b border-blue-100 shrink-0">
                       <Info size={16} className="shrink-0 mt-0.5"/>
                       <p className="leading-relaxed">
-                          判定基準說明：基於 Supabase 資安隔離限制，前端無法直連登入密碼庫。目前「已成功開通」之嚴格判定條件為：該會員登入新系統後，已成功於【個人數位 ID】中確認並儲存過核心或醫護資料（留下活躍足跡）。
+                          判定基準說明：此數據由系統後端 (RPC) 直接連線至真實身份驗證庫 (auth.users) 取得，擁有最高準確度。清單中之人員代表「尚未透過 Google 帳號授權登入新系統」。
                       </p>
                   </div>
 
@@ -597,13 +628,114 @@ export default function Dashboard() {
                           <div className="text-center py-12 flex flex-col items-center justify-center gap-3">
                               <div className="w-16 h-16 bg-green-100 text-green-500 rounded-full flex items-center justify-center mb-2"><CheckCircle size={32}/></div>
                               <div className="text-lg font-black text-slate-800">太棒了！</div>
-                              <div className="text-sm font-bold text-slate-500">所有當屆會員都已經成功開通並更新資料了！</div>
+                              <div className="text-sm font-bold text-slate-500">所有當屆會員都已經成功轉換並登入新系統！</div>
                           </div>
                       )}
                   </div>
 
                   <div className="p-4 bg-slate-50 border-t border-slate-100 shrink-0">
                       <button onClick={() => setShowUnloggedModal(false)} className="w-full py-3.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-black rounded-xl transition-colors active:scale-95">關閉名單</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* 🌟 追蹤名單：當屆已登入新系統名單 Modal */}
+      {showLoggedModal && (
+          <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[200] p-4 animate-fade-in backdrop-blur-sm" onClick={() => setShowLoggedModal(false)}>
+              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-2xl flex flex-col max-h-[85vh] overflow-hidden animate-bounce-in" onClick={e => e.stopPropagation()}>
+                  
+                  <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
+                      <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
+                          <UserCheck className="text-blue-500"/> 當屆已登入新系統名單
+                          <span className="bg-blue-100 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded-full ml-2">共 {loggedList.length} 人</span>
+                      </h3>
+                      <button onClick={() => setShowLoggedModal(false)} className="p-2 text-slate-400 hover:bg-slate-200 rounded-full transition-colors active:scale-95"><X size={20}/></button>
+                  </div>
+                  
+                  <div className="bg-blue-50 text-blue-700 text-[11px] p-4 font-bold flex items-start gap-2 border-b border-blue-100 shrink-0">
+                      <Info size={16} className="shrink-0 mt-0.5"/>
+                      <p className="leading-relaxed">
+                          判定基準說明：名單為系統後端 (RPC) 交叉比對真實身份驗證庫 (auth.users) 後，已成功登入之人員名單。
+                      </p>
+                  </div>
+
+                  <div className="p-6 overflow-y-auto custom-scrollbar flex-1 bg-white space-y-3">
+                      {loggedList.length > 0 ? loggedList.map(m => (
+                          <div key={m.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl border border-slate-100 hover:bg-blue-50/30 hover:border-blue-200 transition-colors gap-3">
+                              <div className="flex items-center gap-3">
+                                  <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center font-black text-sm">{m.full_name?.charAt(0) || '?'}</div>
+                                  <div>
+                                      <div className="font-black text-slate-800 text-sm flex items-center gap-2">{m.full_name}</div>
+                                      <div className="text-[10px] text-slate-400 font-mono mt-0.5" title="資料庫 UUID">系統 ID: {m.id?.substring(0,8)}...</div>
+                                  </div>
+                              </div>
+                              <div className="flex flex-col sm:items-end gap-1.5">
+                                  <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><Mail size={12} className="text-slate-400"/> {m.email || '未建檔信箱'}</span>
+                                  <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><Phone size={12} className="text-slate-400"/> {m.phone || '未建檔電話'}</span>
+                              </div>
+                          </div>
+                      )) : (
+                          <div className="text-center py-12 flex flex-col items-center justify-center gap-3">
+                              <div className="text-sm font-bold text-slate-500">目前尚無人員登入</div>
+                          </div>
+                      )}
+                  </div>
+
+                  <div className="p-4 bg-slate-50 border-t border-slate-100 shrink-0">
+                      <button onClick={() => setShowLoggedModal(false)} className="w-full py-3.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-black rounded-xl transition-colors active:scale-95">關閉名單</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* 🌟 追蹤名單：當屆新人名單 Modal */}
+      {showNewcomersModal && (
+          <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[200] p-4 animate-fade-in backdrop-blur-sm" onClick={() => setShowNewcomersModal(false)}>
+              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-2xl flex flex-col max-h-[85vh] overflow-hidden animate-bounce-in" onClick={e => e.stopPropagation()}>
+
+                  <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
+                      <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
+                          <Sprout className="text-emerald-500"/> 當屆新人名單與權利追蹤
+                          <span className="bg-emerald-100 text-emerald-700 text-[10px] font-black px-2 py-0.5 rounded-full ml-2">共 {newcomersList.length} 人</span>
+                      </h3>
+                      <button onClick={() => setShowNewcomersModal(false)} className="p-2 text-slate-400 hover:bg-slate-200 rounded-full transition-colors active:scale-95"><X size={20}/></button>
+                  </div>
+
+                  <div className="bg-emerald-50 text-emerald-700 text-[11px] p-4 font-bold flex items-start gap-2 border-b border-emerald-100 shrink-0">
+                      <Info size={16} className="shrink-0 mt-0.5"/>
+                      <p className="leading-relaxed">
+                          名單排序：已依照「剩餘優先權利次數」由少到多排序。新人擁有專屬報名階段的優先登記權益。
+                      </p>
+                  </div>
+
+                  <div className="p-6 overflow-y-auto custom-scrollbar flex-1 bg-white space-y-3">
+                      {newcomersList.length > 0 ? newcomersList.map(m => (
+                          <div key={m.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl border border-slate-100 hover:bg-emerald-50/30 hover:border-emerald-200 transition-colors gap-3">
+                              <div className="flex items-center gap-3">
+                                  <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center font-black text-sm">{m.full_name?.charAt(0) || '?'}</div>
+                                  <div>
+                                      <div className="font-black text-slate-800 text-sm flex items-center gap-2">{m.full_name}</div>
+                                      <div className="text-[10px] text-slate-400 font-mono mt-0.5" title="資料庫 UUID">系統 ID: {m.id?.substring(0,8)}...</div>
+                                  </div>
+                              </div>
+                              <div className="flex flex-col sm:items-end gap-1.5">
+                                  <span className="text-xs font-black text-emerald-600 flex items-center gap-1.5 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-100 shadow-sm">
+                                      <Sprout size={12}/> 剩餘優先權利: {m.newbie_passes ?? 0} 次
+                                  </span>
+                                  <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><Mail size={12} className="text-slate-400"/> {m.email || '未建檔信箱'}</span>
+                                  <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><Phone size={12} className="text-slate-400"/> {m.phone || '未建檔電話'}</span>
+                              </div>
+                          </div>
+                      )) : (
+                          <div className="text-center py-12 flex flex-col items-center justify-center gap-3">
+                              <div className="text-sm font-bold text-slate-500">目前尚無新人資料</div>
+                          </div>
+                      )}
+                  </div>
+
+                  <div className="p-4 bg-slate-50 border-t border-slate-100 shrink-0">
+                      <button onClick={() => setShowNewcomersModal(false)} className="w-full py-3.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-black rounded-xl transition-colors active:scale-95">關閉名單</button>
                   </div>
               </div>
           </div>
