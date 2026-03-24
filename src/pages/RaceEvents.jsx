@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { Calendar, MapPin, Users, Clock, ChevronRight, Activity, Flame, ShieldAlert, Timer, CheckCircle, X, Loader2, UsersRound, Crown, Sprout, Handshake, Send, Flag, Settings, Bell, ChevronDown, ChevronUp, Trash2, AlertTriangle, Medal, ServerCrash, Server, Menu, User, Edit3, Zap, Plus, Save } from 'lucide-react'
+import { Calendar, MapPin, Users, Clock, ChevronRight, Activity, Flame, ShieldAlert, Timer, CheckCircle, X, Loader2, UsersRound, Crown, Sprout, Handshake, Send, Flag, Settings, Bell, ChevronDown, ChevronUp, Trash2, AlertTriangle, Medal, ServerCrash, Menu, User, Edit3, Zap, Plus, Save, ArrowRight } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 
@@ -131,12 +131,9 @@ export default function RaceEvents() {
           const { error } = await supabase.from('profiles').select('id').limit(1);
           const latency = Math.round(performance.now() - start);
           setServerLatency(latency);
-          
           if (error) throw error;
-          
           if (latency > 1500) setServerStatus('warning'); 
           else setServerStatus('healthy'); 
-          
       } catch (err) {
           setServerStatus('error'); 
       }
@@ -172,19 +169,44 @@ export default function RaceEvents() {
         });
   }
 
-  const setupRealtimeNotifications = (userId) => {
-      const channel = supabase.channel('race-events-notifs')
-          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'user_notifications', filter: `user_id=eq.${userId}` }, (payload) => {
-              setNotifications(prev => [{...payload.new, date: payload.new.created_at}, ...prev]);
-          })
-          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'user_notifications', filter: `user_id=eq.${userId}` }, (payload) => {
-              setNotifications(prev => prev.map(n => n.id === payload.new.id ? {...payload.new, date: payload.new.created_at} : n));
-          })
-          .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'user_notifications', filter: `user_id=eq.${userId}` }, (payload) => {
-              setNotifications(prev => prev.filter(n => n.id !== payload.old.id));
-          })
-          .subscribe()
-      notifChannelRef.current = channel;
+  // 🌟 鈴鐺雙引擎同步化：精準抓取個人通知 + 系統稽核日誌
+  const fetchNotifs = async () => {
+      try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (!user) return;
+
+          const { data: pData } = await supabase.from('user_notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(50);
+          let allNotifs = pData ? pData.map(n => ({...n, date: n.created_at})) : [];
+
+          const role = localStorage.getItem('iron_medic_user_role') || 'USER';
+          const isAdmin = ADMIN_ROLES.some(r => role.toUpperCase().includes(r));
+
+          if (isAdmin) {
+              const { data: aData } = await supabase.from('admin_notifications').select('*').order('created_at', { ascending: false }).limit(50);
+              if (aData) {
+                  const adminMapped = aData.map(n => ({
+                      id: `admin_${n.id}`, 
+                      user_id: user.id, 
+                      tab: 'system',
+                      category: 'bell',
+                      message: n.message,
+                      date: n.created_at,
+                      is_read: false 
+                  }));
+                  allNotifs = [...allNotifs, ...adminMapped].sort((a,b) => new Date(b.date) - new Date(a.date));
+              }
+          }
+          setNotifications(allNotifs);
+
+          if (!notifChannelRef.current) {
+              const channel = supabase.channel('race-events-notifs')
+                  .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'user_notifications', filter: `user_id=eq.${user.id}` }, () => { fetchNotifs(); })
+                  .subscribe();
+              notifChannelRef.current = channel;
+          }
+      } catch (e) {
+          console.log('通知載入異常', e);
+      }
   }
 
   const fetchUserDataAndRaces = async () => {
@@ -215,21 +237,8 @@ export default function RaceEvents() {
                       });
                   }
 
-                  const eightMonthsAgo = new Date();
-                  eightMonthsAgo.setMonth(eightMonthsAgo.getMonth() - 8);
-                  
-                  const { data: notifs } = await supabase
-                      .from('user_notifications')
-                      .select('*')
-                      .eq('user_id', user.id)
-                      .gte('created_at', eightMonthsAgo.toISOString())
-                      .order('created_at', { ascending: false })
-                  
-                  if (notifs) {
-                      setNotifications(notifs.map(n => ({ ...n, date: n.created_at })))
-                  }
-                  
-                  setupRealtimeNotifications(user.id);
+                  // 🌟 呼叫雙引擎抓取通知
+                  await fetchNotifs();
               }
           } catch (e) { console.log("獲取身分失敗，略過", e) }
       }
@@ -256,9 +265,16 @@ export default function RaceEvents() {
       } catch(e){}
   }
 
+  // 🌟 支援刪除 admin_notifications (與 DigitalID 保持一致)
   const deleteNotification = async (id) => {
       setNotifications(prev => prev.filter(n => n.id !== id));
-      try { await supabase.from('user_notifications').delete().eq('id', id); } catch(e){}
+      try { 
+          if (String(id).startsWith('admin_')) {
+              await supabase.from('admin_notifications').delete().eq('id', id.replace('admin_', ''));
+          } else {
+              await supabase.from('user_notifications').delete().eq('id', id); 
+          }
+      } catch(e){}
   }
 
   const getNotifIcon = (category) => {
@@ -504,7 +520,6 @@ export default function RaceEvents() {
       }
   }
 
-  // ⚡ 快速編輯：智能安插人員 (完美繼承 RaceDetail 邏輯與扣底機制)
   const handleQuickInsert = async (slotId) => {
       const formData = insertForms[slotId] || { name: '', roleTag: '' };
       const trimmedName = formData.name.trim();
@@ -584,7 +599,6 @@ export default function RaceEvents() {
       } catch(e) { alert("安插寫入失敗：" + e.message) }
   }
 
-  // ⚡ 快速編輯：一鍵踢除人員 (完美繼承退還機制)
   const handleQuickKick = async (slotId, userIdToKick, userName) => {
       if(!window.confirm(`⚠️ 賽事總監警告 ⚠️\n確定要強制將【${userName}】從此賽段踢除嗎？`)) return;
 
@@ -835,6 +849,7 @@ export default function RaceEvents() {
               </div>
           ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 lg:gap-8 pb-10">
+                  {/* 🌟 完整未刪減的賽事卡片渲染區塊 */}
                   {filteredRaces.map((race, idx) => {
                       const { totalRegistered, newcomerCount, participantDetails } = extractParticipantsData(race);
                       const required = race.medic_required || 0;
@@ -985,23 +1000,9 @@ export default function RaceEvents() {
                       <button onClick={() => setShowNotifPanel(false)} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors active:scale-95"><X size={20}/></button>
                   </div>
                   <div className="flex bg-white px-4 pt-2 border-b border-slate-200 shrink-0">
-                      <button onClick={() => setNotifTab('system')} className={`flex-1 pb-3 text-sm font-bold border-b-2 transition-colors ${notifTab === 'system' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>賽事通報</button>
+                      <button onClick={() => setNotifTab('system')} className={`flex-1 pb-3 text-sm font-bold border-b-2 transition-colors ${notifTab === 'system' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>賽事/系統通報</button>
                       <button onClick={() => setNotifTab('personal')} className={`flex-1 pb-3 text-sm font-bold border-b-2 transition-colors ${notifTab === 'personal' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>個人提醒</button>
                   </div>
-                  
-                  {notifTab === 'system' && ['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN', '賽事總監', '系統管理員', '管理員'].some(r => userRole.toUpperCase().includes(r)) && (
-                      <div className="px-4 pt-4 shrink-0">
-                          <div className="bg-red-50/80 border border-red-200 rounded-xl p-3.5 flex gap-3 shadow-sm">
-                              <AlertTriangle size={18} className="text-red-500 shrink-0 mt-0.5"/>
-                              <div>
-                                  <div className="text-xs font-black text-red-700">⚠️ 系統資料庫負載告警</div>
-                                  <div className="text-[10px] font-bold text-red-500/80 mt-1 leading-relaxed">
-                                      為避免全體廣播導致資料庫爆滿，系統級通知（如：新增賽事）目前已啟用負載保護，僅限定派發給「當屆有效會員」。
-                                  </div>
-                              </div>
-                          </div>
-                      </div>
-                  )}
 
                   <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
                       <div className="flex justify-between items-center mb-2 px-1">
@@ -1012,13 +1013,30 @@ export default function RaceEvents() {
                           notifications.filter(n => n.tab === notifTab).map(notif => {
                               const isItemRead = notif.isRead || notif.is_read;
                               return (
-                              <div key={notif.id} className={`p-4 rounded-2xl border transition-all relative group ${isItemRead ? 'bg-slate-100/50 border-slate-200 opacity-80' : 'bg-white border-blue-200 shadow-sm'}`}>
-                                  <button onClick={() => deleteNotification(notif.id)} className="absolute top-2 right-2 p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={14}/></button>
+                              <div key={notif.id} 
+                                  // 🌟 點擊通知的雷達觸發器
+                                  onClick={() => {
+                                      const match = notif.message.match(/\(ID:\s*(.*?)\)/);
+                                      if (match) {
+                                          navigate(`/admin/members?view=ALL&targetId=${match[1]}`);
+                                          setShowNotifPanel(false);
+                                      }
+                                  }}
+                                  className={`p-4 rounded-2xl border transition-all relative group ${notif.message.includes('(ID:') ? 'cursor-pointer hover:border-blue-400 hover:shadow-md' : ''} ${isItemRead ? 'bg-slate-100/50 border-slate-200 opacity-80' : 'bg-white border-blue-200 shadow-sm'}`}>
+                                  <button onClick={(e) => { e.stopPropagation(); deleteNotification(notif.id); }} className="absolute top-2 right-2 p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={14}/></button>
                                   <div className="flex gap-3">
-                                      <div className={`mt-0.5 w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isItemRead ? 'bg-slate-200' : 'bg-blue-50'}`}>{getNotifIcon(notif.category)}</div>
+                                      <div className={`mt-0.5 w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isItemRead ? 'bg-slate-200' : 'bg-blue-50'}`}>
+                                          {getNotifIcon(notif.category)}
+                                      </div>
                                       <div className="flex-1 pr-6">
                                           <div className="text-[10px] text-slate-400 font-medium mb-1 flex items-center gap-1"><Clock size={10}/> {new Date(notif.date).toLocaleDateString()}</div>
-                                          <p className={`text-sm leading-relaxed ${isItemRead ? 'text-slate-600' : 'text-slate-800 font-bold'}`}>{notif.message}</p>
+                                          {/* 🌟 加上 whitespace-pre-wrap 讓明細完美換行 */}
+                                          <p className={`text-sm leading-relaxed whitespace-pre-wrap break-words ${isItemRead ? 'text-slate-600' : 'text-slate-800 font-bold'}`}>
+                                              {notif.message}
+                                          </p>
+                                          {notif.message.includes('(ID:') && (
+                                              <div className="mt-2 text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-1 rounded inline-block">👆 點擊前往審核異動</div>
+                                          )}
                                       </div>
                                   </div>
                               </div>
@@ -1067,9 +1085,7 @@ export default function RaceEvents() {
           </div>
       )}
 
-      {/* ========================================== */}
-      {/* ⚡ 快速編輯 (Quick Edit) 上帝捷徑彈窗      */}
-      {/* ========================================== */}
+      {/* 🌟 快速編輯 (Quick Edit) 上帝捷徑彈窗 */}
       {quickEditRace && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4 animate-fade-in" onClick={() => setQuickEditRace(null)}>
               <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-4xl flex flex-col max-h-[90vh] animate-bounce-in" onClick={e => e.stopPropagation()}>

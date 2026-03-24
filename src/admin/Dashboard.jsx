@@ -156,10 +156,10 @@ export default function Dashboard() {
           }
 
           try {
-              const { data: notifs } = await supabase.from('admin_notifications').select('*').eq('type', 'PROFILE_UPDATE').order('created_at', { ascending: false }).limit(10)
+              const { data: notifs } = await supabase.from('admin_notifications').select('*').eq('type', 'PROFILE_UPDATE').order('created_at', { ascending: false }).limit(20)
               if (notifs) {
                   await supabase.from('admin_notifications').update({ is_read: true }).eq('is_read', false).eq('type', 'PROFILE_UPDATE')
-                  setProfileUpdates(notifs.slice(0, 5))
+                  setProfileUpdates(notifs)
               }
           } catch(e) { console.log("admin_notifications 表格可能尚未建立或無資料") }
 
@@ -199,14 +199,22 @@ export default function Dashboard() {
   const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444']
   const TAIWAN_CENTER = [23.6978, 120.9605]
 
-  // 🌟 核心修改：送出隱形包裹的導航函數
+  // 🌟 核心修改：送出隱形包裹的導航函數 (支援雷達 ID 掃描)
   const handleReviewClick = (log) => {
-      navigate('/admin/members', {
-          state: { 
-              autoEditUserName: log.user_name, // 用名字去 CRM 裡找人
-              changesMessage: log.message      // 傳遞變更了什麼內容，供高亮使用
-          }
-      });
+      // 擷取通知訊息內的 (ID: xxxx)
+      const match = log.message.match(/\(ID:\s*(.*?)\)/);
+      if (match && match[1]) {
+          // 精準雷達跳轉
+          navigate(`/admin/members?view=ALL&targetId=${match[1]}`);
+      } else {
+          // 舊版備用跳轉
+          navigate('/admin/members', {
+              state: { 
+                  autoEditUserName: log.user_name, 
+                  changesMessage: log.message      
+              }
+          });
+      }
   }
 
   if (loading) return <div className="h-[60vh] flex items-center justify-center text-slate-400"><Loader2 className="animate-spin mr-2"/> 正在載入醫鐵總部賽事數據...</div>
@@ -251,7 +259,7 @@ export default function Dashboard() {
                   <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
                       <div className="bg-indigo-50/50 p-4 border-b border-indigo-100 flex items-center gap-2">
                           <div className="p-1.5 bg-indigo-100 text-indigo-600 rounded-lg"><UserCheck size={18}/></div>
-                          <h3 className="font-black text-indigo-900">會員資料變更紀錄</h3>
+                          <h3 className="font-black text-indigo-900">會員資料變更紀錄 (稽核日誌)</h3>
                       </div>
                       <div className="p-4 flex-1 overflow-y-auto max-h-[500px] custom-scrollbar space-y-3">
                           {profileUpdates.length > 0 ? profileUpdates.map((log, i) => (
@@ -261,15 +269,18 @@ export default function Dashboard() {
                                   onClick={() => handleReviewClick(log)}
                                   className="flex gap-3 p-3 rounded-xl border border-slate-100 hover:bg-indigo-50/50 hover:border-indigo-200 transition-colors cursor-pointer group"
                               >
-                                  <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 font-black flex items-center justify-center shrink-0 text-xs">
+                                  <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 font-black flex items-center justify-center shrink-0 text-xs mt-1">
                                       {log.user_name?.charAt(0) || '?'}
                                   </div>
-                                  <div className="flex-1">
+                                  <div className="flex-1 min-w-0">
                                       <div className="text-sm font-black text-slate-800">{log.user_name}</div>
-                                      <div className="text-xs text-slate-500 font-medium mt-0.5 leading-snug">{log.message}</div>
+                                      {/* 🌟 加上 whitespace-pre-wrap 保證日誌的換行完美呈現 */}
+                                      <div className="text-xs text-slate-600 font-bold mt-1.5 mb-1 leading-relaxed whitespace-pre-wrap break-words bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                          {log.message}
+                                      </div>
                                       <div className="flex justify-between items-end mt-1.5">
                                           <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1"><Clock size={10}/> {new Date(log.created_at).toLocaleString()}</div>
-                                          <span className="text-[10px] font-bold text-slate-400 group-hover:text-indigo-600 transition-colors flex items-center gap-1">前往 CRM 審查 <ArrowRight size={10}/></span>
+                                          <span className="text-[10px] font-black text-indigo-500 bg-indigo-50 px-2 py-1 rounded group-hover:bg-indigo-100 transition-colors flex items-center gap-1">前往 CRM 審查 <ArrowRight size={10}/></span>
                                       </div>
                                   </div>
                               </div>
