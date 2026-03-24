@@ -5,8 +5,8 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { MapContainer, TileLayer, Marker, Popup, CircleMarker } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
-// 🌟 確保新增了 ArrowRight 圖示，用於 CRM 直達車
-import { Users, Activity, Award, ShieldAlert, Map as MapIcon, Loader2, Flag, Mountain, Bike, Footprints, User, MapPin, Bell, UserCheck, Calendar, Clock, History, ChevronUp, ChevronDown, Handshake, Send, Timer, ArrowRight } from 'lucide-react'
+// 🌟 確保新增了需要的圖示包含 Info
+import { Users, Activity, Award, ShieldAlert, Map as MapIcon, Loader2, Flag, Mountain, Bike, Footprints, User, MapPin, Bell, UserCheck, Calendar, Clock, History, ChevronUp, ChevronDown, Handshake, Send, Timer, ArrowRight, X, UserMinus, Mail, Phone, Info } from 'lucide-react'
 
 // 修正 Leaflet icon 消失問題
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -45,15 +45,21 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const CURRENT_YEAR = new Date().getFullYear();
 
-  // 頂部四大指標
+  // 頂部四大指標 + 新增的轉換率指標
   const [stats, setStats] = useState({
       totalMembers: 0,
       currentMembers: 0,
       newMembers: 0,
       teamLeaders: 0,
-      vipMembers: 0
+      vipMembers: 0,
+      loggedMembers: 0,          
+      unloggedMembersCount: 0    
   })
   
+  // 🌟 追蹤獵殺名單狀態
+  const [unloggedList, setUnloggedList] = useState([])
+  const [showUnloggedModal, setShowUnloggedModal] = useState(false)
+
   // 原本的賽事地圖分類資料
   const [raceStats, setRaceStats] = useState({
       marathon: 0, trail: 0, bike: 0, tri: 0
@@ -81,6 +87,7 @@ export default function Dashboard() {
 
   const fetchDashboardData = async () => {
       try {
+          // 1. 抓取基本數量統計
           const [
               { count: total },
               { count: current },
@@ -94,15 +101,43 @@ export default function Dashboard() {
               supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_team_leader', 'Y'),
               supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_vip', 'Y')
           ]);
+
+          // 🌟 2. 獨立抓取「當屆會員」明細，以進行新舊系統轉換率比對
+          // 必須撈出 basic_edit_count 與 med_edit_count 作為活躍足跡的判定依據
+          const { data: currentMembersList } = await supabase.from('profiles')
+              .select('id, full_name, email, phone, basic_edit_count, med_edit_count')
+              .eq('is_current_member', 'Y')
+              .limit(5000);
+          
+          let loggedInCount = 0;
+          let unloggedArray = [];
+          
+          if (currentMembersList) {
+              currentMembersList.forEach(m => {
+                  // 🌟 終極足跡獵殺法：只要他在新系統有存過任何一次數位 ID (edit_count > 0)，就判定為已開通！
+                  const hasFootprint = (m.basic_edit_count > 0) || (m.med_edit_count > 0);
+
+                  if (hasFootprint) {
+                      loggedInCount++;
+                  } else {
+                      unloggedArray.push(m);
+                  }
+              });
+          }
+          
+          setUnloggedList(unloggedArray);
           
           setStats({
               totalMembers: total || 0, 
               currentMembers: current || 0,
               newMembers: newM || 0,
               teamLeaders: leaders || 0,
-              vipMembers: vips || 0
+              vipMembers: vips || 0,
+              loggedMembers: loggedInCount,
+              unloggedMembersCount: unloggedArray.length
           })
 
+          // 3. 抓取賽事資料
           const { data: races } = await supabase.from('races').select('id, name, date, type, location, status, medic_required, medic_registered').order('created_at', { ascending: false })
           let rMarathon = 0, rTrail = 0, rBike = 0, rTri = 0;
           let locations = []
@@ -132,6 +167,7 @@ export default function Dashboard() {
               setRaceLocations(locations)
           }
 
+          // 4. 抓取地圖與性別分佈
           const { data: memberData } = await supabase.from('profiles').select('gender, address')
           if (memberData) {
               let mMale = 0, mFemale = 0;
@@ -155,6 +191,7 @@ export default function Dashboard() {
               })
           }
 
+          // 5. 抓取通知
           try {
               const { data: notifs } = await supabase.from('admin_notifications').select('*').eq('type', 'PROFILE_UPDATE').order('created_at', { ascending: false }).limit(20)
               if (notifs) {
@@ -199,15 +236,12 @@ export default function Dashboard() {
   const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444']
   const TAIWAN_CENTER = [23.6978, 120.9605]
 
-  // 🌟 核心修改：送出隱形包裹的導航函數 (支援雷達 ID 掃描)
+  // 送出隱形包裹的導航函數 (支援雷達 ID 掃描)
   const handleReviewClick = (log) => {
-      // 擷取通知訊息內的 (ID: xxxx)
       const match = log.message.match(/\(ID:\s*(.*?)\)/);
       if (match && match[1]) {
-          // 精準雷達跳轉
           navigate(`/admin/members?view=ALL&targetId=${match[1]}`);
       } else {
-          // 舊版備用跳轉
           navigate('/admin/members', {
               state: { 
                   autoEditUserName: log.user_name, 
@@ -274,7 +308,6 @@ export default function Dashboard() {
                                   </div>
                                   <div className="flex-1 min-w-0">
                                       <div className="text-sm font-black text-slate-800">{log.user_name}</div>
-                                      {/* 🌟 加上 whitespace-pre-wrap 保證日誌的換行完美呈現 */}
                                       <div className="text-xs text-slate-600 font-bold mt-1.5 mb-1 leading-relaxed whitespace-pre-wrap break-words bg-slate-50 p-2 rounded-lg border border-slate-100">
                                           {log.message}
                                       </div>
@@ -304,7 +337,8 @@ export default function Dashboard() {
           <p className="text-slate-500 font-medium">即時掌握全台醫護鐵人會員與賽事分佈</p>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
+      {/* 🌟 擴充為 5 格排版，並將轉換率狀態框置於中央 */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 md:gap-6">
           <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow group">
               <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform"><Users size={24}/></div>
               <h3 className="text-slate-500 font-bold text-sm">註冊總人數</h3>
@@ -319,6 +353,24 @@ export default function Dashboard() {
                   <span className="text-green-600">{stats.currentMembers}</span>
                   <span className="text-lg text-slate-400">/</span>
                   <span className="text-xl text-emerald-500" title="當屆新人總人數">{stats.newMembers}</span>
+              </div>
+          </div>
+
+          {/* 🌟 全新模組：新系統轉換狀態 (點擊數字可看未登入名單) */}
+          <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow group relative overflow-hidden md:col-span-1 lg:col-span-1 col-span-2">
+              <div className="absolute top-0 right-0 w-24 h-24 bg-rose-50 rounded-bl-full -z-10 transition-transform group-hover:scale-125"></div>
+              <div className="w-12 h-12 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform relative z-10"><UserCheck size={24}/></div>
+              <h3 className="text-slate-500 font-bold text-[13px] md:text-sm whitespace-nowrap">當屆開通 / 未開通追蹤</h3>
+              <div className="text-2xl md:text-3xl font-black text-slate-800 mt-1 flex items-baseline gap-1 relative z-10">
+                  <span className="text-blue-600" title="已成功登入新系統並儲存資料">{stats.loggedMembers}</span>
+                  <span className="text-lg text-slate-400">/</span>
+                  <button 
+                      onClick={() => setShowUnloggedModal(true)}
+                      className="text-xl text-rose-500 hover:text-rose-600 hover:scale-110 transition-transform underline decoration-rose-300 decoration-2 underline-offset-4 cursor-pointer"
+                      title="點擊查看尚未開通名單"
+                  >
+                      {stats.unloggedMembersCount}
+                  </button>
               </div>
           </div>
 
@@ -504,6 +556,59 @@ export default function Dashboard() {
           </div>
 
       </div>
+
+      {/* 🌟 追蹤獵殺名單：當屆尚未登入新系統名單 Modal */}
+      {showUnloggedModal && (
+          <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[200] p-4 animate-fade-in backdrop-blur-sm" onClick={() => setShowUnloggedModal(false)}>
+              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-2xl flex flex-col max-h-[85vh] overflow-hidden animate-bounce-in" onClick={e => e.stopPropagation()}>
+                  
+                  <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
+                      <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
+                          <UserMinus className="text-rose-500"/> 當屆未開通新系統名單
+                          <span className="bg-rose-100 text-rose-700 text-[10px] font-black px-2 py-0.5 rounded-full ml-2">共 {unloggedList.length} 人</span>
+                      </h3>
+                      <button onClick={() => setShowUnloggedModal(false)} className="p-2 text-slate-400 hover:bg-slate-200 rounded-full transition-colors active:scale-95"><X size={20}/></button>
+                  </div>
+                  
+                  {/* 🌟 新增貼心提示面板，解說判定邏輯 */}
+                  <div className="bg-blue-50 text-blue-700 text-[11px] p-4 font-bold flex items-start gap-2 border-b border-blue-100 shrink-0">
+                      <Info size={16} className="shrink-0 mt-0.5"/>
+                      <p className="leading-relaxed">
+                          判定基準說明：基於 Supabase 資安隔離限制，前端無法直連登入密碼庫。目前「已成功開通」之嚴格判定條件為：該會員登入新系統後，已成功於【個人數位 ID】中確認並儲存過核心或醫護資料（留下活躍足跡）。
+                      </p>
+                  </div>
+
+                  <div className="p-6 overflow-y-auto custom-scrollbar flex-1 bg-white space-y-3">
+                      {unloggedList.length > 0 ? unloggedList.map(m => (
+                          <div key={m.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl border border-slate-100 hover:bg-rose-50/30 hover:border-rose-200 transition-colors gap-3">
+                              <div className="flex items-center gap-3">
+                                  <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center font-black text-sm">{m.full_name?.charAt(0) || '?'}</div>
+                                  <div>
+                                      <div className="font-black text-slate-800 text-sm flex items-center gap-2">{m.full_name}</div>
+                                      <div className="text-[10px] text-slate-400 font-mono mt-0.5" title="資料庫 UUID">系統 ID: {m.id?.substring(0,8)}...</div>
+                                  </div>
+                              </div>
+                              <div className="flex flex-col sm:items-end gap-1.5">
+                                  <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><Mail size={12} className="text-slate-400"/> {m.email || '未建檔信箱'}</span>
+                                  <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><Phone size={12} className="text-slate-400"/> {m.phone || '未建檔電話'}</span>
+                              </div>
+                          </div>
+                      )) : (
+                          <div className="text-center py-12 flex flex-col items-center justify-center gap-3">
+                              <div className="w-16 h-16 bg-green-100 text-green-500 rounded-full flex items-center justify-center mb-2"><CheckCircle size={32}/></div>
+                              <div className="text-lg font-black text-slate-800">太棒了！</div>
+                              <div className="text-sm font-bold text-slate-500">所有當屆會員都已經成功開通並更新資料了！</div>
+                          </div>
+                      )}
+                  </div>
+
+                  <div className="p-4 bg-slate-50 border-t border-slate-100 shrink-0">
+                      <button onClick={() => setShowUnloggedModal(false)} className="w-full py-3.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-black rounded-xl transition-colors active:scale-95">關閉名單</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
     </div>
   )
 }
