@@ -298,7 +298,7 @@ export default function RaceBuilder() {
                           <input type="checkbox" className="w-5 h-5 accent-orange-500" checked={raceData.isHot} onChange={e => setRaceData({...raceData, isHot: e.target.checked})}/>
                           <div>
                               <div className="font-black text-orange-700 flex items-center gap-1"><Flame size={16}/> 標記為熱門/重點賽事</div>
-                              <div className="text-xs text-orange-600/80 font-medium">將在賽事大廳中加上火焰特效凸顯</div>
+                              <div className="text-xs text-orange-600/80 font-medium">在賽事大廳中加上火焰特效</div>
                           </div>
                       </label>
                   </div>

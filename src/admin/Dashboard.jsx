@@ -225,7 +225,7 @@ export default function Dashboard() {
                   <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
                       <div className="bg-blue-50/50 p-4 border-b border-blue-100 flex items-center gap-2">
                           <div className="p-1.5 bg-blue-100 text-blue-600 rounded-lg"><Flag size={18}/></div>
-                          <h3 className="font-black text-blue-900">預定新增賽事動態</h3>
+                          <h3 className="font-black text-blue-900">新增賽事動態</h3>
                       </div>
                       <div className="p-4 flex-1 overflow-y-auto max-h-[500px] custom-scrollbar space-y-3">
                           {recentRaces.length > 0 ? recentRaces.map((race, i) => (
@@ -290,7 +290,7 @@ export default function Dashboard() {
     <div className="space-y-6 md:space-y-8 animate-fade-in pb-20">
       <div className="mb-8">
           <h2 className="text-3xl font-black text-slate-800 mb-2">醫鐵數據儀表板</h2>
-          <p className="text-slate-500 font-medium">即時掌握全台醫護鐵人戰力與賽事分佈</p>
+          <p className="text-slate-500 font-medium">即時掌握全台醫護鐵人會員與賽事分佈</p>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">

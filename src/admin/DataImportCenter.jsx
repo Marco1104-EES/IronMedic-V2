@@ -1238,10 +1238,10 @@ export default function DataImportCenter() {
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
                 <div>
                     <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
-                        <Database className="text-blue-600"/> 資料整合匯入中心 <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold border border-slate-200">微觀八核心比對版 V10.0
+                        <Database className="text-blue-600"/> 資料整合匯入中心 <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold border border-slate-200">核心比對版 V10.0
                         </span>
                     </h2>
-                    <p className="text-slate-500 text-sm mt-1">深度清洗、日期轉換與黑洞收納箱完整實裝。</p>
+                    <p className="text-slate-500 text-sm mt-1">深度檢查、日期轉換與黑洞收納箱(無效資訊)。</p>
                 </div>
                 <div className="flex bg-slate-50 p-1 rounded-lg border border-slate-200">
                     <button onClick={()=>handleModeSwitch('full')} className={`px-4 py-2 rounded-md font-bold text-sm flex items-center gap-2 transition-all ${mode==='full' ? 'bg-white shadow-sm border border-slate-200 text-blue-600' : 'text-slate-500 hover:text-slate-700'} `}><Merge size={16}/> 完整資料整合</button>
@@ -1572,7 +1572,7 @@ export default function DataImportCenter() {
                 <h2 className="text-2xl font-black text-amber-600 flex items-center gap-2">
                     <Flag className="text-amber-500"/> 賽事年度總表批次建檔
                 </h2>
-                <p className="text-slate-500 text-sm mt-1">智能時空收束 / 語意職位融合 / 自動對齊系統狀態版 V10.5</p>
+                <p className="text-slate-500 text-sm mt-1">智能日期收束 / 語意職位融合 / 自動對齊系統狀態版 V10.5</p>
             </div>
           </div>
 
@@ -1634,7 +1634,7 @@ export default function DataImportCenter() {
                   <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg text-xs font-medium text-amber-800 leading-relaxed shadow-inner">
                       <span className="font-bold text-amber-600 block mb-1 flex items-center gap-1"><AlertTriangle size={14}/> 類神經網絡整合說明：</span>
                       <ul className="list-disc pl-4 space-y-1 text-slate-700 mt-2">
-                          <li><span className="font-bold text-blue-600">時空解析：</span>遇到 `2025/1/1-2025/1/8` 等區間格式，系統將自動收束為首日標準日期。</li>
+                          <li><span className="font-bold text-blue-600">日期時間解析：</span>遇到 `2025/1/1-2025/1/8` 等區間格式，系統將自動收束為首日標準日期。</li>
                           <li><span className="font-bold text-purple-600">後綴智能剖析：</span>遇到 `蔡智豪21K`, `董珮珊da1`，系統自動拆除後綴，並將其自動分派至 `21K`, `Day 1` 等對應梯次。</li>
                           <li><span className="font-bold text-red-600">職務融合去重：</span>同時出現在「教官欄」與「人員欄」的成員，系統會自動融為一筆，並保留其專業教官身分（絕不重複計算名額）。</li>
                       </ul>
