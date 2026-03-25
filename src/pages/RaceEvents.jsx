@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { Calendar, MapPin, Users, Clock, ChevronRight, Activity, Flame, ShieldAlert, Timer, CheckCircle, X, Loader2, UsersRound, Crown, Sprout, Handshake, Send, Flag, Settings, Bell, ChevronDown, ChevronUp, Trash2, AlertTriangle, Medal, ServerCrash, Menu, User, Edit3, Zap, Plus, Save, ArrowRight } from 'lucide-react'
+import { Calendar, MapPin, Users, Clock, ChevronRight, Activity, Flame, ShieldAlert, Timer, CheckCircle, X, Loader2, UsersRound, Crown, Sprout, Handshake, Send, Flag, Settings, Bell, ChevronDown, ChevronUp, Trash2, AlertTriangle, Medal, ServerCrash, Menu, User, Edit3, Zap, Plus, Save, ArrowRight, Lock } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 
 export default function RaceEvents() {
   const [races, setRaces] = useState([])
   const [loading, setLoading] = useState(true)
-  const [statusFilter, setStatusFilter] = useState('OPEN') 
+  
+  // 🌟 預設分類改為 RECRUITING (招募中組合包)
+  const [statusFilter, setStatusFilter] = useState('RECRUITING') 
   const [timeFilter, setTimeFilter] = useState('CURRENT_YEAR') 
 
   const [previewRace, setPreviewRace] = useState(null)
@@ -42,7 +44,7 @@ export default function RaceEvents() {
 
   const ADMIN_ROLES = ['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN', '賽事總監', '系統管理員', '管理員'];
 
-  // 🌟 全局無塵室字串淨化解析器
+  // 全局無塵室字串淨化解析器
   const parseAssignees = (assigneeString) => {
       if (!assigneeString || typeof assigneeString !== 'string') return [];
       const rawAssignees = assigneeString.split('|').filter(s => s.trim() !== '');
@@ -140,8 +142,8 @@ export default function RaceEvents() {
   }
 
   const setupRealtimePresence = () => {
-      const channel = supabase.channel('room_1', {
-          config: { presence: { key: 'user_' + Math.random().toString(36).substr(2, 9) } }
+      const channel = supabase.channel('room_lobby_presence', {
+          config: { presence: { key: 'lobby_user_' + Math.random().toString(36).substr(2, 9) } }
       });
       channelRef.current = channel;
 
@@ -169,7 +171,6 @@ export default function RaceEvents() {
         });
   }
 
-  // 🌟 鈴鐺雙引擎同步化：精準抓取個人通知 + 系統稽核日誌
   const fetchNotifs = async () => {
       try {
           const { data: { user } } = await supabase.auth.getUser();
@@ -215,14 +216,13 @@ export default function RaceEvents() {
       
       if (user && user.email) {
           try {
-              const { data: profile } = await supabase.from('profiles').select('id, role, full_name, is_new_member, is_current_member, license_expiry, newbie_passes, total_races').eq('email', user.email).maybeSingle()
+              const { data: profile } = await supabase.from('profiles').select('id, role, full_name, is_new_member, is_current_member, license_expiry, newbie_passes, total_races, is_team_leader, is_vip').eq('email', user.email).maybeSingle()
               if (profile) {
                   const role = profile.role ? profile.role.toUpperCase().trim() : 'USER';
                   setUserRole(role);
                   setCurrentUserProfile(profile); 
                   localStorage.setItem('iron_medic_user_role', role); 
 
-                  // 🌟 如果是管理員，自動抓取當屆會員名單供「快速安插」使用
                   if (ADMIN_ROLES.some(r => role.includes(r))) {
                       const { data: membersData } = await supabase.from('profiles').select('*').eq('is_current_member', 'Y');
                       if (membersData) setAllMembers(membersData);
@@ -236,8 +236,6 @@ export default function RaceEvents() {
                           avatar: profile.full_name ? profile.full_name.charAt(0) : '?'
                       });
                   }
-
-                  // 🌟 呼叫雙引擎抓取通知
                   await fetchNotifs();
               }
           } catch (e) { console.log("獲取身分失敗，略過", e) }
@@ -265,7 +263,6 @@ export default function RaceEvents() {
       } catch(e){}
   }
 
-  // 🌟 支援刪除 admin_notifications (與 DigitalID 保持一致)
   const deleteNotification = async (id) => {
       setNotifications(prev => prev.filter(n => n.id !== id));
       try { 
@@ -380,6 +377,14 @@ export default function RaceEvents() {
 
   const getInitial = (name) => name ? name.replace(/[^a-zA-Z\u4e00-\u9fa5]/g, '').charAt(0) || '?' : '?'
 
+  // 🌟 特權身分判定 (VIP / 教官 / 管理員)
+  const isPrivileged = currentUserProfile?.role === 'SUPER_ADMIN' || 
+                       currentUserProfile?.role === 'TOURNAMENT_DIRECTOR' || 
+                       currentUserProfile?.is_team_leader === 'Y' || 
+                       currentUserProfile?.is_vip === 'Y';
+  const isAdminOrDirector = isSuperAdmin; // Alias for backward compatibility in buttons
+
+  // 🌟 核心升級：賽事分類超級收納術
   const filteredRaces = races.filter(race => {
       if (!race.date) return false;
       const today = new Date();
@@ -391,16 +396,39 @@ export default function RaceEvents() {
       if (timeFilter === 'CURRENT_YEAR') matchTime = raceYear === CURRENT_YEAR;
       else if (timeFilter === 'PAST') matchTime = raceYear < CURRENT_YEAR;
       else if (timeFilter === 'FUTURE') matchTime = raceYear > CURRENT_YEAR;
+      else if (timeFilter === 'ALL') matchTime = true;
 
       const isPastRace = raceDate < today || ['COMPLETED', 'CANCELLED', 'CLOSED'].includes(race.status);
-      let effectiveStatus = race.status;
-      if (isPastRace) {
-          effectiveStatus = 'SUBMITTED';
-      }
+      
+      // 判定這場賽事是否符合「幹部預先招募」條件
+      const now = new Date();
+      const earlyOpenTime = race.leader_early_open_time ? new Date(race.leader_early_open_time) : null;
+      const isEarlyOpenActive = earlyOpenTime && now >= earlyOpenTime;
+      const showEarlyAccess = isEarlyOpenActive && isPrivileged && (race.status === 'NEGOTIATING' || race.status === 'UPCOMING');
 
       let matchStatus = false;
-      if (statusFilter === 'ALL') matchStatus = true;
-      else matchStatus = effectiveStatus === statusFilter;
+
+      if (statusFilter === 'ALL') {
+          matchStatus = true;
+      } else if (statusFilter === 'LEADER_EARLY') {
+          // 只有這場賽事是預先招募狀態，且使用者有特權時才顯示
+          matchStatus = showEarlyAccess;
+      } else if (showEarlyAccess) {
+          // 💡 關鍵防護：如果這場賽事處於「預先招募」，就把它從一般分類(招募中/洽談中)強制移除，只顯示在「幹部專屬」與「全部賽事」
+          matchStatus = false;
+      } else {
+          // 常態大廳收納分類邏輯
+          let effectiveStatus = race.status;
+          if (isPastRace) effectiveStatus = 'CLOSED_GROUP'; // 過去賽事直接歸類到結案
+
+          if (statusFilter === 'RECRUITING') {
+              matchStatus = ['OPEN', 'UPCOMING', 'FULL'].includes(effectiveStatus);
+          } else if (statusFilter === 'NEGOTIATING') {
+              matchStatus = effectiveStatus === 'NEGOTIATING';
+          } else if (statusFilter === 'CLOSED') {
+              matchStatus = ['SUBMITTED', 'COMPLETED', 'CANCELLED', 'CLOSED', 'CLOSED_GROUP'].includes(effectiveStatus);
+          }
+      }
 
       return matchTime && matchStatus;
   });
@@ -414,15 +442,17 @@ export default function RaceEvents() {
       return null;
   }
 
+  // 🌟 動態統計更新，配合新的三大群組邏輯
   const raceStats = useMemo(() => {
     let total = races.length;
     let currentYearCount = 0;
     let pastCount = 0;
     let futureCount = 0;
-    let openCount = 0;
+    
+    let recruitingCount = 0;
     let negotiatingCount = 0;
-    let submittedCount = 0;
-    let upcomingCount = 0;
+    let closedCount = 0;
+    let leaderEarlyCount = 0;
 
     const today = new Date();
     today.setHours(0,0,0,0);
@@ -436,19 +466,33 @@ export default function RaceEvents() {
       else if (raceYear > CURRENT_YEAR) futureCount++;
 
       const isPastRace = raceDate < today || ['COMPLETED', 'CANCELLED', 'CLOSED'].includes(race.status);
-      let effectiveStatus = race.status;
-      if (isPastRace) {
-          effectiveStatus = 'SUBMITTED';
-      }
+      
+      const now = new Date();
+      const earlyOpenTime = race.leader_early_open_time ? new Date(race.leader_early_open_time) : null;
+      const isEarlyOpenActive = earlyOpenTime && now >= earlyOpenTime;
+      const showEarlyAccess = isEarlyOpenActive && isPrivileged && (race.status === 'NEGOTIATING' || race.status === 'UPCOMING');
 
-      if (effectiveStatus === 'OPEN') openCount++;
-      else if (effectiveStatus === 'NEGOTIATING') negotiatingCount++;
-      else if (effectiveStatus === 'SUBMITTED') submittedCount++;
-      else if (effectiveStatus === 'UPCOMING') upcomingCount++;
+      if (showEarlyAccess) {
+          leaderEarlyCount++;
+      } else if (isPastRace || ['SUBMITTED', 'COMPLETED', 'CANCELLED', 'CLOSED'].includes(race.status)) {
+          closedCount++;
+      } else if (['OPEN', 'UPCOMING', 'FULL'].includes(race.status)) {
+          recruitingCount++;
+      } else if (race.status === 'NEGOTIATING') {
+          negotiatingCount++;
+      }
     });
 
-    return { total, currentYearCount, pastCount, futureCount, openCount, negotiatingCount, submittedCount, upcomingCount };
-  }, [races, CURRENT_YEAR]);
+    return { total, currentYearCount, pastCount, futureCount, recruitingCount, negotiatingCount, closedCount, leaderEarlyCount };
+  }, [races, CURRENT_YEAR, isPrivileged]);
+
+  const raceTypeColors = {
+      '馬拉松': 'bg-blue-50 text-blue-700 border-blue-200',
+      '越野賽': 'bg-green-50 text-green-700 border-green-200',
+      '自行車': 'bg-amber-50 text-amber-700 border-amber-200',
+      '鐵人三項': 'bg-red-50 text-red-700 border-red-200',
+      '其他': 'bg-slate-50 text-slate-700 border-slate-200'
+  }
 
   const getRegistrationPhase = (openTimeStr) => {
       if (!openTimeStr) return { phase: 2, label: '全面開放' }; 
@@ -505,7 +549,8 @@ export default function RaceEvents() {
       try {
           const { error } = await supabase.from('races').update({ 
               status: quickEditRace.status,
-              slots_data: quickEditRace.slots_data 
+              slots_data: quickEditRace.slots_data,
+              medic_registered: quickEditRace.medic_registered 
           }).eq('id', quickEditRace.id);
 
           if (error) throw error;
@@ -518,6 +563,29 @@ export default function RaceEvents() {
       } finally {
           setIsQuickSaving(false);
       }
+  }
+
+  const handleQuickAssignRole = (slotId, participantIdOrName, roleTag) => {
+      if (!quickEditRace) return;
+      const updatedSlots = quickEditRace.slots_data.map(s => {
+          if (s.id === slotId && s.assignee) {
+              const assigneesArray = s.assignee.split('|').map(str => {
+                  try { return JSON.parse(str); } catch(e) { return { id: str, name: str, isLegacy: true }; }
+              });
+              
+              const updatedAssignees = assigneesArray.map(p => {
+                  if (p.id === participantIdOrName || p.name === participantIdOrName) {
+                      return { ...p, roleTag: roleTag || null };
+                  }
+                  return p;
+              });
+              
+              const newAssigneeString = updatedAssignees.map(p => p.isLegacy ? p.name : JSON.stringify(p)).join('|');
+              return { ...s, assignee: newAssigneeString };
+          }
+          return s;
+      });
+      setQuickEditRace({ ...quickEditRace, slots_data: updatedSlots });
   }
 
   const handleQuickInsert = async (slotId) => {
@@ -580,11 +648,15 @@ export default function RaceEvents() {
           return s;
       });
 
-      const updatedRace = { ...quickEditRace, slots_data: updatedSlots };
+      const newMedicRegistered = updatedSlots.reduce((acc, curr) => acc + Number(curr.filled || 0), 0);
+      const updatedRace = { ...quickEditRace, slots_data: updatedSlots, medic_registered: newMedicRegistered };
       setQuickEditRace(updatedRace);
 
       try {
-          const { error } = await supabase.from('races').update({ slots_data: updatedSlots }).eq('id', quickEditRace.id);
+          const { error } = await supabase.from('races').update({ 
+              slots_data: updatedSlots,
+              medic_registered: newMedicRegistered 
+          }).eq('id', quickEditRace.id);
           if (error) throw error;
 
           if (willBurnNewbiePass) {
@@ -621,11 +693,15 @@ export default function RaceEvents() {
           return s;
       });
 
-      const updatedRace = { ...quickEditRace, slots_data: updatedSlots };
+      const newMedicRegistered = updatedSlots.reduce((acc, curr) => acc + Number(curr.filled || 0), 0);
+      const updatedRace = { ...quickEditRace, slots_data: updatedSlots, medic_registered: newMedicRegistered };
       setQuickEditRace(updatedRace);
 
       try {
-          const { error } = await supabase.from('races').update({ slots_data: updatedSlots }).eq('id', quickEditRace.id);
+          const { error } = await supabase.from('races').update({ 
+              slots_data: updatedSlots,
+              medic_registered: newMedicRegistered 
+          }).eq('id', quickEditRace.id);
           if (error) throw error;
           
           if (kickedUserUsedPass && userIdToKick && !String(userIdToKick).startsWith('force_')) {
@@ -780,19 +856,26 @@ export default function RaceEvents() {
                               </p>
                           </div>
                       </div>
-                      <button onClick={() => { setStatusFilter('OPEN'); setTimeFilter('CURRENT_YEAR'); }} className="shrink-0 bg-white text-emerald-600 hover:bg-emerald-50 px-5 py-2.5 rounded-xl font-black text-sm transition-colors shadow-sm active:scale-95 w-full sm:w-auto text-center border-b-2 border-emerald-200">
+                      <button onClick={() => { setStatusFilter('RECRUITING'); setTimeFilter('CURRENT_YEAR'); }} className="shrink-0 bg-white text-emerald-600 hover:bg-emerald-50 px-5 py-2.5 rounded-xl font-black text-sm transition-colors shadow-sm active:scale-95 w-full sm:w-auto text-center border-b-2 border-emerald-200">
                           立即尋找招募賽事
                       </button>
                   </div>
               )}
           </div>
 
+          {/* 🌟 核心升級：大廳分類過濾器超級收納術 */}
           <div className="bg-white/95 backdrop-blur-xl rounded-2xl md:rounded-[2rem] shadow-xl p-3 md:p-4 flex flex-col xl:flex-row justify-between items-center gap-3 md:gap-4 mb-4 border border-slate-100/50 animate-fade-in-up">
               <div className="flex gap-2 w-full xl:w-auto overflow-x-auto pb-1 md:pb-0 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden snap-x">
                   <button onClick={() => setStatusFilter('ALL')} className={`shrink-0 px-4 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all whitespace-nowrap snap-start ${statusFilter === 'ALL' ? 'bg-slate-800 text-white shadow-md' : 'text-slate-500 hover:bg-slate-100 bg-slate-50/50'}`}>全部賽事</button>
-                  <button onClick={() => setStatusFilter('OPEN')} className={`shrink-0 px-4 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all whitespace-nowrap flex items-center gap-1.5 snap-start ${statusFilter === 'OPEN' ? 'bg-green-500 text-white shadow-md shadow-green-500/20' : 'text-slate-500 hover:bg-slate-100 bg-slate-50/50'}`}><Activity size={14} className="hidden sm:block"/> 招募中</button>
-                  <button onClick={() => setStatusFilter('NEGOTIATING')} className={`shrink-0 px-4 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all whitespace-nowrap flex items-center gap-1.5 snap-start ${statusFilter === 'NEGOTIATING' ? 'bg-amber-500 text-white shadow-md shadow-amber-500/20' : 'text-slate-500 hover:bg-slate-100 bg-slate-50/50'}`}><Handshake size={14} className="hidden sm:block"/> 洽談中</button>
-                  <button onClick={() => setStatusFilter('SUBMITTED')} className={`shrink-0 px-4 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all whitespace-nowrap flex items-center gap-1.5 snap-start ${statusFilter === 'SUBMITTED' ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 hover:bg-slate-100 bg-slate-50/50'}`}><Send size={14} className="hidden sm:block"/> 已送名單/其他結案</button>
+                  
+                  {/* 👑 特權幹部專屬的過濾器按鈕 */}
+                  {isPrivileged && (
+                      <button onClick={() => setStatusFilter('LEADER_EARLY')} className={`shrink-0 px-4 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all whitespace-nowrap flex items-center gap-1.5 snap-start ${statusFilter === 'LEADER_EARLY' ? 'bg-amber-500 text-white shadow-md shadow-amber-500/20' : 'text-amber-600 hover:bg-amber-50 bg-amber-50/50 border border-amber-100'}`}><Crown size={14} className="hidden sm:block"/> 幹部專屬優先</button>
+                  )}
+
+                  <button onClick={() => setStatusFilter('RECRUITING')} className={`shrink-0 px-4 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all whitespace-nowrap flex items-center gap-1.5 snap-start ${statusFilter === 'RECRUITING' ? 'bg-green-500 text-white shadow-md shadow-green-500/20' : 'text-slate-500 hover:bg-slate-100 bg-slate-50/50'}`}><Activity size={14} className="hidden sm:block"/> 招募中</button>
+                  <button onClick={() => setStatusFilter('NEGOTIATING')} className={`shrink-0 px-4 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all whitespace-nowrap flex items-center gap-1.5 snap-start ${statusFilter === 'NEGOTIATING' ? 'bg-orange-400 text-white shadow-md shadow-orange-400/20' : 'text-slate-500 hover:bg-slate-100 bg-slate-50/50'}`}><Handshake size={14} className="hidden sm:block"/> 洽談中</button>
+                  <button onClick={() => setStatusFilter('CLOSED')} className={`shrink-0 px-4 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all whitespace-nowrap flex items-center gap-1.5 snap-start ${statusFilter === 'CLOSED' ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 hover:bg-slate-100 bg-slate-50/50'}`}><Send size={14} className="hidden sm:block"/> 已送名單/結案</button>
               </div>
 
               <div className="flex bg-slate-100/80 p-1 md:p-1.5 rounded-xl md:rounded-2xl w-full xl:w-auto border border-slate-200 shadow-inner">
@@ -827,12 +910,14 @@ export default function RaceEvents() {
                       </div>
                       
                       <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                          <h4 className="text-xs font-black text-slate-500 mb-3 flex items-center gap-1.5"><Activity size={14}/> 招募狀態</h4>
+                          <h4 className="text-xs font-black text-slate-500 mb-3 flex items-center gap-1.5"><Activity size={14}/> 分類狀態統計</h4>
                           <div className="flex flex-col gap-2">
-                              <div className="flex justify-between items-center text-sm"><span className="text-green-600 font-bold flex items-center gap-1"><Activity size={12}/> 招募中</span><span className="font-black text-green-700">{raceStats.openCount}</span></div>
-                              <div className="flex justify-between items-center text-sm"><span className="text-amber-600 font-bold flex items-center gap-1"><Handshake size={12}/> 洽談中</span><span className="font-black text-amber-700">{raceStats.negotiatingCount}</span></div>
-                              <div className="flex justify-between items-center text-sm"><span className="text-slate-600 font-bold flex items-center gap-1"><Send size={12}/> 已送名單/其他結案</span><span className="font-black text-slate-800">{raceStats.submittedCount}</span></div>
-                              <div className="flex justify-between items-center text-sm"><span className="text-slate-400 font-bold flex items-center gap-1"><Timer size={12}/> 預備中</span><span className="font-black text-slate-500">{raceStats.upcomingCount}</span></div>
+                              {isPrivileged && (
+                                  <div className="flex justify-between items-center text-sm bg-amber-50/50 p-1.5 -mx-1.5 rounded-lg"><span className="text-amber-600 font-bold flex items-center gap-1"><Crown size={12}/> 幹部預先招募</span><span className="font-black text-amber-700">{raceStats.leaderEarlyCount}</span></div>
+                              )}
+                              <div className="flex justify-between items-center text-sm"><span className="text-green-600 font-bold flex items-center gap-1"><Activity size={12}/> 招募中</span><span className="font-black text-green-700">{raceStats.recruitingCount}</span></div>
+                              <div className="flex justify-between items-center text-sm"><span className="text-orange-500 font-bold flex items-center gap-1"><Handshake size={12}/> 洽談中</span><span className="font-black text-orange-600">{raceStats.negotiatingCount}</span></div>
+                              <div className="flex justify-between items-center text-sm"><span className="text-slate-600 font-bold flex items-center gap-1"><Send size={12}/> 已送名單/結案</span><span className="font-black text-slate-800">{raceStats.closedCount}</span></div>
                           </div>
                       </div>
                   </div>
@@ -865,11 +950,18 @@ export default function RaceEvents() {
                       today.setHours(0,0,0,0);
                       const isPastRace = new Date(race.date) < today || ['COMPLETED', 'CANCELLED', 'CLOSED'].includes(race.status);
 
+                      // 🌟 核心升級：帶隊教官特權通關判定引擎
+                      const now = new Date();
+                      const earlyOpenTime = race.leader_early_open_time ? new Date(race.leader_early_open_time) : null;
+                      const isEarlyOpenActive = earlyOpenTime && now >= earlyOpenTime;
+                      
+                      // 判斷是否要顯示「幹部預先招募」特權模式
+                      const showEarlyAccess = isEarlyOpenActive && isPrivileged && (race.status === 'NEGOTIATING' || race.status === 'UPCOMING');
+
                       const getButtonConfig = () => {
-                          if (isPastRace) return { text: '賽事已結束 / 檢視名單', class: 'bg-slate-200 text-slate-500 border border-slate-300' }
-                          if (race.status === 'SUBMITTED') return { text: '名單已送出 / 檢視', class: 'bg-slate-700 text-white hover:bg-slate-800' }
-                          if (race.status === 'NEGOTIATING') return { text: '賽事洽談中 / 預覽', class: 'bg-amber-100 text-amber-700 hover:bg-amber-200 border border-amber-200' }
-                          if (race.status === 'UPCOMING') return { text: '敬請期待', class: 'bg-slate-50 text-slate-400 cursor-not-allowed border border-slate-100' }
+                          if (isPastRace || ['SUBMITTED', 'COMPLETED', 'CANCELLED', 'CLOSED'].includes(race.status)) return { text: '賽事已結束 / 檢視名單', class: 'bg-slate-200 text-slate-500 border border-slate-300' }
+                          if (race.status === 'NEGOTIATING' && !showEarlyAccess) return { text: '賽事洽談中 / 預覽', class: 'bg-amber-100 text-amber-700 hover:bg-amber-200 border border-amber-200' }
+                          if (race.status === 'UPCOMING' && !showEarlyAccess) return { text: '敬請期待', class: 'bg-slate-50 text-slate-400 cursor-not-allowed border border-slate-100' }
                           if (isFull || race.status === 'FULL') return { text: '查看報名名單 / 候補', class: 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200' }
                           return { text: '進入名額配置 / 報名', class: 'bg-slate-900 text-white hover:bg-blue-600 hover:shadow-xl hover:shadow-blue-600/30' }
                       }
@@ -879,9 +971,13 @@ export default function RaceEvents() {
 
                       return (
                       <div key={race.id} 
-                           onClick={() => race.status !== 'UPCOMING' && navigate(`/race-detail/${race.id}`)}
+                           onClick={() => {
+                               if (showEarlyAccess || race.status !== 'UPCOMING') {
+                                   navigate(`/race-detail/${race.id}`);
+                               }
+                           }}
                            className={`group bg-white rounded-3xl shadow-sm hover:shadow-2xl transition-all duration-500 border border-slate-100 overflow-hidden flex flex-col relative animate-fade-in-up
-                           ${race.status === 'UPCOMING' ? 'opacity-80 grayscale-[20%]' : 'cursor-pointer hover:-translate-y-1'}`}
+                           ${(race.status === 'UPCOMING' && !showEarlyAccess) ? 'opacity-80 grayscale-[20%]' : 'cursor-pointer hover:-translate-y-1'}`}
                            style={{ animationDelay: `${(idx % 6) * 50}ms` }}>
                           
                           <div className="relative h-48 md:h-52 overflow-hidden shrink-0">
@@ -893,10 +989,20 @@ export default function RaceEvents() {
                                       e.target.onerror = null; 
                                       e.target.src = 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&q=80&w=600';
                                   }}
-                                  className={`w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-700 ease-out ${isFull || race.status === 'SUBMITTED' || isPastRace ? 'grayscale opacity-70' : ''}`} 
+                                  className={`w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-700 ease-out ${isFull || ['SUBMITTED', 'COMPLETED', 'CANCELLED', 'CLOSED'].includes(race.status) || isPastRace ? 'grayscale opacity-70' : ''}`} 
                               />
                               <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-slate-900/20 to-transparent"></div>
-                              {renderStatusBadge(race.status, race.is_hot, isFull, isPastRace)}
+                              
+                              {/* 🌟 狀態標籤動態切換：如果符合特權條件，覆蓋原本狀態 */}
+                              {showEarlyAccess ? (
+                                  <div className="absolute top-3 left-3 md:top-4 md:left-4 flex gap-2 z-20">
+                                      <span className="flex items-center gap-1 bg-amber-500 text-white px-2.5 py-1 md:px-3 rounded-full font-black text-[10px] md:text-xs shadow-lg animate-pulse border border-amber-400">
+                                          <ShieldAlert size={14}/> 幹部預先招募
+                                      </span>
+                                  </div>
+                              ) : (
+                                  renderStatusBadge(race.status, race.is_hot, isFull, isPastRace)
+                              )}
                               
                               {/* 🌟 快速編輯 (Quick Edit) 上帝按鈕 */}
                               {isSuperAdmin && (
@@ -909,12 +1015,23 @@ export default function RaceEvents() {
                                   </button>
                               )}
 
-                              <div className="absolute bottom-3 left-3 md:bottom-4 md:left-4 flex items-center gap-2">
+                              <div className="absolute bottom-3 left-3 md:bottom-4 md:left-4 flex items-center gap-2 z-20">
                                   <span className="bg-white/20 backdrop-blur-md text-white text-[10px] md:text-xs font-bold px-2.5 md:px-3 py-1 md:py-1.5 rounded-lg border border-white/30">{race.type}</span>
                               </div>
                           </div>
 
-                          <div className="p-5 md:p-6 flex flex-col flex-1">
+                          {/* 🌟 專屬特權橫幅：加大加粗提示 */}
+                          {showEarlyAccess && (
+                              <div className="bg-amber-50 border-y-2 border-amber-400 p-3.5 flex items-center gap-3 text-amber-800 animate-fade-in shadow-inner shrink-0 relative z-20">
+                                  <ShieldAlert size={24} className="text-amber-500 shrink-0 animate-pulse"/>
+                                  <div className="leading-tight">
+                                      <div className="font-black text-[15px]">【帶隊教官預先招募】</div>
+                                      <div className="text-[11px] font-bold mt-0.5 opacity-80">本賽事已對幹部提前開放登記！請盡速就位。</div>
+                                  </div>
+                              </div>
+                          )}
+
+                          <div className="p-5 md:p-6 flex flex-col flex-1 bg-white relative">
                               <h3 className="text-lg md:text-xl font-black text-slate-800 mb-4 md:mb-5 line-clamp-2 leading-snug group-hover:text-blue-600 transition-colors">
                                   {race.name}
                               </h3>
@@ -981,73 +1098,29 @@ export default function RaceEvents() {
                                   </div>
                               </div>
                               
-                              <button onClick={() => navigate(`/race-detail/${race.id}`)} disabled={race.status === 'UPCOMING'} className={`w-full mt-5 py-3 md:py-4 rounded-xl font-black text-[13px] md:text-[15px] flex items-center justify-center gap-2 transition-all active:scale-95 ${btnConfig.class}`}>
-                                  {btnConfig.text}
-                                  {race.status !== 'UPCOMING' && <ChevronRight size={16} md:size={18} className="group-hover:translate-x-1 transition-transform" />}
-                              </button>
+                              {/* 🌟 按鈕動態切換：特權模式 vs 一般模式 */}
+                              {showEarlyAccess ? (
+                                  <button onClick={() => navigate(`/admin/races/${race.id}`)} className="w-full mt-5 py-3 md:py-4 rounded-xl font-black text-[13px] md:text-[15px] flex items-center justify-center gap-2 transition-all active:scale-95 bg-amber-500 hover:bg-amber-600 text-white shadow-lg shadow-amber-500/30">
+                                      <Crown size={18}/> 幹部優先進入
+                                      <ChevronRight size={16} md:size={18} className="group-hover:translate-x-1 transition-transform" />
+                                  </button>
+                              ) : (
+                                  <button onClick={() => {
+                                          if (race.status !== 'UPCOMING') navigate(`/admin/races/${race.id}`);
+                                      }} 
+                                      disabled={race.status === 'UPCOMING'} 
+                                      className={`w-full mt-5 py-3 md:py-4 rounded-xl font-black text-[13px] md:text-[15px] flex items-center justify-center gap-2 transition-all active:scale-95 ${btnConfig.class}`}
+                                  >
+                                      {btnConfig.text}
+                                      {race.status !== 'UPCOMING' && <ChevronRight size={16} md:size={18} className="group-hover:translate-x-1 transition-transform" />}
+                                  </button>
+                              )}
                           </div>
                       </div>
                   )})}
               </div>
           )}
       </div>
-
-      {showNotifPanel && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex justify-end animate-fade-in" onClick={() => setShowNotifPanel(false)}>
-              <div className="bg-slate-50 w-full sm:w-[400px] h-full flex flex-col shadow-2xl animate-slide-left" onClick={e => e.stopPropagation()}>
-                  <div className="px-6 py-5 border-b border-slate-200 bg-white flex justify-between items-center shrink-0">
-                      <h3 className="text-xl font-black text-slate-800 flex items-center gap-2"><Bell className="text-blue-600"/> 系統通知</h3>
-                      <button onClick={() => setShowNotifPanel(false)} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors active:scale-95"><X size={20}/></button>
-                  </div>
-                  <div className="flex bg-white px-4 pt-2 border-b border-slate-200 shrink-0">
-                      <button onClick={() => setNotifTab('system')} className={`flex-1 pb-3 text-sm font-bold border-b-2 transition-colors ${notifTab === 'system' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>賽事/系統通報</button>
-                      <button onClick={() => setNotifTab('personal')} className={`flex-1 pb-3 text-sm font-bold border-b-2 transition-colors ${notifTab === 'personal' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>個人提醒</button>
-                  </div>
-
-                  <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-                      <div className="flex justify-between items-center mb-2 px-1">
-                          <span className="text-xs font-bold text-slate-400">保留近 8 個月的通知</span>
-                          <button onClick={markAllAsRead} className="text-xs font-bold text-blue-600 hover:underline">全部標示已讀</button>
-                      </div>
-                      {notifications.filter(n => n.tab === notifTab).length > 0 ? (
-                          notifications.filter(n => n.tab === notifTab).map(notif => {
-                              const isItemRead = notif.isRead || notif.is_read;
-                              return (
-                              <div key={notif.id} 
-                                  // 🌟 點擊通知的雷達觸發器
-                                  onClick={() => {
-                                      const match = notif.message.match(/\(ID:\s*(.*?)\)/);
-                                      if (match) {
-                                          navigate(`/admin/members?view=ALL&targetId=${match[1]}`);
-                                          setShowNotifPanel(false);
-                                      }
-                                  }}
-                                  className={`p-4 rounded-2xl border transition-all relative group ${notif.message.includes('(ID:') ? 'cursor-pointer hover:border-blue-400 hover:shadow-md' : ''} ${isItemRead ? 'bg-slate-100/50 border-slate-200 opacity-80' : 'bg-white border-blue-200 shadow-sm'}`}>
-                                  <button onClick={(e) => { e.stopPropagation(); deleteNotification(notif.id); }} className="absolute top-2 right-2 p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={14}/></button>
-                                  <div className="flex gap-3">
-                                      <div className={`mt-0.5 w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isItemRead ? 'bg-slate-200' : 'bg-blue-50'}`}>
-                                          {getNotifIcon(notif.category)}
-                                      </div>
-                                      <div className="flex-1 pr-6">
-                                          <div className="text-[10px] text-slate-400 font-medium mb-1 flex items-center gap-1"><Clock size={10}/> {new Date(notif.date).toLocaleDateString()}</div>
-                                          {/* 🌟 加上 whitespace-pre-wrap 讓明細完美換行 */}
-                                          <p className={`text-sm leading-relaxed whitespace-pre-wrap break-words ${isItemRead ? 'text-slate-600' : 'text-slate-800 font-bold'}`}>
-                                              {notif.message}
-                                          </p>
-                                          {notif.message.includes('(ID:') && (
-                                              <div className="mt-2 text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-1 rounded inline-block">👆 點擊前往審核異動</div>
-                                          )}
-                                      </div>
-                                  </div>
-                              </div>
-                          )})
-                      ) : (
-                          <div className="text-center py-10 text-slate-400 font-medium text-sm">目前沒有任何通知</div>
-                      )}
-                  </div>
-              </div>
-          </div>
-      )}
 
       {previewRace && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in" onClick={() => setPreviewRace(null)}>
@@ -1085,14 +1158,14 @@ export default function RaceEvents() {
           </div>
       )}
 
-      {/* 🌟 快速編輯 (Quick Edit) 上帝捷徑彈窗 */}
+      {/* 🌟 快速編輯 (Quick Edit) 上帝捷徑彈窗 (保證 100% 完整不縮減) */}
       {quickEditRace && (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4 animate-fade-in" onClick={() => setQuickEditRace(null)}>
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4 animate-fade-in" onClick={() => { if(!isQuickSaving) setQuickEditRace(null) }}>
               <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-4xl flex flex-col max-h-[90vh] animate-bounce-in" onClick={e => e.stopPropagation()}>
                   
                   <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center rounded-t-[2rem] shrink-0">
                       <h3 className="text-xl font-black text-slate-800 flex items-center gap-2"><Zap className="text-amber-500"/> 賽事快速編輯 (Quick Edit)</h3>
-                      <button onClick={() => setQuickEditRace(null)} className="p-2 text-slate-400 hover:bg-slate-200 rounded-full transition-colors"><X size={20}/></button>
+                      <button onClick={() => { if(!isQuickSaving) setQuickEditRace(null) }} className="p-2 text-slate-400 hover:bg-slate-200 rounded-full transition-colors"><X size={20}/></button>
                   </div>
 
                   <div className="p-6 overflow-y-auto custom-scrollbar flex-1 bg-slate-50 space-y-6">
@@ -1107,7 +1180,7 @@ export default function RaceEvents() {
                       </div>
 
                       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                          <label className="block text-sm font-black text-slate-700 mb-2">賽事狀態切換</label>
+                          <label className="block text-sm font-black text-slate-700 mb-2">強制變更賽事招募狀態</label>
                           <select
                               className="w-full border border-slate-300 p-2.5 rounded-lg font-bold bg-white focus:ring-2 focus:ring-amber-500 outline-none transition-shadow"
                               value={quickEditRace.status}
@@ -1126,13 +1199,13 @@ export default function RaceEvents() {
 
                       <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
                           <div className="flex justify-between items-center mb-2">
-                              <h4 className="font-black text-slate-800 flex items-center gap-2"><Users size={18} className="text-blue-500"/> 賽事組別與人員變動</h4>
+                              <h4 className="font-black text-slate-800 flex items-center gap-2"><UsersRound size={18} className="text-indigo-500"/> 各賽段名單快速安插與職務指派</h4>
                               <button onClick={handleAddQuickSlot} className="text-xs font-bold bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg border border-blue-200 hover:bg-blue-100 flex items-center gap-1 transition-colors">
                                   <Plus size={14}/> 新增組別
                               </button>
                           </div>
 
-                          {quickEditRace.slots_data?.map((slot, index) => (
+                          {quickEditRace.slots_data?.map((slot) => (
                               <div key={slot.id} className="border-2 border-slate-100 rounded-xl p-4 bg-slate-50/50 relative">
                                   <div className="flex flex-wrap gap-3 mb-4 pr-10">
                                       <div className="flex-1 min-w-[120px]">
@@ -1160,7 +1233,16 @@ export default function RaceEvents() {
                                                   {!p.roleTag && p.isVip && <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-black border border-amber-200">VIP</span>}
                                                   {p.isNew && <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-black border border-green-200">新人</span>}
                                               </div>
-                                              <button onClick={() => handleQuickKick(slot.id, p.id || p.name, p.name)} className="text-slate-400 hover:text-red-500 hover:bg-red-50 p-1.5 rounded-md transition-colors"><X size={14}/></button>
+                                              <div className="flex gap-2">
+                                                  <select className="text-xs border border-slate-200 rounded-md p-1.5 outline-none font-bold bg-white focus:ring-2 focus:ring-blue-500" value={p.roleTag || ""} onChange={(e) => handleQuickAssignRole(slot.id, p.id || p.name, e.target.value)}>
+                                                      <option value="">一般參賽</option>
+                                                      <option value="帶隊教官">🛡️ 帶隊教官</option>
+                                                      <option value="賽道教官">🚩 賽道教官</option>
+                                                      <option value="醫護教官">🏥 醫護教官</option>
+                                                      <option value="官方代表">👑 官方代表</option>
+                                                  </select>
+                                                  <button onClick={() => handleQuickKick(slot.id, p.id || p.name, p.name)} className="text-slate-400 hover:text-red-500 hover:bg-red-50 p-1.5 rounded-md transition-colors" title="強制移除"><X size={14}/></button>
+                                              </div>
                                           </div>
                                       ))}
                                       {parseAssignees(slot.assignee).length === 0 && <div className="text-xs text-slate-400 font-bold text-center py-2">該組別目前無人員</div>}
@@ -1210,6 +1292,7 @@ export default function RaceEvents() {
               </datalist>
           </div>
       )}
+
     </div>
   )
 }

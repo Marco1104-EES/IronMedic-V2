@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '../supabaseClient'
 import { useNavigate } from 'react-router-dom'
-// 🌟 核心修復：補上了漏掉的 X 圖示，解決白畫面崩潰
 import { Database, Cpu, HardDrive, CheckCircle, AlertTriangle, Activity, ExternalLink, Loader2, RefreshCw, Cloud, Globe, ChevronRight, Flag, Bell, Users, Github, Bot, FileText, Download, Trash2, Clock, BarChart3, LineChart as LineChartIcon, Radar, X } from 'lucide-react'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar as RadarArea, Legend } from 'recharts'
 
@@ -19,6 +18,10 @@ export default function SystemStatus() {
   const [loading, setLoading] = useState(true)
   const [cronJobStatus, setCronJobStatus] = useState(null)
   
+  // 🌟 真實連線人數狀態
+  const [onlineCount, setOnlineCount] = useState(1)
+  const channelRef = useRef(null)
+
   const logsRef = useRef([]) 
   const [systemLogs, setSystemLogs] = useState([]) 
   const logsEndRef = useRef(null)
@@ -27,9 +30,10 @@ export default function SystemStatus() {
   const [showNotifPanel, setShowNotifPanel] = useState(false)
   const [notifTab, setNotifTab] = useState('system')
 
-  const [timeRange, setTimeRange] = useState('24h') 
+  const [timeRange, setTimeRange] = useState('1h') 
   const [historicalData, setHistoricalData] = useState([])
   const [loadAnalysisData, setLoadAnalysisData] = useState([])
+  const [systemAssessment, setSystemAssessment] = useState('正在收集真實數據進行評估...')
 
   const addLog = useCallback((msg, type = 'info') => {
       const time = new Date().toLocaleTimeString('zh-TW', { hour12: false });
@@ -40,8 +44,8 @@ export default function SystemStatus() {
   }, []);
 
   useEffect(() => { 
+      setupRealtimePresence();
       fetchAllSystemData();
-      generateMockHistoricalData('24h'); 
 
       const heartbeat = setInterval(() => {
           fetchSilentHeartbeat();
@@ -67,48 +71,106 @@ export default function SystemStatus() {
       return () => {
           clearInterval(heartbeat);
           supabase.removeChannel(radarChannel);
+          if (channelRef.current) supabase.removeChannel(channelRef.current);
       }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const generateMockHistoricalData = (range) => {
-      let points = 24; let format = 'HH:mm';
-      if (range === '1h') { points = 60; format = 'mm:ss'; }
-      if (range === '12h') { points = 12; format = 'HH:mm'; }
-      if (range === '7d') { points = 7; format = 'MM/DD'; }
-      if (range === '30d') { points = 30; format = 'MM/DD'; }
+  // 🌟 獲取全域真實線上人數
+  const setupRealtimePresence = () => {
+      const channel = supabase.channel('room_1', {
+          config: { presence: { key: 'admin_apm_' + Math.random().toString(36).substr(2, 9) } }
+      });
+      channelRef.current = channel;
 
-      const data = [];
-      let currentAuth = 20; let currentDb = 35;
-      for (let i = points; i >= 0; i--) {
-          const d = new Date();
-          if (range === '1h') d.setMinutes(d.getMinutes() - i);
-          else if (range === '12h') d.setHours(d.getHours() - i);
-          else if (range === '24h') d.setHours(d.getHours() - i);
-          else d.setDate(d.getDate() - i);
+      channel
+        .on('presence', { event: 'sync' }, () => {
+          const state = channel.presenceState();
+          let count = 0;
+          for (const id in state) { count += state[id].length; }
+          setOnlineCount(count > 0 ? count : 1);
+        })
+        .subscribe(async (status) => {
+          if (status === 'SUBSCRIBED') {
+              await channel.track({ online_at: new Date().toISOString() })
+          }
+        });
+  }
 
-          const isNight = d.getHours() >= 1 && d.getHours() <= 6;
-          const spike = Math.random() > 0.8 ? Math.random() * 200 : 0;
-          
-          currentAuth = Math.max(10, currentAuth + (Math.random() - 0.5) * 10 + (isNight ? -5 : 2) + spike*0.2);
-          currentDb = Math.max(15, currentDb + (Math.random() - 0.5) * 20 + (isNight ? -10 : 5) + spike);
+  // 🌟 真實歷史數據處理引擎 (Real APM Local Storage)
+  const saveAndFetchRealHistoricalData = (currentAuth, currentDb, currentUsers, range) => {
+      const now = Date.now();
+      let history = [];
+      try {
+          history = JSON.parse(localStorage.getItem('iron_medic_apm_history') || '[]');
+      } catch (e) { history = []; }
 
-          data.push({
-              time: range === '1h' ? d.toLocaleTimeString('zh-TW', {minute:'2-digit', second:'2-digit'}) : 
-                    range === '7d' || range === '30d' ? `${d.getMonth()+1}/${d.getDate()}` : 
-                    `${d.getHours()}:00`,
-              Auth延遲: Math.round(currentAuth),
-              DB延遲: Math.round(currentDb)
-          });
+      // 寫入最新一筆真實數據
+      if (currentAuth !== null && currentDb !== null) {
+          history.push({ timestamp: now, auth: currentAuth, db: currentDb, users: currentUsers });
+          // 保留最近 2000 筆紀錄 (避免 localStorage 爆滿)
+          if (history.length > 2000) history = history.slice(history.length - 2000);
+          localStorage.setItem('iron_medic_apm_history', JSON.stringify(history));
       }
-      setHistoricalData(data);
+
+      // 根據選定時間範圍過濾數據
+      const rangeMs = {
+          '1h': 60 * 60 * 1000,
+          '12h': 12 * 60 * 60 * 1000,
+          '24h': 24 * 60 * 60 * 1000,
+          '7d': 7 * 24 * 60 * 60 * 1000,
+          '30d': 30 * 24 * 60 * 60 * 1000
+      }[range];
+
+      const filteredHistory = history.filter(item => (now - item.timestamp) <= rangeMs);
+      
+      // 如果完全沒有歷史紀錄，塞入一筆當下資料避免圖表破圖
+      if (filteredHistory.length === 0 && currentAuth !== null) {
+          filteredHistory.push({ timestamp: now, auth: currentAuth, db: currentDb, users: currentUsers });
+      }
+
+      // 格式化折線圖數據
+      const chartData = filteredHistory.map(item => {
+          const d = new Date(item.timestamp);
+          return {
+              time: range === '1h' ? d.toLocaleTimeString('zh-TW', {minute:'2-digit', second:'2-digit'}) : 
+                    range === '7d' || range === '30d' ? `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:00` : 
+                    `${d.getHours()}:${d.getMinutes().toString().padStart(2,'0')}`,
+              Auth延遲: item.auth,
+              DB延遲: item.db,
+              在線人數: item.users
+          };
+      });
+      setHistoricalData(chartData);
+
+      // 🌟 計算全歷史尖峰值供雷達圖比對
+      let peakAuth = 50; let peakDb = 100; let peakUsers = 5;
+      history.forEach(item => {
+          if (item.auth > peakAuth) peakAuth = item.auth;
+          if (item.db > peakDb) peakDb = item.db;
+          if (item.users > peakUsers) peakUsers = item.users;
+      });
+
+      // 🌟 真實動態向量雷達圖資料
+      const liveAuth = currentAuth || 20;
+      const liveDb = currentDb || 30;
+      const liveUsers = currentUsers || 1;
 
       setLoadAnalysisData([
-          { subject: '< 10人 (極輕)', Auth: 15, DB讀取: 25, DB寫入: 35, API: 10 },
-          { subject: '< 50人 (正常)', Auth: 25, DB讀取: 45, DB寫入: 60, API: 30 },
-          { subject: '< 100人 (高峰)', Auth: 40, DB讀取: 80, DB寫入: 120, API: 70 },
-          { subject: '< 300人 (警報)', Auth: 90, DB讀取: 250, DB寫入: 400, API: 150 },
+          { subject: 'Auth響應延遲', 即時負載: liveAuth, 歷史尖峰: peakAuth },
+          { subject: 'DB讀取延遲', 即時負載: liveDb, 歷史尖峰: peakDb },
+          { subject: '真實併發人數', 即時負載: liveUsers * 10, 歷史尖峰: peakUsers * 10 }, // 乘 10 以放大雷達圖視覺比例
+          { subject: 'API負載率', 即時負載: Math.min(100, (liveDb/1000)*100), 歷史尖峰: Math.min(100, (peakDb/1000)*100) },
       ]);
+
+      // 🌟 動態智能評估文字
+      if (liveDb < 300 && liveUsers < 50) {
+          setSystemAssessment(`當前真實連線 ${liveUsers} 人，資料庫核心延遲 ${liveDb}ms。系統資源充裕，運行極度順暢。`);
+      } else if (liveDb >= 300 && liveDb < 800) {
+          setSystemAssessment(`當前真實連線 ${liveUsers} 人，資料庫核心延遲 ${liveDb}ms。系統處於正常負載狀態，持續監控中。`);
+      } else if (liveDb >= 800) {
+          setSystemAssessment(`⚠️ 當前真實連線 ${liveUsers} 人，資料庫核心延遲高達 ${liveDb}ms！系統面臨高負載壓力，建議追蹤網路狀態或考慮擴充資源。`);
+      }
   }
 
   const fetchNotifs = async () => {
@@ -172,6 +234,9 @@ export default function SystemStatus() {
               addLog(`測速完成 - Auth: ${probe.auth}ms | Profile表: ${probe.profile}ms | Race表: ${probe.race}ms`, 'success')
           }
 
+          // 🌟 掃描完成後，立即將真實數據寫入歷史庫
+          saveAndFetchRealHistoricalData(probe.auth, Math.max(probe.profile, probe.race), onlineCount, timeRange);
+
           addLog('正在抓取資料庫即時統計數據...', 'info')
           const [mCountRes, rCountRes, nCountRes, cronRes] = await Promise.all([
               supabase.from('profiles').select('*', { count: 'exact', head: true }),
@@ -223,6 +288,9 @@ export default function SystemStatus() {
               dbLatency: Math.max(probe.profile, probe.race),
               status: currentStatus
           }))
+
+          // 🌟 每次心跳，將真實數據推入歷史庫
+          saveAndFetchRealHistoricalData(probe.auth, Math.max(probe.profile, probe.race), onlineCount, timeRange);
 
           if (currentStatus === 'warning') {
               addLog(`[靜默心跳] ⚠️ 偵測到延遲! (Auth: ${probe.auth}ms | Profile: ${probe.profile}ms | Race: ${probe.race}ms)`, 'warning')
@@ -280,15 +348,6 @@ export default function SystemStatus() {
     return <AlertTriangle size={24} />
   }
 
-  const getNotifIcon = (category) => {
-      switch(category) {
-          case 'race': return <Flag size={16} className="text-blue-500"/>;
-          case 'cert': return <AlertTriangle size={16} className="text-red-500"/>;
-          case 'shop': return <Medal size={16} className="text-amber-500"/>;
-          default: return <Bell size={16} className="text-slate-500"/>;
-      }
-  }
-
   return (
     <div className="space-y-6 md:space-y-8 animate-fade-in pb-20">
       
@@ -301,6 +360,10 @@ export default function SystemStatus() {
                   <p className="text-slate-500 font-medium text-sm mt-1">Super Admin APM - Rimac 全時效能觀測雷達</p>
               </div>
               <div className="flex gap-2">
+                  {/* 🌟 加上當前真實人數的顯示標籤 */}
+                  <div className="hidden sm:flex items-center gap-2 bg-blue-50 text-blue-600 px-4 py-2 rounded-xl font-bold border border-blue-200 mr-2">
+                      <Users size={16}/> 真實即時連線: {onlineCount} 人
+                  </div>
                   <button onClick={() => { fetchNotifs(); setShowNotifPanel(true); }} className="relative flex items-center justify-center bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 w-11 h-11 rounded-full transition-all shadow-sm active:scale-95 group" title="系統異常警報中心">
                       <AlertTriangle size={20} className="group-hover:scale-110 transition-transform"/>
                       {notifications.filter(n => !n.is_read && !n.isRead).length > 0 && <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-black text-white border-2 border-white animate-pulse">{notifications.filter(n => !n.is_read && !n.isRead).length}</span>}
@@ -548,20 +611,21 @@ export default function SystemStatus() {
           </div>
       </div>
 
+      {/* 🌟 史詩級 APM：全域 24/7 歷史真實效能分析矩陣 */}
       <div className="bg-white p-6 md:p-8 rounded-[2rem] shadow-xl border border-slate-200 mt-6 relative animate-fade-in-up">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 border-b border-slate-100 pb-5 gap-4">
               <div>
                   <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
-                      <BarChart3 className="text-indigo-600"/> 系統歷史效能與負載交叉分析矩陣 (Historical APM)
+                      <BarChart3 className="text-indigo-600"/> 系統真實歷史效能與動態負載交叉分析 (Real APM)
                   </h3>
-                  <p className="text-slate-500 text-sm mt-1 font-medium">全天候非同步收集資料庫心跳，分析離線與尖峰時段之承載極限。</p>
+                  <p className="text-slate-500 text-sm mt-1 font-medium">全天候收集本機瀏覽器內最真實之資料庫心跳，實測目前線上人數與負載壓力交叉比對。</p>
               </div>
               
               <div className="flex bg-slate-100 p-1.5 rounded-xl border border-slate-200 shadow-inner overflow-x-auto w-full md:w-auto">
                   {['1h', '12h', '24h', '7d', '30d'].map(range => (
                       <button 
                           key={range}
-                          onClick={() => { setTimeRange(range); generateMockHistoricalData(range); }}
+                          onClick={() => { setTimeRange(range); saveAndFetchRealHistoricalData(null, null, onlineCount, range); }}
                           className={`px-4 py-2 rounded-lg text-xs font-black transition-all ${timeRange === range ? 'bg-white text-indigo-600 shadow border border-slate-200' : 'text-slate-500 hover:text-slate-800'}`}
                       >
                           {range === '1h' ? '每小時' : range === '12h' ? '每12小時' : range === '24h' ? '每日(24h)' : range === '7d' ? '每週' : '每月'}
@@ -573,7 +637,7 @@ export default function SystemStatus() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               <div className="lg:col-span-2 bg-slate-50 p-5 rounded-2xl border border-slate-100 flex flex-col">
                   <h4 className="text-sm font-black text-slate-700 mb-6 flex items-center gap-2">
-                      <LineChartIcon size={16} className="text-blue-500"/> 資料庫讀取延遲時間軸 (毫秒 ms)
+                      <LineChartIcon size={16} className="text-blue-500"/> 伺服器真實延遲時間軸 (毫秒 ms)
                   </h4>
                   <div className="flex-1 min-h-[300px] w-full">
                       <ResponsiveContainer width="100%" height={300}>
@@ -596,8 +660,8 @@ export default function SystemStatus() {
                                   labelStyle={{ fontWeight: '900', color: '#1e293b', marginBottom: '4px' }}
                               />
                               <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: 'bold', paddingTop: '20px' }}/>
-                              <Area type="monotone" dataKey="DB延遲" stroke="#8b5cf6" strokeWidth={3} fillOpacity={1} fill="url(#colorDb)" activeDot={{ r: 6, strokeWidth: 0 }} />
-                              <Area type="monotone" dataKey="Auth延遲" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorAuth)" activeDot={{ r: 6, strokeWidth: 0 }} />
+                              <Area type="monotone" name="DB 讀取延遲" dataKey="DB延遲" stroke="#8b5cf6" strokeWidth={3} fillOpacity={1} fill="url(#colorDb)" activeDot={{ r: 6, strokeWidth: 0 }} />
+                              <Area type="monotone" name="Auth 驗證延遲" dataKey="Auth延遲" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorAuth)" activeDot={{ r: 6, strokeWidth: 0 }} />
                           </AreaChart>
                       </ResponsiveContainer>
                   </div>
@@ -606,28 +670,30 @@ export default function SystemStatus() {
               <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800 flex flex-col relative overflow-hidden">
                   <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-bl-full blur-2xl"></div>
                   <h4 className="text-sm font-black text-white mb-2 flex items-center gap-2 relative z-10">
-                      <Radar size={16} className="text-amber-400"/> 在線人數負載壓力分析
+                      <Radar size={16} className="text-amber-400"/> 真實即時負載 vs 歷史尖峰向量圖
                   </h4>
-                  <p className="text-[10px] text-slate-400 mb-6 font-medium relative z-10">模擬檢測: 10人 / 50人 / 100人 / 300人極限</p>
+                  <p className="text-[10px] text-slate-400 mb-6 font-medium relative z-10">依據本地收集之最高併發人數與延遲進行動態疊加比對</p>
                   
                   <div className="flex-1 min-h-[250px] w-full relative z-10 -ml-4">
                       <ResponsiveContainer width="100%" height={250}>
                           <RadarChart cx="50%" cy="50%" outerRadius="70%" data={loadAnalysisData}>
                               <PolarGrid stroke="#334155" />
                               <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 'bold' }} />
-                              <PolarRadiusAxis angle={30} domain={[0, 400]} tick={false} axisLine={false} />
+                              <PolarRadiusAxis angle={30} domain={[0, 'auto']} tick={false} axisLine={false} />
                               <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px', color: '#fff' }} itemStyle={{ fontWeight: 'bold' }}/>
-                              <RadarArea name="DB寫入壓力" dataKey="DB寫入" stroke="#f43f5e" fill="#f43f5e" fillOpacity={0.5} />
-                              <RadarArea name="DB讀取壓力" dataKey="DB讀取" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.5} />
+                              <RadarArea name="歷史最高尖峰" dataKey="歷史尖峰" stroke="#f43f5e" fill="#f43f5e" fillOpacity={0.3} />
+                              <RadarArea name="當前即時負載" dataKey="即時負載" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.7} />
                               <Legend iconType="circle" wrapperStyle={{ fontSize: '11px', color: '#cbd5e1', paddingTop: '10px' }}/>
                           </RadarChart>
                       </ResponsiveContainer>
                   </div>
                   
                   <div className="mt-4 pt-4 border-t border-slate-800 relative z-10">
-                      <div className="flex justify-between items-center text-xs">
-                          <span className="text-slate-400 font-bold">系統承載評估：</span>
-                          <span className="text-emerald-400 font-black bg-emerald-500/20 px-2 py-1 rounded">100人內極度順暢</span>
+                      <div className="flex justify-between items-start text-xs">
+                          <span className="text-slate-400 font-bold shrink-0">智能系統評估：</span>
+                          <span className={`font-black text-right leading-relaxed ${metrics.dbLatency > 800 ? 'text-red-400 bg-red-500/20' : 'text-emerald-400 bg-emerald-500/20'} px-2 py-1 rounded`}>
+                              {systemAssessment}
+                          </span>
                       </div>
                   </div>
               </div>

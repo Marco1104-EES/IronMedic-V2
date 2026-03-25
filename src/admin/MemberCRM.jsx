@@ -76,17 +76,22 @@ const FieldEditor = ({ label, name, type = "text", options = [], value, onChange
 export default function MemberCRM() {
   const [members, setMembers] = useState([])
   const [loading, setLoading] = useState(true)
-  const [searchTerm, setSearchTerm] = useState('')
+  
+  // 🌟 搜尋超級進化：導入 Debounce 機制
+  const [searchInput, setSearchInput] = useState('') // 即時響應的輸入值
+  const [searchTerm, setSearchTerm] = useState('')   // 觸發資料庫過濾的值
+  
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const ITEMS_PER_PAGE = 20 
-  
+
   const [roleStats, setRoleStats] = useState({ SUPER_ADMIN: 0, TOURNAMENT_DIRECTOR: 0, VERIFIED_MEDIC: 0, USER: 0, BLACKLISTED: 0 })
 
   const [exportCart, setExportCart] = useState(new Set())
   const [isCartModalOpen, setIsCartModalOpen] = useState(false)
   const [selectedIds, setSelectedIds] = useState(new Set())
   const [exporting, setExporting] = useState(false)
+  const [exportingAll, setExportingAll] = useState(false) 
   
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [editingMember, setEditingMember] = useState(null)
@@ -99,7 +104,6 @@ export default function MemberCRM() {
   const searchParams = new URLSearchParams(location.search)
   const currentView = searchParams.get('view') || 'ALL'
   
-  // 🌟 URL 雷達定位目標 ID
   const targetId = searchParams.get('targetId')
 
   const [isColumnConfigOpen, setIsColumnConfigOpen] = useState(false)
@@ -110,10 +114,20 @@ export default function MemberCRM() {
       group4_ext: false       
   })
 
-  // 🌟 高亮欄位陣列
   const [highlightFields, setHighlightFields] = useState([])
 
   const fileInputRef = useRef(null)
+
+  // 🌟 Debounce 引擎：打字停頓 250ms 後，無感重整下方表格，體驗極致流暢
+  useEffect(() => {
+      const timer = setTimeout(() => {
+          if (searchTerm !== searchInput) {
+              setSearchTerm(searchInput);
+              setPage(1); 
+          }
+      }, 250);
+      return () => clearTimeout(timer);
+  }, [searchInput, searchTerm]);
 
   useEffect(() => {
       setPage(1) 
@@ -136,17 +150,14 @@ export default function MemberCRM() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, searchTerm, currentView])
 
-  // 🌟 雷達定位引擎 (Radar Ping) + 觸發高亮
   useEffect(() => {
       if (targetId && members.length > 0 && !isEditModalOpen) {
           const targetMember = members.find(m => m.id === targetId);
           if (targetMember) {
-              handleEditClick(targetMember, true); // 🌟 傳入 true 強制觸發高亮
-              // 清除 URL 中的 targetId 避免重整一直彈出
+              handleEditClick(targetMember, true); 
               navigate(`/admin/members?view=${currentView}`, { replace: true });
           } else {
-              // 如果這頁找不到，自動用 search 去找他
-              setSearchTerm(targetId.substring(0,8)); 
+              setSearchInput(targetId.substring(0,8)); 
           }
       }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -199,14 +210,30 @@ export default function MemberCRM() {
           query = query.or('is_blacklisted.is.null,is_blacklisted.eq.N');
       }
 
-      if (currentView === 'COMMAND') query = query.or('role.eq.SUPER_ADMIN,role.eq.TOURNAMENT_DIRECTOR,is_vip.eq.Y')
-      else if (currentView === 'ACTIVE') query = query.eq('role', 'VERIFIED_MEDIC') 
-      else if (currentView === 'RESERVE') query = query.or('role.eq.USER,role.is.null')
-      else if (currentView === 'RISK') query = query.lt('license_expiry', new Date().toISOString().slice(0,10))
-      else if (currentView === 'BLACKLIST') query = query.eq('is_blacklisted', 'Y')
+      if (currentView === 'COMMAND') {
+          query = query.or('role.eq.SUPER_ADMIN,role.eq.TOURNAMENT_DIRECTOR,is_vip.eq.Y');
+      } 
+      else if (currentView === 'ACTIVE') {
+          query = query.or('role.eq.VERIFIED_MEDIC,role.eq.TOURNAMENT_DIRECTOR,role.eq.SUPER_ADMIN');
+      } 
+      else if (currentView === 'RESERVE') {
+          query = query.or('role.eq.USER,role.is.null');
+      } 
+      else if (currentView === 'RISK') {
+          query = query.lt('license_expiry', new Date().toISOString().slice(0,10));
+      } 
+      else if (currentView === 'BLACKLIST') {
+          query = query.eq('is_blacklisted', 'Y');
+      }
 
+      // 🌟 核心防護修復：智慧判斷 UUID 格式，避免資料庫因欄位型別衝突而假死
       if (searchTerm) {
-          query = query.or(`email.ilike.%${searchTerm}%,full_name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%,id.ilike.%${searchTerm}%`)
+          const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(searchTerm);
+          if (isUUID) {
+              query = query.eq('id', searchTerm);
+          } else {
+              query = query.or(`email.ilike.%${searchTerm}%,full_name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%,national_id.ilike.%${searchTerm}%`);
+          }
       }
       
       const from = (page - 1) * ITEMS_PER_PAGE
@@ -216,7 +243,13 @@ export default function MemberCRM() {
       if (error) throw error
       setMembers(data || [])
       setTotalPages(Math.ceil((count || 0) / ITEMS_PER_PAGE))
-    } catch (error) { console.error('Error:', error) } finally { setLoading(false) }
+    } catch (error) { 
+      console.error('資料載入異常:', error);
+      // 確保出錯時不會殘留上一筆資料造成誤導
+      setMembers([]); 
+    } finally { 
+      setLoading(false) 
+    }
   }
 
   const handleSort = (key) => {
@@ -237,12 +270,10 @@ export default function MemberCRM() {
       })
   }, [members, sortConfig])
 
-  // 🌟 點開編輯視窗時，執行智慧異動比對 (支援從雷達觸發)
   const handleEditClick = (member, fromRadar = false) => { 
       setEditingMember({ ...member });
       
       let fieldsToHighlight = [];
-      // 只要是從通知中心(雷達)導引過來，或是他原本就帶有異動標記，就會自動高亮核心區域
       if (fromRadar || member.basic_edit_count > 0 || member.med_edit_count > 0) {
           fieldsToHighlight = [
               'full_name', 'english_name', 'national_id', 'gender', 'birthday', 'phone', 'contact_email', 'address',
@@ -259,8 +290,6 @@ export default function MemberCRM() {
       if (!editingMember) return
       setSavingMember(true)
       try {
-          // 🌟 終極防爆：精準剝離前端專用變數 (basic_edit_count, med_edit_count 等)
-          // 絕對不將這些不存在於資料庫的欄位送出，避免 Schema 報錯！
           const { count, _exact, basic_edit_count, med_edit_count, ...safeDbPayload } = editingMember;
 
           const { error } = await supabase.from('profiles').update(safeDbPayload).eq('id', editingMember.id)
@@ -353,6 +382,77 @@ export default function MemberCRM() {
   
   const handleFileUpload = async(e) => {  }
   
+  const generateExcel = (cartData, filename) => {
+      const exportData = cartData.map(m => ({
+          "姓名(A)": m.full_name || '',
+          "出生年月日(B)": m.birthday || '',
+          "身分證字號(C)": m.national_id || '',
+          "手機(D)": m.phone || '',
+          "e-mail(E)": m.contact_email || '',
+          "通訊地址(F)": m.address || '',
+          "賽事衣服(G)": m.shirt_size || '',
+          "緊急聯繫人(H)": m.emergency_name || '',
+          "緊急聯繫人電話(I)": m.emergency_phone || '',
+          "緊急聯繫人關係(J)": m.emergency_relation || '',
+          "英文名(K)": m.english_name || '',
+          "醫護證照繳交情況(L)": m.medical_license || '',
+          "飲食(M)": m.dietary_habit || '',
+          "醫鐵履歷網址(N)": m.resume_url || '',
+          "成就徽章(O)": m.badges || '',
+          "醫鐵權限(P)": m.role || '',
+          "當年度會員(Q)": m.is_current_member || '',
+          "會員訓練(R)": m.training_status || '',
+          "帶隊官(S)": m.is_team_leader || '',
+          "新人(T)": m.is_new_member || '',
+          "醫護證照有效期(U)": m.license_expiry || '',
+          "三鐵服期限-25(V)": m.shirt_expiry_25 || '',
+          "三鐵服期限-26(W)": m.shirt_expiry_26 || '',
+          "VIP(X)": m.is_vip || '',
+          "報名系統登入(Y)": m.email || '',
+          "血型(Z)": m.blood_type || '',
+          "病史(AA)": m.medical_history || '',
+          "黑名單(AB)": m.is_blacklisted || '',
+          "積分(AC)": m.total_points || 0,
+          "場次(AD)": m.total_races || 0,
+          "時數(AE)": m.volunteer_hours || 0,
+          "等級(AF)": m.rank_level || '',
+          "LineID(AG)": m.line_id || '',
+          "FB(AH)": m.fb_id || '',
+          "IG(AI)": m.ig_id || '',
+          "備註(AJ)": m.admin_note || '',
+          "領衣日(AK)": m.shirt_receive_date || '',
+          "證書日(AL)": m.cert_send_date || '',
+          "交通(AM)": m.transport_pref || '',
+          "住宿(AN)": m.stay_pref || '',
+          "眷屬(AO)": m.family_count || '',
+          "Ext_01": m.ext_01 || '',
+          "Ext_02": m.ext_02 || '',
+          "Ext_03": m.ext_03 || '',
+          "Ext_04": m.ext_04 || '',
+          "Ext_05": m.ext_05 || '',
+          "Ext_06": m.ext_06 || '',
+          "Ext_07": m.ext_07 || '',
+          "Ext_08": m.ext_08 || '',
+          "Ext_09": m.ext_09 || '',
+          "Ext_10": m.ext_10 || '',
+          "Ext_11": m.ext_11 || '',
+          "Ext_12": m.ext_12 || '',
+          "Ext_13": m.ext_13 || '',
+          "Ext_14": m.ext_14 || '',
+          "Ext_15": m.ext_15 || '',
+          "Ext_16": m.ext_16 || '',
+          "Ext_17": m.ext_17 || '',
+          "Ext_18": m.ext_18 || '',
+          "Ext_19": m.ext_19 || '',
+          "Ext_20": m.ext_20 || ''
+      }))
+
+      const ws = XLSX.utils.json_to_sheet(exportData)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, "醫護鐵人名單")
+      XLSX.writeFile(wb, filename)
+  }
+
   const handleExportCart = async() => { 
     if (exportCart.size === 0) return alert("匯出清單為空。")
     setExporting(true)
@@ -360,78 +460,59 @@ export default function MemberCRM() {
         const { data: cartData, error } = await supabase.from('profiles').select('*').in('id', Array.from(exportCart)).order('created_at', { ascending: false })
         if (error) throw error
 
-        const exportData = cartData.map(m => ({
-            "姓名(A)": m.full_name || '',
-            "出生年月日(B)": m.birthday || '',
-            "身分證字號(C)": m.national_id || '',
-            "手機(D)": m.phone || '',
-            "e-mail(E)": m.contact_email || '',
-            "通訊地址(F)": m.address || '',
-            "賽事衣服(G)": m.shirt_size || '',
-            "緊急聯繫人(H)": m.emergency_name || '',
-            "緊急聯繫人電話(I)": m.emergency_phone || '',
-            "緊急聯繫人關係(J)": m.emergency_relation || '',
-            "英文名(K)": m.english_name || '',
-            "醫護證照繳交情況(L)": m.medical_license || '',
-            "飲食(M)": m.dietary_habit || '',
-            "醫鐵履歷網址(N)": m.resume_url || '',
-            "成就徽章(O)": m.badges || '',
-            "醫鐵權限(P)": m.role || '',
-            "當年度會員(Q)": m.is_current_member || '',
-            "會員訓練(R)": m.training_status || '',
-            "帶隊官(S)": m.is_team_leader || '',
-            "新人(T)": m.is_new_member || '',
-            "醫護證照有效期(U)": m.license_expiry || '',
-            "三鐵服期限-25(V)": m.shirt_expiry_25 || '',
-            "三鐵服期限-26(W)": m.shirt_expiry_26 || '',
-            "VIP(X)": m.is_vip || '',
-            "報名系統登入(Y)": m.email || '',
-            "血型(Z)": m.blood_type || '',
-            "病史(AA)": m.medical_history || '',
-            "黑名單(AB)": m.is_blacklisted || '',
-            "積分(AC)": m.total_points || 0,
-            "場次(AD)": m.total_races || 0,
-            "時數(AE)": m.volunteer_hours || 0,
-            "等級(AF)": m.rank_level || '',
-            "LineID(AG)": m.line_id || '',
-            "FB(AH)": m.fb_id || '',
-            "IG(AI)": m.ig_id || '',
-            "備註(AJ)": m.admin_note || '',
-            "領衣日(AK)": m.shirt_receive_date || '',
-            "證書日(AL)": m.cert_send_date || '',
-            "交通(AM)": m.transport_pref || '',
-            "住宿(AN)": m.stay_pref || '',
-            "眷屬(AO)": m.family_count || '',
-            "Ext_01": m.ext_01 || '',
-            "Ext_02": m.ext_02 || '',
-            "Ext_03": m.ext_03 || '',
-            "Ext_04": m.ext_04 || '',
-            "Ext_05": m.ext_05 || '',
-            "Ext_06": m.ext_06 || '',
-            "Ext_07": m.ext_07 || '',
-            "Ext_08": m.ext_08 || '',
-            "Ext_09": m.ext_09 || '',
-            "Ext_10": m.ext_10 || '',
-            "Ext_11": m.ext_11 || '',
-            "Ext_12": m.ext_12 || '',
-            "Ext_13": m.ext_13 || '',
-            "Ext_14": m.ext_14 || '',
-            "Ext_15": m.ext_15 || '',
-            "Ext_16": m.ext_16 || '',
-            "Ext_17": m.ext_17 || '',
-            "Ext_18": m.ext_18 || '',
-            "Ext_19": m.ext_19 || '',
-            "Ext_20": m.ext_20 || ''
-        }))
-
-        const ws = XLSX.utils.json_to_sheet(exportData)
-        const wb = XLSX.utils.book_new()
-        XLSX.utils.book_append_sheet(wb, ws, "醫護鐵人名單")
-        XLSX.writeFile(wb, `IronMedic_Members_${new Date().toISOString().slice(0,10)}.xlsx`)
-
+        generateExcel(cartData, `IronMedic_Selected_${new Date().toISOString().slice(0,10)}.xlsx`)
+        
         setIsCartModalOpen(false)
         setExportCart(new Set())
     } catch (err) { alert('系統匯出失敗: ' + err.message) } finally { setExporting(false) }
+  }
+
+  const handleExportAll = async() => {
+      if(!window.confirm(`確定要匯出目前【${currentView}】分類下的所有人員資料嗎？\n(這將無視分頁，打包整個資料庫區塊)`)) return;
+      setExportingAll(true);
+      
+      try {
+          let query = supabase.from('profiles').select('*').order('created_at', { ascending: false })
+          
+          if (currentView !== 'BLACKLIST') {
+              query = query.or('is_blacklisted.is.null,is_blacklisted.eq.N');
+          }
+
+          if (currentView === 'COMMAND') {
+              query = query.or('role.eq.SUPER_ADMIN,role.eq.TOURNAMENT_DIRECTOR,is_vip.eq.Y');
+          } 
+          else if (currentView === 'ACTIVE') {
+              query = query.or('role.eq.VERIFIED_MEDIC,role.eq.TOURNAMENT_DIRECTOR,role.eq.SUPER_ADMIN');
+          } 
+          else if (currentView === 'RESERVE') {
+              query = query.or('role.eq.USER,role.is.null');
+          } 
+          else if (currentView === 'RISK') {
+              query = query.lt('license_expiry', new Date().toISOString().slice(0,10));
+          } 
+          else if (currentView === 'BLACKLIST') {
+              query = query.eq('is_blacklisted', 'Y');
+          }
+
+          // 🌟 同樣在匯出時進行智慧判斷，保護資料庫防呆
+          if (searchTerm) {
+              const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(searchTerm);
+              if (isUUID) {
+                  query = query.eq('id', searchTerm);
+              } else {
+                  query = query.or(`email.ilike.%${searchTerm}%,full_name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%,national_id.ilike.%${searchTerm}%`);
+              }
+          }
+
+          const { data: allData, error } = await query;
+          if (error) throw error;
+          
+          if(allData.length === 0) return alert("此分類下沒有任何資料可匯出。");
+
+          generateExcel(allData, `IronMedic_All_${currentView}_${new Date().toISOString().slice(0,10)}.xlsx`)
+          alert(`✅ 成功匯出 ${allData.length} 筆資料！`);
+          
+      } catch (err) { alert('全庫匯出失敗: ' + err.message) } finally { setExportingAll(false) }
   }
 
   const handleFieldChange = useCallback((name, value) => {
@@ -452,11 +533,17 @@ export default function MemberCRM() {
                 </h1>
                 <p className="text-sm text-slate-500">系統資料庫檢視模式 V10.9.2 (左側凍結排版)</p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 items-center">
                  <button onClick={() => navigate('/admin/import')} className="px-4 py-2 bg-slate-100 text-slate-600 rounded-lg font-bold hover:bg-slate-200 shadow-sm flex items-center gap-1"><FileSpreadsheet size={16}/> 前往匯入中心</button>
                  <button onClick={() => setIsColumnConfigOpen(!isColumnConfigOpen)} className={`px-4 py-2 rounded-lg font-bold transition-all ${isColumnConfigOpen ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'}`}>欄位配置</button>
+                 
+                 <button onClick={handleExportAll} disabled={exportingAll} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold shadow-md shadow-indigo-600/30 transition-all flex items-center gap-2 active:scale-95 disabled:opacity-50">
+                     {exportingAll ? <Loader2 size={16} className="animate-spin"/> : <Download size={16}/>}
+                     匯出本頁全庫
+                 </button>
+
                  <button onClick={() => setIsCartModalOpen(true)} className={`px-4 py-2 rounded-lg font-bold shadow transition-all ${exportCart.size > 0 ? 'bg-green-600 text-white animate-pulse' : 'bg-slate-800 text-slate-400'}`}>
-                     匯出作業 ({exportCart.size})
+                     選擇匯出購物車 ({exportCart.size})
                  </button>
             </div>
         </div>
@@ -508,9 +595,30 @@ export default function MemberCRM() {
           </div>
       )}
 
-      {/* 搜尋列 */}
+      {/* 🌟 真・即時漸進式過濾搜尋列 (無懸浮卡片，直接反應在下方表格) */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-          <input type="text" placeholder="搜尋姓名、Email、電話..." className="w-full pl-4 pr-4 py-2 bg-slate-50 border rounded-lg outline-none focus:bg-white focus:ring-2 focus:ring-blue-100 transition-all" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}/>
+          <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Search className="h-5 w-5 text-slate-400" />
+              </div>
+              <input 
+                  type="text" 
+                  autoComplete="off"
+                  placeholder="超級搜尋：輸入姓名、Email、電話、身分證字號..." 
+                  className="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-bold text-slate-700 shadow-sm" 
+                  value={searchInput} 
+                  onChange={e => setSearchInput(e.target.value)}
+              />
+              {searchInput && (
+                  <button 
+                      onClick={() => { setSearchInput(''); setSearchTerm(''); }}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-red-500 transition-colors"
+                      title="清除搜尋"
+                  >
+                      <XCircle size={20} />
+                  </button>
+              )}
+          </div>
       </div>
 
       {/* 批次操作列 */}
@@ -805,8 +913,8 @@ export default function MemberCRM() {
           <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[110] backdrop-blur-sm animate-fade-in" onClick={() => setIsCartModalOpen(false)}>
              <div className="bg-white p-8 rounded-[2rem] shadow-2xl max-w-sm w-full animate-bounce-in" onClick={e => e.stopPropagation()}>
                  <div className="w-16 h-16 bg-green-50 text-green-600 rounded-2xl flex items-center justify-center mb-6 mx-auto"><Download size={32}/></div>
-                 <h3 className="font-black text-2xl mb-3 text-center text-slate-800">匯出完整資料</h3>
-                 <p className="mb-8 text-slate-500 text-sm text-center leading-relaxed">即將匯出 {exportCart.size} 位人員的 A~AO 全部欄位（Excel 格式），方便您進行離線處理或匯入中心。</p>
+                 <h3 className="font-black text-2xl mb-3 text-center text-slate-800">匯出選擇資料</h3>
+                 <p className="mb-8 text-slate-500 text-sm text-center leading-relaxed">即將匯出您勾選的 {exportCart.size} 位人員的 A~AO 全部欄位（Excel 格式），方便您進行離線處理。</p>
                  <button disabled={exporting} className="w-full font-black bg-green-600 hover:bg-green-700 text-white py-4 rounded-xl mb-3 flex items-center justify-center gap-2 transition-all shadow-lg shadow-green-600/30 disabled:opacity-50 active:scale-95" onClick={handleExportCart}>
                      {exporting ? <Loader2 className="animate-spin" size={20}/> : <><FileSpreadsheet size={20}/> 執行匯出作業</>}
                  </button>

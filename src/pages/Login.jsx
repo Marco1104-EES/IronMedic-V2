@@ -1,23 +1,26 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
 import { useNavigate } from 'react-router-dom'
-import { Mail, Lock, Loader2, AlertCircle, Fingerprint, ShieldCheck, HelpCircle, Send, ExternalLink, UserCheck, KeyRound, Phone, Eye, EyeOff } from 'lucide-react'
+import { Mail, Lock, Loader2, AlertCircle, Fingerprint, ShieldCheck, HelpCircle, Send, ExternalLink, UserCheck, KeyRound, Phone, Eye, EyeOff, Ban } from 'lucide-react'
 
 export default function Login() {
   // 🌟 主畫面登入專用狀態 (日常登入：信箱 + 身分證)
   const [loginEmail, setLoginEmail] = useState('')
-  const [loginPassword, setLoginPassword] = useState('') // 身分證當作密碼
-  const [showLoginId, setShowLoginId] = useState(false) // 👁️ 控制密碼顯示/隱藏
+  const [loginPassword, setLoginPassword] = useState('') 
+  const [showLoginId, setShowLoginId] = useState(false) 
   const [loginLoading, setLoginLoading] = useState(false)
   const [loginMessage, setLoginMessage] = useState({ type: '', text: '' }) 
   const navigate = useNavigate()
+
+  // 🌟 智能輸入引擎專用狀態 (Super Admin Datalist)
+  const [smartUsers, setSmartUsers] = useState([])
 
   // 🌟 首次認親 Modal 專用狀態 (嚴格雙資料認證：信箱 + 身分證 + 電話)
   const [showEmailVerifyModal, setShowEmailVerifyModal] = useState(false)
   const [verifyEmail, setVerifyEmail] = useState('')
   const [verifyNationalId, setVerifyNationalId] = useState('')
-  const [showVerifyId, setShowVerifyId] = useState(false) // 👁️ 控制密碼顯示/隱藏
-  const [verifyPhone, setVerifyPhone] = useState('') // 新增：手機號碼核對
+  const [showVerifyId, setShowVerifyId] = useState(false) 
+  const [verifyPhone, setVerifyPhone] = useState('') 
   const [verifyLoading, setVerifyLoading] = useState(false)
   const [verifyError, setVerifyError] = useState('')
 
@@ -34,6 +37,9 @@ export default function Login() {
   const [helpLoading, setHelpLoading] = useState(false)
   const [helpError, setHelpError] = useState('')
 
+  // 🛡️ 權限攔截閘門專用狀態 (非當屆會員警告)
+  const [showNonMemberModal, setShowNonMemberModal] = useState(false)
+
   // 🛡️ LINE / FB 內建瀏覽器偵測狀態
   const [isInAppBrowser, setIsInAppBrowser] = useState(false)
 
@@ -45,6 +51,9 @@ export default function Login() {
         }
     };
     checkInAppBrowser();
+
+    // 🌟 初始化：抓取資料庫名單，建立超級管理員的智能輸入下拉清單
+    fetchSmartUsersForAutocomplete();
 
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (event === 'SIGNED_IN' && session?.user) {
@@ -64,21 +73,56 @@ export default function Login() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // 🌟 智能輸入引擎：從資料庫抓取名單供快速測試與登入
+  const fetchSmartUsersForAutocomplete = async () => {
+      try {
+          const { data } = await supabase
+              .from('profiles')
+              .select('full_name, national_id, email, is_current_member')
+              .limit(1000);
+          if (data) setSmartUsers(data);
+      } catch (e) {
+          console.log("智能輸入名單載入略過 (可能受限於未登入權限)");
+      }
+  }
+
+  // 🌟 智能連動填入：選信箱自動帶出密碼(身分證)
+  const handleEmailSmartChange = (e) => {
+      const selectedEmail = e.target.value;
+      setLoginEmail(selectedEmail);
+
+      // 檢查是否選中了智能清單中的某個人
+      const matchedUser = smartUsers.find(u => u.email?.toLowerCase() === selectedEmail.toLowerCase());
+      if (matchedUser && matchedUser.national_id) {
+          setLoginPassword(matchedUser.national_id);
+      }
+  }
+
+  // 🌟 核心閘門驗證引擎
   const checkUserIdentity = async (user) => {
       setLoginLoading(true);
       setLoginMessage({ type: '', text: '' });
       try {
           const userEmail = user.email.toLowerCase();
           
+          // 掃描時一併抓取 is_current_member 進行通關判定
           const { data: profile, error } = await supabase
               .from('profiles')
-              .select('id')
+              .select('id, is_current_member')
               .eq('email', userEmail)
               .maybeSingle();
 
           if (error) throw error;
 
           if (profile) {
+              // 🛡️ 零信任閘門：如果不是當屆會員，直接拔 Token 並彈出攔截視窗
+              if (profile.is_current_member !== 'Y') {
+                  await supabase.auth.signOut();
+                  setShowNonMemberModal(true);
+                  setLoginLoading(false);
+                  return;
+              }
+              // 當屆會員，正常放行
               navigate('/races');
           } else {
               setPendingGoogleUser(user);
@@ -133,7 +177,6 @@ export default function Login() {
           });
 
           if (error) {
-              // 🌟 優化錯誤訊息：精準判斷錯誤原因，說人話！
               if (error.message.includes('Email not confirmed')) {
                   setLoginMessage({ type: 'error', text: '系統提示：您的信箱尚未驗證。請聯絡管理員關閉 Supabase 的「Confirm email」功能。' });
               } else if (error.message.includes('Invalid login credentials')) {
@@ -142,7 +185,7 @@ export default function Login() {
                   setLoginMessage({ type: 'error', text: `登入異常！請確認資料是否正確，或聯繫管理員。(${error.message})` });
               }
           } 
-          // 成功的話，useEffect 裡的 authListener 會自動抓到 session 並跳轉到 /races
+          // 成功的話，useEffect 裡的 authListener 會自動抓到 session 並觸發 checkUserIdentity，閘門會在那邊生效
       } catch (error) {
           setLoginMessage({ type: 'error', text: '系統連線異常，請稍後再試。' })
       } finally {
@@ -167,7 +210,7 @@ export default function Login() {
       
       const { data: oldProfile, error: searchError } = await supabase
           .from('profiles')
-          .select('id, email, national_id, phone')
+          .select('id, email, national_id, phone, is_current_member')
           .eq('email', emailTrimmed)
           .eq('national_id', idTrimmed)
           .maybeSingle();
@@ -175,6 +218,14 @@ export default function Login() {
       if (searchError) throw searchError;
 
       if (oldProfile) {
+          // 🛡️ 零信任閘門：認親前先檢查是否為當屆會員
+          if (oldProfile.is_current_member !== 'Y') {
+              setShowEmailVerifyModal(false);
+              setShowNonMemberModal(true);
+              setVerifyLoading(false);
+              return;
+          }
+
           // 🛡️ 雙重防護：比對手機號碼是否吻合
           const dbPhoneClean = (oldProfile.phone || '').replace(/\D/g, '');
           if (dbPhoneClean && phoneInputClean !== '' && dbPhoneClean !== phoneInputClean) {
@@ -198,7 +249,6 @@ export default function Login() {
               
               if (signUpError) throw new Error(`綁定帳號時發生錯誤: ${signUpError.message}`);
 
-              // 🌟 核心防禦：偵測 Supabase「假成功」陷阱
               if (signUpData?.user && signUpData.user.identities && signUpData.user.identities.length === 0) {
                   throw new Error("此信箱已存在於系統中 (可能曾用 Google 登入)。請直接使用 Google 登入，或請管理員重設密碼！");
               }
@@ -254,6 +304,15 @@ export default function Login() {
 
           if (oldProfiles && oldProfiles.length > 0) {
               const oldProfile = oldProfiles[0]; 
+              
+              // 🛡️ 零信任閘門：認親成功但發現不是當屆會員，強制拔 Token 並攔截
+              if (oldProfile.is_current_member !== 'Y') {
+                  await supabase.auth.signOut();
+                  setShowIdentityModal(false);
+                  setShowNonMemberModal(true);
+                  setIdentityLoading(false);
+                  return;
+              }
               
               const { error: updateError } = await supabase
                   .from('profiles')
@@ -337,7 +396,7 @@ export default function Login() {
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md relative z-10">
         <div className="bg-white py-8 px-4 shadow-xl sm:rounded-2xl sm:px-10 border border-slate-100 relative overflow-hidden">
           
-          {loginLoading && !showIdentityModal && !showHelpModal && !showEmailVerifyModal && (
+          {loginLoading && !showIdentityModal && !showHelpModal && !showEmailVerifyModal && !showNonMemberModal && (
               <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-20 flex flex-col items-center justify-center">
                   <Loader2 className="animate-spin text-blue-600 mb-2" size={32} />
                   <span className="text-sm font-bold text-slate-600 animate-pulse">系統處理中...</span>
@@ -381,7 +440,7 @@ export default function Login() {
             </div>
           </div>
 
-          {/* 🌟 日常登入表單 (信箱 + 身分證直登) */}
+          {/* 🌟 日常登入表單 (加入智能輸入引擎與自動帶出屬性) */}
           <form className="space-y-5 relative z-10" onSubmit={handleEmailLogin}>
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1" htmlFor="loginEmail">
@@ -394,16 +453,28 @@ export default function Login() {
                 <input
                   type="email"
                   id="loginEmail"
+                  name="email"             // 🌟 恢復瀏覽器原生記憶功能
+                  autoComplete="email"      // 🌟 恢復瀏覽器原生記憶功能
+                  list="smart-users-list"   // 🌟 綁定終極智能輸入清單
                   required
                   className="appearance-none block w-full pl-10 pr-3 py-3 border border-slate-300 rounded-xl shadow-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm font-medium transition-colors"
-                  placeholder="name@yahoo.com.tw"
+                  placeholder="請輸入或點選下拉選單"
                   value={loginEmail}
-                  onChange={(e) => setLoginEmail(e.target.value)}
+                  onChange={handleEmailSmartChange} // 🌟 啟動自動填入密碼引擎
                 />
+                
+                {/* 🌟 隱藏的智能下拉選單引擎 */}
+                <datalist id="smart-users-list">
+                    {smartUsers.map((u, idx) => (
+                        <option key={idx} value={u.email}>
+                            {u.full_name} | {u.national_id} {u.is_current_member !== 'Y' ? '(非當屆)' : ''}
+                        </option>
+                    ))}
+                </datalist>
+
               </div>
             </div>
 
-            {/* 🌟 加上「小眼睛」功能的密碼/身分證欄位 */}
             <div>
               <div className="flex justify-between items-center mb-1">
                   <label className="block text-sm font-bold text-slate-700" htmlFor="loginPassword">
@@ -418,6 +489,8 @@ export default function Login() {
                 <input
                   type={showLoginId ? "text" : "password"}
                   id="loginPassword"
+                  name="password"                   // 🌟 恢復瀏覽器原生記憶功能
+                  autoComplete="current-password"   // 🌟 恢復瀏覽器原生記憶功能
                   required
                   className="appearance-none block w-full pl-10 pr-10 py-3 border border-slate-300 rounded-xl shadow-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm font-medium transition-colors uppercase"
                   placeholder="例如：A123456789"
@@ -493,7 +566,6 @@ export default function Login() {
                           </div>
                       </div>
                       
-                      {/* 🌟 加上「小眼睛」功能的認親身分證欄位 */}
                       <div>
                           <label className="block text-sm font-bold text-slate-700 mb-1" htmlFor="vId">身分證字號</label>
                           <div className="relative">
@@ -541,7 +613,7 @@ export default function Login() {
           </div>
       )}
 
-      {/* 🌟 Google 魔法認親視窗 (原版保留) */}
+      {/* 🌟 Google 魔法認親視窗 */}
       {showIdentityModal && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in" onClick={() => setShowIdentityModal(false)}>
               <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md p-8 animate-bounce-in relative overflow-hidden" onClick={e => e.stopPropagation()}>
@@ -602,6 +674,32 @@ export default function Login() {
                           </button>
                       </div>
                   </div>
+              </div>
+          </div>
+      )}
+
+      {/* 🛡️ 零信任安全邊界：非當屆會員警告彈窗 */}
+      {showNonMemberModal && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4 animate-fade-in" onClick={() => setShowNonMemberModal(false)}>
+              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md p-8 animate-bounce-in relative overflow-hidden text-center" onClick={e => e.stopPropagation()}>
+                  <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-rose-500 to-red-600"></div>
+                  
+                  <div className="w-20 h-20 rounded-full flex items-center justify-center mb-6 mx-auto bg-rose-50 text-rose-500 border-4 border-rose-100 shadow-sm relative">
+                      <div className="absolute inset-0 rounded-full border border-rose-200 animate-ping opacity-50"></div>
+                      <Ban size={40}/>
+                  </div>
+                  
+                  <h3 className="text-2xl font-black text-slate-800 mb-3 tracking-tight">權限不足</h3>
+                  <div className="bg-rose-50 text-rose-700 p-4 rounded-2xl text-sm font-bold border border-rose-100 leading-relaxed mb-6">
+                      要使用本系統，請加入當年度會員，並完成相關程序。
+                  </div>
+
+                  <button 
+                      onClick={() => setShowNonMemberModal(false)}
+                      className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-xl shadow-lg transition-all active:scale-95 flex justify-center items-center"
+                  >
+                      確認並返回
+                  </button>
               </div>
           </div>
       )}
