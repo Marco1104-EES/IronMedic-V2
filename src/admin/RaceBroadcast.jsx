@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
-import { Radio, CalendarClock, Send, CheckCircle2, AlertCircle, Loader2, RefreshCw } from 'lucide-react'
+import { Radio, CalendarClock, Send, CheckCircle2, AlertCircle, Loader2, RefreshCw, ShieldAlert, Users } from 'lucide-react'
 
 export default function RaceBroadcast() {
     const [races, setRaces] = useState([])
@@ -29,31 +29,66 @@ export default function RaceBroadcast() {
         }
     }
 
-    const handleManualFire = async (race) => {
-        const confirmFire = window.confirm(`系統確認：\n\n確定要對所有有效會員發送【${race.name}】的賽事通知嗎？\n(這將立即發送手機推播並同步更新系統通知)`);
+    // 🌟 核心修復二：加入目標受眾選擇機制 (全體會員 vs 帶隊教官)
+    const handleManualFire = async (race, targetGroup = 'ALL') => {
+        const targetName = targetGroup === 'LEADERS' ? '【帶隊教官】' : '【全體有效會員】';
+        const confirmFire = window.confirm(`系統確認：\n\n確定要對 ${targetName} 發送「${race.name}」的賽事通知嗎？\n(這將立即更新系統通知)`);
         
         if (!confirmFire) return;
 
         setFiringId(race.id);
         
         try {
-            const pastTime = new Date(Date.now() - 60000).toISOString();
+            if (targetGroup === 'LEADERS') {
+                // 🚀 帶隊教官專屬廣播邏輯 (前端直接寫入系統通知)
+                const { data: leaders, error: leaderError } = await supabase
+                    .from('profiles')
+                    .select('id')
+                    .eq('is_current_member', 'Y')
+                    .eq('is_team_leader', 'Y');
+                
+                if (leaderError) throw leaderError;
+                
+                if (!leaders || leaders.length === 0) {
+                    alert('系統提示：目前資料庫中沒有設定為帶隊教官的會員！');
+                    setFiringId(null);
+                    return;
+                }
 
-            await supabase.from('races')
-                .update({ announce_time: pastTime, is_announced: false })
-                .eq('id', race.id);
+                const notificationsToInsert = leaders.map(leader => ({
+                    user_id: leader.id,
+                    tab: 'personal',
+                    category: 'alert',
+                    message: `📢 帶隊教官預先召集令：\n【${race.name}】已為幹部開放預先報名配置，請儘速前往賽事大廳報到。`,
+                    is_read: false
+                }));
 
-            const res = await supabase.functions.invoke('broadcast-push');
-            
-            if (res.error) throw res.error;
+                const { error: insertError } = await supabase.from('user_notifications').insert(notificationsToInsert);
+                if (insertError) throw insertError;
+                
+                alert(`✅ 專屬廣播成功！已發送系統通知給 ${leaders.length} 位帶隊教官。\n(註：專屬廣播目前僅推播至系統鈴鐺，無手機 Push)`);
 
-            if (res.data && res.data.message && res.data.message.includes('無賽事')) {
-                alert('系統提示：伺服器正在同步資料，請等待 3 秒後再試一次。');
-                setFiringId(null);
-                return;
+            } else {
+                // 🚀 全域廣播邏輯 (原版 Edge Function 觸發)
+                const pastTime = new Date(Date.now() - 60000).toISOString();
+
+                await supabase.from('races')
+                    .update({ announce_time: pastTime, is_announced: false })
+                    .eq('id', race.id);
+
+                const res = await supabase.functions.invoke('broadcast-push');
+                
+                if (res.error) throw res.error;
+
+                if (res.data && res.data.message && res.data.message.includes('無賽事')) {
+                    alert('系統提示：伺服器正在同步資料，請等待 3 秒後再試一次。');
+                    setFiringId(null);
+                    return;
+                }
+
+                alert('✅ 全域推播發送成功！手機通知與系統通知皆已同步。');
             }
-
-            alert('✅ 推播發送成功！手機通知與系統通知皆已同步。');
+            
             fetchRaces(); 
         } catch (error) {
             console.error('推播失敗:', error);
@@ -108,7 +143,7 @@ export default function RaceBroadcast() {
                             
                             if (isAnnounced) {
                                 statusClass = "border-emerald-200 bg-emerald-50";
-                                statusText = "通知已發送";
+                                statusText = "全域通知已發送";
                                 statusIcon = <CheckCircle2 size={20} className="text-emerald-500"/>;
                             } else if (isPast && !isAnnounced) {
                                 statusClass = "border-amber-200 bg-amber-50";
@@ -117,7 +152,7 @@ export default function RaceBroadcast() {
                             }
 
                             return (
-                                <div key={race.id} className={`p-5 rounded-2xl border-2 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 ${statusClass}`}>
+                                <div key={race.id} className={`p-5 rounded-2xl border-2 transition-all flex flex-col xl:flex-row xl:items-center justify-between gap-4 ${statusClass}`}>
                                     <div className="flex-1">
                                         <div className="flex items-center gap-2 mb-1">
                                             {statusIcon}
@@ -134,31 +169,44 @@ export default function RaceBroadcast() {
                                         </div>
                                     </div>
                                     
-                                    <div className="shrink-0 flex items-center justify-end gap-3">
+                                    <div className="shrink-0 flex flex-wrap items-center justify-end gap-3 border-t xl:border-t-0 xl:border-l border-slate-200 pt-3 xl:pt-0 xl:pl-4 mt-2 xl:mt-0">
+                                        
+                                        {/* 🌟 核心修復二：帶隊教官專屬推播按鈕 */}
+                                        <button 
+                                            onClick={() => handleManualFire(race, 'LEADERS')}
+                                            disabled={firingId === race.id}
+                                            className="flex-1 xl:flex-none flex items-center justify-center gap-2 bg-amber-100 hover:bg-amber-200 text-amber-700 px-4 py-2.5 rounded-xl font-black shadow-sm border border-amber-300 transition-colors disabled:opacity-50"
+                                            title="僅發送系統通知給帶隊教官"
+                                        >
+                                            {firingId === race.id ? <Loader2 size={18} className="animate-spin"/> : <ShieldAlert size={18}/>}
+                                            招募帶隊教官
+                                        </button>
+
                                         {!isAnnounced && (
                                             <button 
-                                                onClick={() => handleManualFire(race)}
+                                                onClick={() => handleManualFire(race, 'ALL')}
                                                 disabled={firingId === race.id}
-                                                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2.5 rounded-xl font-black shadow-md transition-colors disabled:opacity-50"
+                                                className="flex-1 xl:flex-none flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2.5 rounded-xl font-black shadow-md transition-colors disabled:opacity-50"
+                                                title="發送手機與系統通知給全體會員"
                                             >
-                                                {firingId === race.id ? <Loader2 size={18} className="animate-spin"/> : <Send size={18}/>}
-                                                手動發送通知
+                                                {firingId === race.id ? <Loader2 size={18} className="animate-spin"/> : <Users size={18}/>}
+                                                全域發送
                                             </button>
                                         )}
                                         
                                         {isAnnounced && (
                                             <>
                                                 <div className="hidden sm:flex items-center gap-2 text-emerald-600 bg-emerald-100 px-4 py-2.5 rounded-xl font-black border border-emerald-200">
-                                                    <CheckCircle2 size={18}/> 作業已完成
+                                                    <CheckCircle2 size={18}/> 全域已廣播
                                                 </div>
                                                 <button 
-                                                    onClick={() => handleManualFire(race)}
+                                                    onClick={() => handleManualFire(race, 'ALL')}
                                                     disabled={firingId === race.id}
                                                     className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2.5 rounded-xl font-black shadow-md transition-colors disabled:opacity-50"
-                                                    title="重新發送手機推播與系統通知"
+                                                    title="重新發送手機與系統通知給全體"
                                                 >
                                                     {firingId === race.id ? <Loader2 size={18} className="animate-spin"/> : <Send size={18}/>}
-                                                    重新發送通知
+                                                    重發全域
                                                 </button>
                                             </>
                                         )}

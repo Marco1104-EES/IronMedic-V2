@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
 import { useNavigate } from 'react-router-dom'
-import { Mail, Lock, Loader2, AlertCircle, Fingerprint, ShieldCheck, HelpCircle, Send, ExternalLink, UserCheck, KeyRound, Phone, Eye, EyeOff, Ban } from 'lucide-react'
+import { Mail, Lock, Loader2, AlertCircle, Fingerprint, ShieldCheck, HelpCircle, Send, UserCheck, KeyRound, Phone, Eye, EyeOff } from 'lucide-react'
 
 export default function Login() {
   // 🌟 主畫面登入專用狀態 (日常登入：信箱 + 身分證)
@@ -36,9 +36,6 @@ export default function Login() {
   const [helpForm, setHelpForm] = useState({ name: '', nationalId: '', email: '' })
   const [helpLoading, setHelpLoading] = useState(false)
   const [helpError, setHelpError] = useState('')
-
-  // 🛡️ 權限攔截閘門專用狀態 (非當屆會員警告)
-  const [showNonMemberModal, setShowNonMemberModal] = useState(false)
 
   // 🛡️ LINE / FB 內建瀏覽器偵測狀態
   const [isInAppBrowser, setIsInAppBrowser] = useState(false)
@@ -98,14 +95,13 @@ export default function Login() {
       }
   }
 
-  // 🌟 核心閘門驗證引擎
+  // 🌟 核心閘門驗證引擎 (已拆除死胡同，全面放行至大廳)
   const checkUserIdentity = async (user) => {
       setLoginLoading(true);
       setLoginMessage({ type: '', text: '' });
       try {
           const userEmail = user.email.toLowerCase();
           
-          // 掃描時一併抓取 is_current_member 進行通關判定
           const { data: profile, error } = await supabase
               .from('profiles')
               .select('id, is_current_member')
@@ -115,14 +111,7 @@ export default function Login() {
           if (error) throw error;
 
           if (profile) {
-              // 🛡️ 零信任閘門：如果不是當屆會員，直接拔 Token 並彈出攔截視窗
-              if (profile.is_current_member !== 'Y') {
-                  await supabase.auth.signOut();
-                  setShowNonMemberModal(true);
-                  setLoginLoading(false);
-                  return;
-              }
-              // 當屆會員，正常放行
+              // 🛡️ 死胡同已拆除：只要有 Profile，一律放行進入大廳，由大廳的鐵壁接手判定
               navigate('/races');
           } else {
               setPendingGoogleUser(user);
@@ -218,14 +207,6 @@ export default function Login() {
       if (searchError) throw searchError;
 
       if (oldProfile) {
-          // 🛡️ 零信任閘門：認親前先檢查是否為當屆會員
-          if (oldProfile.is_current_member !== 'Y') {
-              setShowEmailVerifyModal(false);
-              setShowNonMemberModal(true);
-              setVerifyLoading(false);
-              return;
-          }
-
           // 🛡️ 雙重防護：比對手機號碼是否吻合
           const dbPhoneClean = (oldProfile.phone || '').replace(/\D/g, '');
           if (dbPhoneClean && phoneInputClean !== '' && dbPhoneClean !== phoneInputClean) {
@@ -304,15 +285,6 @@ export default function Login() {
 
           if (oldProfiles && oldProfiles.length > 0) {
               const oldProfile = oldProfiles[0]; 
-              
-              // 🛡️ 零信任閘門：認親成功但發現不是當屆會員，強制拔 Token 並攔截
-              if (oldProfile.is_current_member !== 'Y') {
-                  await supabase.auth.signOut();
-                  setShowIdentityModal(false);
-                  setShowNonMemberModal(true);
-                  setIdentityLoading(false);
-                  return;
-              }
               
               const { error: updateError } = await supabase
                   .from('profiles')
@@ -396,7 +368,7 @@ export default function Login() {
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md relative z-10">
         <div className="bg-white py-8 px-4 shadow-xl sm:rounded-2xl sm:px-10 border border-slate-100 relative overflow-hidden">
           
-          {loginLoading && !showIdentityModal && !showHelpModal && !showEmailVerifyModal && !showNonMemberModal && (
+          {loginLoading && !showIdentityModal && !showHelpModal && !showEmailVerifyModal && (
               <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-20 flex flex-col items-center justify-center">
                   <Loader2 className="animate-spin text-blue-600 mb-2" size={32} />
                   <span className="text-sm font-bold text-slate-600 animate-pulse">系統處理中...</span>
@@ -674,32 +646,6 @@ export default function Login() {
                           </button>
                       </div>
                   </div>
-              </div>
-          </div>
-      )}
-
-      {/* 🛡️ 零信任安全邊界：非當屆會員警告彈窗 */}
-      {showNonMemberModal && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4 animate-fade-in" onClick={() => setShowNonMemberModal(false)}>
-              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md p-8 animate-bounce-in relative overflow-hidden text-center" onClick={e => e.stopPropagation()}>
-                  <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-rose-500 to-red-600"></div>
-                  
-                  <div className="w-20 h-20 rounded-full flex items-center justify-center mb-6 mx-auto bg-rose-50 text-rose-500 border-4 border-rose-100 shadow-sm relative">
-                      <div className="absolute inset-0 rounded-full border border-rose-200 animate-ping opacity-50"></div>
-                      <Ban size={40}/>
-                  </div>
-                  
-                  <h3 className="text-2xl font-black text-slate-800 mb-3 tracking-tight">權限不足</h3>
-                  <div className="bg-rose-50 text-rose-700 p-4 rounded-2xl text-sm font-bold border border-rose-100 leading-relaxed mb-6">
-                      要使用本系統，請加入當年度會員，並完成相關程序。
-                  </div>
-
-                  <button 
-                      onClick={() => setShowNonMemberModal(false)}
-                      className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-xl shadow-lg transition-all active:scale-95 flex justify-center items-center"
-                  >
-                      確認並返回
-                  </button>
               </div>
           </div>
       )}
