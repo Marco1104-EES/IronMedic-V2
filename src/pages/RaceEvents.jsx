@@ -765,7 +765,7 @@ export default function RaceEvents() {
                       onClick={() => navigate('/my-id')}
                       className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-xl shadow-xl shadow-slate-900/20 transition-all active:scale-95 flex justify-center items-center gap-2"
                   >
-                      <User size={20}/> 前往數位 ID 辦理/更新會籍
+                      <User size={20}/> 請洽相關人員辦理相關程序/更新會籍
                   </button>
               </div>
           </div>
