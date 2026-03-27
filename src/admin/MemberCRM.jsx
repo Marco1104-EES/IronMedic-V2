@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 import * as XLSX from 'xlsx' 
-import { Search, Trash2, Edit, User, X, Shield, CheckSquare, Square, FileSpreadsheet, Upload, Download, Save, AlertCircle, Settings, ExternalLink, Zap, Crown, Flame, Cloud, Loader2, Ban, ShieldAlert, ShoppingCart, PlusCircle, ArrowUpDown, ChevronUp, ChevronDown, Users, Award, CheckCircle, XCircle, HeartPulse, Activity, UserCheck } from 'lucide-react'
+import { Search, Trash2, Edit, User, X, Shield, CheckSquare, Square, FileSpreadsheet, Upload, Download, Save, AlertCircle, Settings, ExternalLink, Zap, Crown, Flame, Cloud, Loader2, Ban, ShieldAlert, ShoppingCart, PlusCircle, ArrowUpDown, ChevronUp, ChevronDown, Users, Award, CheckCircle, XCircle, HeartPulse, Activity, UserCheck, RefreshCw } from 'lucide-react'
 
 const FIELD_TRANSLATION_MAP = {
     '姓名': 'full_name',
@@ -96,6 +96,9 @@ export default function MemberCRM() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [editingMember, setEditingMember] = useState(null)
   const [savingMember, setSavingMember] = useState(false)
+  
+  // ⚡【新增】一鍵解除綁定 Loading 狀態
+  const [isUnlockLoading, setIsUnlockLoading] = useState(false)
 
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'desc' })
 
@@ -303,6 +306,50 @@ export default function MemberCRM() {
           alert("資料更新失敗: " + err.message) 
       } finally {
           setSavingMember(false)
+      }
+  }
+
+  // ==========================================
+  // ⚡【新增】上帝捷徑：強制解除帳號綁定 (重置帳號媒合)
+  // ==========================================
+  const handleForceUnlockBinding = async (userId, userFullName) => {
+      const confirmMsg = `🛡️🛡️🛡️ 帳號重置警報 🛡️🛡️🛡️\n\n您確定要強制將【${userFullName}】解除帳號綁定 (重置帳號媒合狀態) 嗎？\n\n這通常用於以下情況：\n1. 您或會員【不小心帳號媒合錯誤】(綁到錯誤的 Google/信箱)。\n2. 會員更換 Email，需要重新綁定。\n\n執行後，系統將洗掉她的 ID 並將信箱強制改回資料庫建檔的原始信箱 (marietai@ms1.url.com.tw)，這會讓該人員下次登入時【重新走一次帳號媒合流程】。\n這不是刪除資料，她過去的紀錄會保留，只是身分需要重新核對。`;
+      if (!window.confirm(confirmMsg)) return;
+
+      setIsUnlockLoading(true);
+      try {
+          // 企業級安全 UUID 生成
+          const newRandomUuid = crypto.randomUUID(); 
+          const originalEmail = 'marietai@ms1.url.com.tw'; // 強制恢復預設信箱
+
+          const { error } = await supabase
+              .from('profiles')
+              .update({ 
+                  id: newRandomUuid,  // 洗掉舊 ID
+                  email: originalEmail // 恢復信箱
+              })
+              .eq('id', userId);
+
+          if (error) throw error;
+
+          // 更新前端狀態，讓畫面瞬間變過來
+          setMembers(prevMembers =>
+            prevMembers.map(member =>
+              member.id === userId ? { ...member, id: newRandomUuid, email: originalEmail } : member
+            )
+          );
+
+          if (editingMember && editingMember.id === userId) {
+              setEditingMember({ ...editingMember, id: newRandomUuid, email: originalEmail });
+          }
+
+          alert(`🎉【${userFullName}】已強制解除綁定！\n信箱已恢復為：${originalEmail}\nID已重置。她下次登入系統時，將會重新彈出『首次帳號核對綁定』視窗，讓她自己重新帳號媒合。`);
+
+      } catch (error) {
+          console.error("解鎖綁定失敗:", error)
+          alert('❌ 解鎖綁定失敗 (可能受限於資料庫約束)：' + error.message);
+      } finally {
+          setIsUnlockLoading(false);
       }
   }
 
@@ -904,6 +951,18 @@ export default function MemberCRM() {
                       </button>
                       <button onClick={handleCloseEditModal} disabled={savingMember} className="w-1/3 bg-slate-100 text-slate-600 font-bold py-3.5 rounded-xl hover:bg-slate-200 transition-colors active:scale-95 disabled:opacity-50">放棄並返回</button>
                   </div>
+                  
+                  {/* ⚡【新增】上帝捷徑：強制解除帳號綁定 (重置帳號媒合) */}
+                  <div className="bg-slate-50 p-5 flex flex-col gap-3 rounded-b-[2rem]">
+                      <button 
+                          onClick={() => handleForceUnlockBinding(editingMember.id, editingMember.full_name)} 
+                          disabled={isUnlockLoading}
+                          className="w-full py-3 bg-white border border-rose-200 hover:bg-rose-50 text-rose-600 font-black rounded-xl transition-all flex justify-center items-center gap-2 active:scale-95 disabled:opacity-50"
+                      >
+                          {isUnlockLoading ? <Loader2 className="animate-spin" size={16}/> : <Zap size={16}/>} ⚡ 強制解除帳號綁定 (重置帳號媒合狀態)
+                      </button>
+                  </div>
+
               </div>
           </div>
       )}

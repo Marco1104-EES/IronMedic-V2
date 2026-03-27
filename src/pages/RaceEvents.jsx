@@ -797,7 +797,7 @@ export default function RaceEvents() {
               )}
           </div>
 
-          <div className="absolute top-4 right-4 md:top-6 md:right-8 z-40 flex items-center gap-2 md:gap-3">
+          <div className="absolute top-4 right-4 md:top-6 md:right-8 z-40 flex items-start gap-2 md:gap-3">
               {isSuperAdmin && (
                   <div className="relative" ref={adminMenuRef}>
                       <button 
@@ -841,13 +841,21 @@ export default function RaceEvents() {
                   )}
               </button>
 
-              <button 
-                  onClick={() => navigate('/my-id')} 
-                  className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 px-3 py-2 md:px-4 md:py-2.5 rounded-full text-white text-[11px] sm:text-xs md:text-sm font-bold transition-all shadow-lg shadow-black/20 active:scale-95 shrink-0"
-              >
-                  <User size={16} className="hidden sm:block"/>
-                  <span className="whitespace-nowrap">數位 ID</span>
-              </button>
+              {/* 🌟 核心任務：數位 ID 按鈕加上專屬問候，維持優雅排版 */}
+              <div className="flex flex-col items-center gap-1.5 animate-fade-in">
+                  <button 
+                      onClick={() => navigate('/my-id')} 
+                      className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 px-3 py-2 md:px-4 md:py-2.5 rounded-full text-white text-[11px] sm:text-xs md:text-sm font-bold transition-all shadow-lg shadow-black/20 active:scale-95 shrink-0"
+                  >
+                      <User size={16} className="hidden sm:block"/>
+                      <span className="whitespace-nowrap">數位 ID</span>
+                  </button>
+                  {currentUserProfile && (
+                      <span className="text-[18px] sm:text-[19px] text-slate-100 opacity-80 font-medium tracking-wide">
+                          {currentUserProfile.full_name?.split(' ')[0] || '會員'}，您好
+                      </span>
+                  )}
+              </div>
           </div>
 
           <div className="absolute inset-0 opacity-20 bg-[url('https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&q=80&w=1920')] bg-cover bg-center"></div>
@@ -989,20 +997,13 @@ export default function RaceEvents() {
                       
                       const showEarlyAccess = isEarlyOpenActive && isPrivileged && (race.status === 'NEGOTIATING' || race.status === 'UPCOMING');
 
-                      // 🌟 核心修復：管理員無敵進入特權 (解除 disabled)
                       const getButtonConfig = () => {
                           if (isPastRace || ['SUBMITTED', 'COMPLETED', 'CANCELLED', 'CLOSED'].includes(race.status)) return { text: '賽事已結束 / 檢視名單', class: 'bg-slate-200 text-slate-500 border border-slate-300' }
-                          
-                          // 管理員特權：不管什麼狀態，按鈕永遠是開放進入的
                           if (isAdminOrDirector && race.status === 'UPCOMING') return { text: '進入名額配置 (總監特權)', class: 'bg-indigo-600 text-white hover:bg-indigo-700 hover:shadow-xl hover:shadow-indigo-600/30' }
                           if (isAdminOrDirector && race.status === 'NEGOTIATING') return { text: '進入名額配置 (總監特權)', class: 'bg-indigo-600 text-white hover:bg-indigo-700 hover:shadow-xl hover:shadow-indigo-600/30' }
-                          
-                          // 一般人員的常態邏輯
                           if (race.status === 'NEGOTIATING' && !showEarlyAccess) return { text: '賽事洽談中 / 預覽', class: 'bg-amber-100 text-amber-700 hover:bg-amber-200 border border-amber-200' }
-                          if (race.status === 'UPCOMING' && !showEarlyAccess) return { text: '敬請期待', class: 'bg-slate-50 text-slate-400 cursor-not-allowed border border-slate-100', disabled: true } // 一般人依然 disabled
+                          if (race.status === 'UPCOMING' && !showEarlyAccess) return { text: '敬請期待', class: 'bg-slate-50 text-slate-400 cursor-not-allowed border border-slate-100', disabled: true }
                           if (isFull || race.status === 'FULL') return { text: '查看報名名單 / 候補', class: 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200' }
-                          
-                          // 一般人員的降級邏輯 (只給看，不能報，因此不給藍色進入按鈕)
                           if (isGeneralUser) return { text: '尚未開通權限', class: 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200', disabled: true }
                           
                           return { text: '進入名額配置 / 報名', class: 'bg-slate-900 text-white hover:bg-blue-600 hover:shadow-xl hover:shadow-blue-600/30' }
@@ -1014,7 +1015,6 @@ export default function RaceEvents() {
                       return (
                       <div key={race.id} 
                            onClick={() => {
-                               // 🌟 核心修復：管理員點擊整張卡片必定進入
                                if (showEarlyAccess || race.status !== 'UPCOMING' || isAdminOrDirector) {
                                    navigate(`/race-detail/${race.id}`);
                                }
@@ -1147,7 +1147,6 @@ export default function RaceEvents() {
                                   <button onClick={() => {
                                           if (isAdminOrDirector || race.status !== 'UPCOMING') navigate(`/race-detail/${race.id}`);
                                       }} 
-                                      // 🌟 核心修復：管理員永遠不被 disable
                                       disabled={btnConfig.disabled} 
                                       className={`w-full mt-5 py-3 md:py-4 rounded-xl font-black text-[13px] md:text-[15px] flex items-center justify-center gap-2 transition-all active:scale-95 ${btnConfig.class}`}
                                   >
@@ -1198,7 +1197,6 @@ export default function RaceEvents() {
           </div>
       )}
 
-      {/* 🌟 快速編輯 (Quick Edit) 上帝捷徑彈窗 */}
       {quickEditRace && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4 animate-fade-in" onClick={() => { if(!isQuickSaving) setQuickEditRace(null) }}>
               <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-4xl flex flex-col max-h-[90vh] animate-bounce-in" onClick={e => e.stopPropagation()}>

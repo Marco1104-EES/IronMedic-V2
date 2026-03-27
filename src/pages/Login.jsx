@@ -15,7 +15,7 @@ export default function Login() {
   // 🌟 智能輸入引擎專用狀態 (Super Admin Datalist)
   const [smartUsers, setSmartUsers] = useState([])
 
-  // 🌟 首次認親 Modal 專用狀態 (嚴格雙資料認證：信箱 + 身分證 + 電話)
+  // 🌟 首次帳號媒合 Modal 專用狀態 (嚴格雙資料認證：信箱 + 身分證 + 電話)
   const [showEmailVerifyModal, setShowEmailVerifyModal] = useState(false)
   const [verifyEmail, setVerifyEmail] = useState('')
   const [verifyNationalId, setVerifyNationalId] = useState('')
@@ -24,7 +24,7 @@ export default function Login() {
   const [verifyLoading, setVerifyLoading] = useState(false)
   const [verifyError, setVerifyError] = useState('')
 
-  // 🌟 Google 魔法認親專用狀態
+  // 🌟 Google 魔法帳號媒合專用狀態
   const [showIdentityModal, setShowIdentityModal] = useState(false)
   const [identityInput, setIdentityInput] = useState('')
   const [identityLoading, setIdentityLoading] = useState(false)
@@ -182,7 +182,7 @@ export default function Login() {
       }
   }
 
-  // 🚀 首次認親邏輯 (嚴格雙資料核對：信箱 + 身分證 + 電話)
+  // 🚀 首次帳號媒合邏輯 (嚴格雙資料核對：信箱 + 身分證 + 電話)
   const handleEmailVerification = async () => {
     if (!verifyEmail || !verifyNationalId || !verifyPhone) {
         setVerifyError('請輸入信箱、身分證字號與手機號碼。')
@@ -262,7 +262,7 @@ export default function Login() {
     }
   }
 
-  // Google 模式的魔法認親
+  // Google 模式的魔法帳號媒合
   const handleIdentityLink = async () => {
       if (!identityInput.trim()) {
           setIdentityError('請輸入身分證字號或手機號碼');
@@ -297,7 +297,7 @@ export default function Login() {
               if (updateError) throw new Error(`綁定過程發生錯誤: ${updateError.message}`);
 
               setShowIdentityModal(false);
-              alert('🎉 認親成功！資料已成功綁定，歡迎回來！');
+              alert('🎉 帳號媒合成功！資料已成功綁定，歡迎回來！');
               navigate('/races');
 
           } else {
@@ -502,7 +502,7 @@ export default function Login() {
       </div>
 
       {/* ========================================================= */}
-      {/* 🌟 首次認親 Modal (嚴格雙資料：信箱 + 身分證 + 電話) */}
+      {/* 🌟 首次帳號媒合 Modal (嚴格雙資料：信箱 + 身分證 + 電話) */}
       {/* ========================================================= */}
       {showEmailVerifyModal && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in" onClick={() => setShowEmailVerifyModal(false)}>
@@ -585,7 +585,7 @@ export default function Login() {
           </div>
       )}
 
-      {/* 🌟 Google 魔法認親視窗 */}
+      {/* 🌟 Google 魔法帳號媒合視窗 */}
       {showIdentityModal && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in" onClick={() => setShowIdentityModal(false)}>
               <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md p-8 animate-bounce-in relative overflow-hidden" onClick={e => e.stopPropagation()}>
