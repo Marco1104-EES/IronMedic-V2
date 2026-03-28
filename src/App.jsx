@@ -1,7 +1,8 @@
+import React from 'react' // 🌟 Error Boundary 需要用到 React.Component
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { supabase } from './supabaseClient'
-import { Loader2, X, BellRing } from 'lucide-react'
+import { Loader2, X, BellRing, AlertOctagon, RefreshCw } from 'lucide-react'
 
 // 引入 PWA 註冊與自動更新監聽模組
 import { useRegisterSW } from 'virtual:pwa-register/react'
@@ -18,6 +19,73 @@ import RaceBuilder from './admin/RaceBuilder'
 import RaceManager from './admin/RaceManager' 
 import DigitalID from './pages/DigitalID'
 import RaceBroadcast from './admin/RaceBroadcast'
+
+// 🌟 防黑畫面裝甲：React Error Boundary 元件
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error) {
+    // 當子元件發生錯誤時，更新 state 以顯示備用 UI
+    return { hasError: true };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    // 您也可以在這裡將錯誤記錄到錯誤回報服務 (如 Sentry)
+    console.error("系統發生崩潰攔截 (Error Boundary):", error, errorInfo);
+  }
+
+  handleForceUpdate = () => {
+      // 核彈級快取清除引擎
+      if ('caches' in window) {
+          caches.keys().then((names) => {
+              names.forEach((name) => {
+                  caches.delete(name);
+              });
+          });
+      }
+      
+      // 清除可能損壞的本地快取
+      localStorage.removeItem('iron_medic_races_cache');
+      
+      // 強制硬刷新頁面
+      window.location.reload(true);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      // 崩潰時顯示的優雅備用 UI
+      return (
+        <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+            <div className="bg-slate-800 rounded-[2rem] shadow-2xl w-full max-w-md p-8 text-center border border-slate-700 relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-amber-400 to-amber-600"></div>
+                
+                <div className="w-20 h-20 bg-slate-900 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner border border-slate-700">
+                    <AlertOctagon size={40} className="text-amber-500 animate-pulse" />
+                </div>
+                
+                <h2 className="text-2xl font-black text-white mb-3">系統已發布更新</h2>
+                <p className="text-slate-400 text-sm mb-8 leading-relaxed font-medium">
+                    為了提供更流暢的體驗，醫護鐵人系統已進行核心升級。<br/>請點擊下方按鈕獲取最新版本。
+                </p>
+                
+                <button 
+                    onClick={this.handleForceUpdate}
+                    className="w-full bg-amber-500 hover:bg-amber-600 text-white font-black py-4 rounded-xl shadow-lg shadow-amber-500/20 transition-all active:scale-95 flex items-center justify-center gap-2"
+                >
+                    <RefreshCw size={20} />
+                    立即更新並重新載入
+                </button>
+            </div>
+        </div>
+      );
+    }
+
+    return this.props.children; 
+  }
+}
 
 // 推播金鑰轉換工具函數
 function urlBase64ToUint8Array(base64String) {
@@ -196,52 +264,55 @@ function App() {
   };
 
   return (
-    <BrowserRouter>
-      {/* PWA 更新提示橫幅 */}
-      {needRefresh && (
-        <div className="fixed bottom-6 right-6 z-[9999] bg-slate-900 text-white p-4 rounded-2xl shadow-2xl border border-slate-700 flex items-center gap-4 animate-bounce-in">
-            <div>
-                <h4 className="font-black text-sm mb-0.5">系統更新</h4>
-                <p className="text-[10px] text-slate-400 font-medium">發現新版本，點擊以更新系統。</p>
-            </div>
-            <button onClick={() => updateServiceWorker(true)} className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-black px-4 py-2 rounded-xl transition-colors shadow-md active:scale-95">立即更新</button>
-            <button onClick={() => setNeedRefresh(false)} className="text-slate-400 hover:text-white p-1 ml-1 transition-colors"><X size={16}/></button>
-        </div>
-      )}
+    // 🌟 在最外層包上防護罩
+    <ErrorBoundary>
+      <BrowserRouter>
+        {/* PWA 更新提示橫幅 */}
+        {needRefresh && (
+          <div className="fixed bottom-6 right-6 z-[9999] bg-slate-900 text-white p-4 rounded-2xl shadow-2xl border border-slate-700 flex items-center gap-4 animate-bounce-in">
+              <div>
+                  <h4 className="font-black text-sm mb-0.5">系統更新</h4>
+                  <p className="text-[10px] text-slate-400 font-medium">發現新版本，點擊以更新系統。</p>
+              </div>
+              <button onClick={() => updateServiceWorker(true)} className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-black px-4 py-2 rounded-xl transition-colors shadow-md active:scale-95">立即更新</button>
+              <button onClick={() => setNeedRefresh(false)} className="text-slate-400 hover:text-white p-1 ml-1 transition-colors"><X size={16}/></button>
+          </div>
+        )}
 
-      {/* 請求推播授權橫幅 */}
-      {notificationPermission === 'default' && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] bg-white text-slate-800 p-4 rounded-2xl shadow-2xl border border-slate-200 flex items-center gap-4 animate-fade-in-down w-[95%] max-w-md">
-            <div className="bg-blue-100 text-blue-600 p-2.5 rounded-xl shrink-0 shadow-inner"><BellRing size={24} className="animate-pulse" /></div>
-            <div className="flex-1 min-w-0">
-                <h4 className="font-black text-sm mb-1 text-slate-800 truncate">啟用賽事通知</h4>
-                <p className="text-xs text-slate-500 font-medium leading-tight">開啟通知以接收賽事候補及重要訊息。</p>
-            </div>
-            <button onClick={requestNotificationPermission} className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-black px-4 py-2.5 rounded-xl transition-colors shadow-[0_0_15px_rgba(37,99,235,0.3)] active:scale-95 shrink-0">開啟</button>
-            <button onClick={() => setNotificationPermission('denied')} className="text-slate-400 hover:text-slate-600 p-1.5 transition-colors shrink-0 bg-slate-50 rounded-lg" title="稍後再說"><X size={16}/></button>
-        </div>
-      )}
+        {/* 請求推播授權橫幅 */}
+        {notificationPermission === 'default' && (
+          <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] bg-white text-slate-800 p-4 rounded-2xl shadow-2xl border border-slate-200 flex items-center gap-4 animate-fade-in-down w-[95%] max-w-md">
+              <div className="bg-blue-100 text-blue-600 p-2.5 rounded-xl shrink-0 shadow-inner"><BellRing size={24} className="animate-pulse" /></div>
+              <div className="flex-1 min-w-0">
+                  <h4 className="font-black text-sm mb-1 text-slate-800 truncate">啟用賽事通知</h4>
+                  <p className="text-xs text-slate-500 font-medium leading-tight">開啟通知以接收賽事候補及重要訊息。</p>
+              </div>
+              <button onClick={requestNotificationPermission} className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-black px-4 py-2.5 rounded-xl transition-colors shadow-[0_0_15px_rgba(37,99,235,0.3)] active:scale-95 shrink-0">開啟</button>
+              <button onClick={() => setNotificationPermission('denied')} className="text-slate-400 hover:text-slate-600 p-1.5 transition-colors shrink-0 bg-slate-50 rounded-lg" title="稍後再說"><X size={16}/></button>
+          </div>
+        )}
 
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route path="/races" element={<RaceEvents />} />
-        <Route path="/race-detail/:id" element={<RaceDetail />} />
-        <Route path="/my-id" element={<DigitalID />} />
-        
-        <Route path="/admin" element={<AdminRoute><AdminLayout /></AdminRoute>}>
-          <Route index element={<Navigate to="/admin/dashboard" replace />} />
-          <Route path="dashboard" element={<Dashboard />} />
-          <Route path="members" element={<MemberCRM />} />
-          <Route path="races" element={<RaceManager />} />        
-          <Route path="race-builder" element={<RaceBuilder />} /> 
-          <Route path="import" element={<DataImportCenter />} />
-          <Route path="race-broadcast" element={<RaceBroadcast />} />
-          <Route path="system-status" element={<AdminRoute requiredRole="SUPER_ADMIN"><SystemStatus /></AdminRoute>} />
-        </Route>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/races" element={<RaceEvents />} />
+          <Route path="/race-detail/:id" element={<RaceDetail />} />
+          <Route path="/my-id" element={<DigitalID />} />
+          
+          <Route path="/admin" element={<AdminRoute><AdminLayout /></AdminRoute>}>
+            <Route index element={<Navigate to="/admin/dashboard" replace />} />
+            <Route path="dashboard" element={<Dashboard />} />
+            <Route path="members" element={<MemberCRM />} />
+            <Route path="races" element={<RaceManager />} />        
+            <Route path="race-builder" element={<RaceBuilder />} /> 
+            <Route path="import" element={<DataImportCenter />} />
+            <Route path="race-broadcast" element={<RaceBroadcast />} />
+            <Route path="system-status" element={<AdminRoute requiredRole="SUPER_ADMIN"><SystemStatus /></AdminRoute>} />
+          </Route>
 
-        <Route path="*" element={<Navigate to="/login" replace />} />
-      </Routes>
-    </BrowserRouter>
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </ErrorBoundary>
   )
 }
 

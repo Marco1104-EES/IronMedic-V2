@@ -851,7 +851,7 @@ export default function RaceEvents() {
                       <span className="whitespace-nowrap">數位 ID</span>
                   </button>
                   {currentUserProfile && (
-                      <span className="text-[18px] sm:text-[19px] text-slate-100 opacity-80 font-medium tracking-wide">
+                      <span className="text-[16px] sm:text-[15px] text-slate-100 opacity-80 font-medium tracking-wide">
                           {currentUserProfile.full_name?.split(' ')[0] || '會員'}，您好
                       </span>
                   )}
