@@ -1,6 +1,5 @@
-import React from 'react' // 🌟 Error Boundary 需要用到 React.Component
+import React, { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { useState, useEffect } from 'react'
 import { supabase } from './supabaseClient'
 import { Loader2, X, BellRing, AlertOctagon, RefreshCw } from 'lucide-react'
 
@@ -20,7 +19,9 @@ import RaceManager from './admin/RaceManager'
 import DigitalID from './pages/DigitalID'
 import RaceBroadcast from './admin/RaceBroadcast'
 
-// 🌟 防黑畫面裝甲：React Error Boundary 元件
+// ==========================================
+// 🌟 防黑畫面裝甲：React Error Boundary 終極防護網
+// ==========================================
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -28,17 +29,17 @@ class ErrorBoundary extends React.Component {
   }
 
   static getDerivedStateFromError(error) {
-    // 當子元件發生錯誤時，更新 state 以顯示備用 UI
+    // 當底層發生崩潰時，立刻啟動防護罩狀態
     return { hasError: true };
   }
 
   componentDidCatch(error, errorInfo) {
-    // 您也可以在這裡將錯誤記錄到錯誤回報服務 (如 Sentry)
-    console.error("系統發生崩潰攔截 (Error Boundary):", error, errorInfo);
+    // 在後台默默記錄崩潰原因
+    console.error("🚨 系統發生崩潰，防護罩已攔截 (Error Boundary):", error, errorInfo);
   }
 
   handleForceUpdate = () => {
-      // 核彈級快取清除引擎
+      // 💣 核彈級快取清除引擎：炸毀所有 PWA 殘留的 Service Worker 快取
       if ('caches' in window) {
           caches.keys().then((names) => {
               names.forEach((name) => {
@@ -47,28 +48,28 @@ class ErrorBoundary extends React.Component {
           });
       }
       
-      // 清除可能損壞的本地快取
+      // 清除可能損壞的本地儲存資料
       localStorage.removeItem('iron_medic_races_cache');
       
-      // 強制硬刷新頁面
+      // 🚀 強制硬刷新頁面，向伺服器索取最新鮮的程式碼
       window.location.reload(true);
   }
 
   render() {
     if (this.state.hasError) {
-      // 崩潰時顯示的優雅備用 UI
+      // 崩潰時不顯示黑畫面，改顯示優雅的升級引導 UI
       return (
-        <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-            <div className="bg-slate-800 rounded-[2rem] shadow-2xl w-full max-w-md p-8 text-center border border-slate-700 relative overflow-hidden">
+        <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 font-sans">
+            <div className="bg-slate-800 rounded-[2rem] shadow-2xl w-full max-w-md p-8 text-center border border-slate-700 relative overflow-hidden animate-fade-in-up">
                 <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-amber-400 to-amber-600"></div>
                 
                 <div className="w-20 h-20 bg-slate-900 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner border border-slate-700">
                     <AlertOctagon size={40} className="text-amber-500 animate-pulse" />
                 </div>
                 
-                <h2 className="text-2xl font-black text-white mb-3">系統已發布更新</h2>
+                <h2 className="text-2xl font-black text-white mb-3 tracking-tight">系統已發布更新</h2>
                 <p className="text-slate-400 text-sm mb-8 leading-relaxed font-medium">
-                    為了提供更流暢的體驗，醫護鐵人系統已進行核心升級。<br/>請點擊下方按鈕獲取最新版本。
+                    為了提供更流暢的體驗，醫護鐵人系統已進行核心升級。<br/>請點擊下方按鈕獲取最新版本，排除異常。
                 </p>
                 
                 <button 
@@ -83,9 +84,12 @@ class ErrorBoundary extends React.Component {
       );
     }
 
+    // 正常情況下，隱形並正常渲染內部應用程式
     return this.props.children; 
   }
 }
+// ==========================================
+
 
 // 推播金鑰轉換工具函數
 function urlBase64ToUint8Array(base64String) {
