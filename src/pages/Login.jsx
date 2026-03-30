@@ -40,17 +40,6 @@ export default function Login() {
   // 🛡️ LINE / FB 內建瀏覽器偵測狀態
   const [isInAppBrowser, setIsInAppBrowser] = useState(false)
 
-  // ==========================================
-  // ☢️ 測試用：引爆防黑畫面裝甲的自毀引信
-  // ==========================================
-  const [triggerCrash, setTriggerCrash] = useState(false);
-
-  if (triggerCrash) {
-      // 模擬 PWA 快取衝突或 React 渲染層級的致命錯誤
-      throw new Error("💥 這是超級管理員的人工模擬崩潰測試！如果您看到這個錯誤，代表外層的 ErrorBoundary 防護罩沒有正常運作！");
-  }
-  // ==========================================
-
   useEffect(() => {
     const checkInAppBrowser = () => {
         const ua = navigator.userAgent || navigator.vendor || window.opera;
@@ -352,15 +341,6 @@ export default function Login() {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8 font-sans relative">
       
-      {/* ☢️ 測試用：核彈按鈕 (放置於畫面右下角，隱密測試用) */}
-      <button 
-          onClick={() => setTriggerCrash(true)}
-          className="fixed bottom-4 right-4 z-[9999] bg-red-600 hover:bg-red-700 text-white font-black px-4 py-2 rounded-xl shadow-2xl opacity-60 hover:opacity-100 transition-all text-xs"
-          title="警告：點擊將引發系統致命崩潰，用以測試 ErrorBoundary 裝甲"
-      >
-          ☢️ 測試防護罩
-      </button>
-
       {isInAppBrowser && (
           <div className="fixed top-0 left-0 right-0 bg-amber-500 text-white p-3 z-50 shadow-md animate-fade-in-down flex items-start gap-3 justify-center">
               <AlertCircle size={20} className="shrink-0 mt-0.5" />

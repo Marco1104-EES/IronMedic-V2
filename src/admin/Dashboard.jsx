@@ -5,8 +5,8 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { MapContainer, TileLayer, Marker, Popup, CircleMarker } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
-// 🌟 確保新增了需要的圖示包含 Info, Sprout
-import { Users, Activity, Award, ShieldAlert, Map as MapIcon, Loader2, Flag, Mountain, Bike, Footprints, User, MapPin, Bell, UserCheck, Calendar, Clock, History, ChevronUp, ChevronDown, Handshake, Send, Timer, ArrowRight, X, UserMinus, Mail, Phone, Info, Sprout } from 'lucide-react'
+// 🌟 確保新增了需要的圖示包含 Info, Sprout, 還有新功能需要的 Search, Zap, AlertTriangle, FileSpreadsheet
+import { Users, Activity, Award, ShieldAlert, Map as MapIcon, Loader2, Flag, Mountain, Bike, Footprints, User, MapPin, Bell, UserCheck, Calendar, Clock, History, ChevronUp, ChevronDown, Handshake, Send, Timer, ArrowRight, X, UserMinus, Mail, Phone, Info, Sprout, Search, Zap, AlertTriangle, FileSpreadsheet } from 'lucide-react'
 
 // 修正 Leaflet icon 消失問題
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -85,10 +85,85 @@ export default function Dashboard() {
   const [allRacesData, setAllRacesData] = useState([])
   const [showRaceOverview, setShowRaceOverview] = useState(true)
 
+  // ==========================================
+  // ⚡ 新增功能：單一帳號媒合管理 (智能搜尋) 狀態
+  // ==========================================
+  const [searchAccountInput, setSearchAccountInput] = useState('');
+  const [searchAccountResult, setSearchAccountResult] = useState(null);
+  const [isSearchingAccount, setIsSearchingAccount] = useState(false);
+  const [isUnlinkingAccount, setIsUnlinkingAccount] = useState(false);
+
   useEffect(() => {
       fetchDashboardData()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // ==========================================
+  // ⚡ 新增功能：漸進式防抖搜尋引擎
+  // ==========================================
+  useEffect(() => {
+      const timer = setTimeout(() => {
+          if (searchAccountInput.trim().length > 1) {
+              performAccountSearch(searchAccountInput.trim());
+          } else {
+              setSearchAccountResult(null);
+          }
+      }, 500); // 500ms 防抖
+      return () => clearTimeout(timer);
+  }, [searchAccountInput]);
+
+  const performAccountSearch = async (term) => {
+      setIsSearchingAccount(true);
+      try {
+          const { data, error } = await supabase
+              .from('profiles')
+              .select('*')
+              .or(`email.ilike.%${term}%,full_name.ilike.%${term}%,national_id.ilike.%${term}%`)
+              .limit(1); 
+
+          if (error) throw error;
+          setSearchAccountResult(data && data.length > 0 ? data[0] : null);
+      } catch (err) {
+          console.error("搜尋帳號失敗:", err);
+      } finally {
+          setIsSearchingAccount(false);
+      }
+  };
+
+  const handleUnlinkAccount = async () => {
+      if (!searchAccountResult) return;
+      
+      const confirmMsg = `🛡️ 系統警報 🛡️\n\n確定要強制將【${searchAccountResult.full_name}】解除帳號媒合狀態嗎？\n\n執行後，系統將賦予全新 ID 並將信箱重置為預設 (marietai@ms1.url.com.tw)。該人員下次登入系統時，必須重新進行帳號媒合。`;
+      if (!window.confirm(confirmMsg)) return;
+
+      setIsUnlinkingAccount(true);
+      try {
+          const newRandomUuid = crypto.randomUUID(); 
+          const originalEmail = 'marietai@ms1.url.com.tw'; 
+
+          const { error } = await supabase
+              .from('profiles')
+              .update({ 
+                  id: newRandomUuid, 
+                  email: originalEmail 
+              })
+              .eq('id', searchAccountResult.id);
+
+          if (error) throw error;
+
+          alert(`🎉【${searchAccountResult.full_name}】已強制解除帳號媒合！\n信箱已恢復為：${originalEmail}`);
+          setSearchAccountInput('');
+          setSearchAccountResult(null);
+
+      } catch (error) {
+          console.error("解除媒合失敗:", error)
+          alert('❌ 解除媒合失敗：' + error.message);
+      } finally {
+          setIsUnlinkingAccount(false);
+      }
+  };
+  // ==========================================
+
 
   const fetchDashboardData = async () => {
       try {
@@ -351,7 +426,7 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="space-y-6 md:space-y-8 animate-fade-in pb-20">
+    <div className="space-y-6 md:space-y-8 animate-fade-in pb-20 max-w-[1600px] mx-auto">
       <div className="mb-8">
           <h2 className="text-3xl font-black text-slate-800 mb-2">醫鐵數據儀表板</h2>
           <p className="text-slate-500 font-medium">即時掌握全台醫護鐵人會員與賽事分佈</p>
@@ -741,6 +816,90 @@ export default function Dashboard() {
           </div>
       )}
 
+      {/* 🌟 您原生的：系統資料庫管理 / 匯入中心 + 獨立插入的新區塊 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8 mt-6 md:mt-8">
+          
+          <div className="bg-white rounded-[2rem] shadow-sm border border-slate-200 p-6 relative overflow-hidden group">
+              <h3 className="font-black text-slate-800 mb-5 flex items-center gap-2">系統資料庫管理 / 匯入中心</h3>
+              <p className="text-slate-500 text-sm mb-6 font-medium leading-relaxed">執行年度會員資料更新、名單匯入，或是重置系統參數的專屬管理通道。</p>
+              <button onClick={() => navigate('/admin/import')} className="w-full py-4 bg-amber-500 hover:bg-amber-400 text-slate-900 font-black rounded-xl text-sm transition-all active:scale-95 shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2">
+                  <FileSpreadsheet size={18}/> 前往資料匯入與重置中心
+              </button>
+          </div>
+
+          {/* ========================================== */}
+          {/* ⚡ 新增功能區塊：單一帳號媒合管理 (智能搜尋) */}
+          {/* ========================================== */}
+          <div className="bg-gradient-to-b from-slate-900 to-slate-800 rounded-[2rem] shadow-xl border border-slate-700 p-6 relative overflow-hidden flex-1 flex flex-col group">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-bl-full blur-2xl"></div>
+              
+              <div className="flex justify-between items-center mb-5 relative z-10">
+                  <h3 className="font-black text-white flex items-center gap-2"><Zap size={18} className="text-amber-400"/> 解除帳號媒合</h3>
+                  <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-1 rounded border border-slate-700 font-bold uppercase tracking-wider">Admin Engine</span>
+              </div>
+
+              <div className="relative z-10 flex flex-col h-full justify-center gap-4">
+                  <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                          <Search className="h-4 w-4 text-slate-400" />
+                      </div>
+                      <input 
+                          type="text" 
+                          placeholder="智能搜尋：輸入姓名、信箱或身分證..." 
+                          className="w-full bg-slate-950 border border-slate-700 text-white pl-10 pr-4 py-3 rounded-xl text-sm font-medium focus:ring-2 focus:ring-amber-500 outline-none transition-all placeholder-slate-600"
+                          value={searchAccountInput}
+                          onChange={(e) => setSearchAccountInput(e.target.value)}
+                      />
+                      {isSearchingAccount && (
+                          <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
+                              <Loader2 className="h-4 w-4 text-amber-500 animate-spin" />
+                          </div>
+                      )}
+                  </div>
+
+                  {searchAccountResult ? (
+                      <div className="bg-slate-800 rounded-xl p-4 border border-slate-700 shadow-inner animate-fade-in">
+                          <div className="flex justify-between items-start mb-3">
+                              <div>
+                                  <div className="font-black text-white text-lg">{searchAccountResult.full_name}</div>
+                                  <div className="text-[10px] text-slate-400 font-mono mt-0.5">{searchAccountResult.id.slice(0, 13)}...</div>
+                              </div>
+                              <span className={`text-[10px] px-2 py-1 rounded font-black ${searchAccountResult.is_current_member === 'Y' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-700 text-slate-400'}`}>
+                                  {searchAccountResult.is_current_member === 'Y' ? '當屆會員' : '非當屆'}
+                              </span>
+                          </div>
+                          
+                          <div className="space-y-1.5 mb-4">
+                              <div className="text-xs font-medium text-slate-300 flex items-center gap-2"><Mail size={12} className="text-slate-500"/> {searchAccountResult.email}</div>
+                              <div className="text-xs font-medium text-slate-300 flex items-center gap-2"><UserCheck size={12} className="text-slate-500"/> {searchAccountResult.national_id || '未登錄'}</div>
+                          </div>
+
+                          <button 
+                              onClick={handleUnlinkAccount}
+                              disabled={isUnlinkingAccount}
+                              className="w-full py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 font-black rounded-lg text-sm transition-colors active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+                          >
+                              {isUnlinkingAccount ? <Loader2 size={16} className="animate-spin"/> : <AlertTriangle size={16}/>}
+                              強制解除帳號媒合
+                          </button>
+                      </div>
+                  ) : searchAccountInput.trim().length > 1 && !isSearchingAccount ? (
+                      <div className="bg-slate-800/50 rounded-xl p-6 border border-dashed border-slate-700 text-center animate-fade-in">
+                          <div className="text-slate-500 text-sm font-bold">查無相符的會員資料</div>
+                      </div>
+                  ) : (
+                      <div className="bg-slate-800/30 rounded-xl p-6 border border-slate-800 text-center">
+                          <Info size={24} className="text-slate-600 mx-auto mb-2 opacity-50"/>
+                          <div className="text-slate-400 text-xs font-medium leading-relaxed">
+                              用於處理會員綁錯帳號、或更換信箱之異常排除。<br/>解除帳號媒合後，該會員需重新進行身份驗證。
+                          </div>
+                      </div>
+                  )}
+              </div>
+          </div>
+          {/* ========================================== */}
+
+      </div>
     </div>
   )
 }
