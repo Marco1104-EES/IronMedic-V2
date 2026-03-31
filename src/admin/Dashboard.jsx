@@ -80,9 +80,6 @@ export default function Dashboard() {
   const [isSearchingAccount, setIsSearchingAccount] = useState(false);
   const [isUnlinkingAccount, setIsUnlinkingAccount] = useState(false);
 
-  // ==========================================
-  // 🌟 系統版本與發布控制中心 狀態
-  // ==========================================
   const [updateCount, setUpdateCount] = useState(0);
   const [updateLogs, setUpdateLogs] = useState([]);
   const [errorBoundaryEnabled, setErrorBoundaryEnabled] = useState(true);
@@ -106,7 +103,7 @@ export default function Dashboard() {
   };
 
   const handleBroadcastRelease = async () => {
-      if (!window.confirm('確定要發布全域更新嗎？\n這將強制所有在線會員的手機系統重新載入並清除舊快取。')) return;
+      if (!window.confirm('確定要發布全域更新嗎？\n這將強制所有在線會員的手機系統重新載入最新版本。')) return;
 
       try {
           const channel = supabase.channel('global_system_updates');
@@ -117,9 +114,9 @@ export default function Dashboard() {
                       event: 'force_reload',
                       payload: { timestamp: Date.now() }
                   });
+                  // 🌟 核心修正：發布後只歸零發布次數，保留所有的操作日誌備查
                   localStorage.setItem('system_update_count', '0');
-                  localStorage.setItem('system_update_logs', '[]');
-                  localStorage.setItem('read_release_counts', '{}');
+                  
                   window.dispatchEvent(new Event('system_update_changed'));
                   alert('✅ 全域更新指令已成功發布！');
                   supabase.removeChannel(channel);
@@ -136,9 +133,6 @@ export default function Dashboard() {
       return () => window.removeEventListener('system_update_changed', loadSystemReleaseData);
   }, [loadSystemReleaseData]);
 
-  // ==========================================
-  // ⚡ 日誌月份分群與智能未讀狀態引擎
-  // ==========================================
   const groupedReleaseLogs = useMemo(() => {
       const groups = {};
       updateLogs.forEach(log => {
@@ -158,12 +152,10 @@ export default function Dashboard() {
       return groups;
   }, [updateLogs]);
 
-  // 預設全部收合 (移除了自動展開的邏輯)
   const [expandedReleaseMonths, setExpandedReleaseMonths] = useState({});
 
   const toggleReleaseMonth = (month) => {
       setExpandedReleaseMonths(prev => ({ ...prev, [month]: !prev[month] }));
-      // 只要打開，就將該月份目前的總筆數記為已讀
       if (!expandedReleaseMonths[month]) {
           setReadReleaseCounts(prev => {
               const newCounts = { ...prev, [month]: groupedReleaseLogs[month].length };
@@ -172,7 +164,6 @@ export default function Dashboard() {
           });
       }
   };
-  // ==========================================
 
   useEffect(() => {
       fetchDashboardData()
@@ -1225,7 +1216,10 @@ export default function Dashboard() {
 
               <div className="flex justify-between items-center mb-6 relative z-10">
                   <h3 className="font-black text-slate-800 flex items-center gap-2"><Server size={20} className="text-indigo-500"/> 系統版本與發布控制中心</h3>
-                  <span className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-1 rounded-full font-black border border-indigo-100 uppercase tracking-wider">Release Management</span>
+                  <div className="flex gap-2">
+                      <span className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-1 rounded-full font-black border border-indigo-100 uppercase tracking-wider">Release Management</span>
+                      <span className="text-[10px] bg-rose-50 text-rose-600 px-2 py-1 rounded-full font-black border border-rose-100 uppercase tracking-wider">限管理員可見</span>
+                  </div>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 relative z-10">
@@ -1240,8 +1234,10 @@ export default function Dashboard() {
                                   {updateCount} <span className="text-sm font-medium text-slate-500">項</span>
                               </div>
                           </div>
-                          <p className={`text-xs font-bold ${updateCount >= 5 ? 'text-rose-500' : 'text-slate-500'}`}>
-                              {updateCount >= 5 ? '已達發布建議門檻，建議立即推送全域更新以確保使用者資料同步。' : '系統將自動記錄後台核心異動，達到 5 項時將提醒您發布更新。'}
+                          <p className={`text-xs font-bold leading-relaxed mt-2 ${updateCount >= 5 ? 'text-rose-500' : 'text-slate-500'}`}>
+                              這些是您與其他管理員在後台執行的異動紀錄。<br/>
+                              點擊下方發布按鈕後，系統將透過 WebSocket 廣播，強制全體在線會員的手機瞬間清除舊快取並重新載入最新資料。<br/>
+                              <span className="text-[10px] text-slate-400 font-medium">※ 發布後僅重置次數，操作日誌將永久保留以供查核。</span>
                           </p>
                       </div>
 
@@ -1276,7 +1272,7 @@ export default function Dashboard() {
                       </div>
 
                       <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex-1 overflow-hidden flex flex-col min-h-[220px]">
-                          <div className="text-xs font-black text-slate-700 mb-3 flex items-center gap-2"><Radio size={14} className="text-slate-400"/> 智能備註日誌 (待發布)</div>
+                          <div className="text-xs font-black text-slate-700 mb-3 flex items-center gap-2"><Radio size={14} className="text-slate-400"/> 備註日誌</div>
                           <div className="overflow-y-auto custom-scrollbar flex-1 space-y-3 pr-2">
                               {Object.keys(groupedReleaseLogs).length > 0 ? (
                                   Object.entries(groupedReleaseLogs).map(([month, logs]) => {
@@ -1312,7 +1308,7 @@ export default function Dashboard() {
                                       )
                                   })
                               ) : (
-                                  <div className="text-center py-6 text-slate-400 text-xs font-bold">目前尚無未發布之異動</div>
+                                  <div className="text-center py-6 text-slate-400 text-xs font-bold">目前尚無日誌紀錄</div>
                               )}
                           </div>
                       </div>

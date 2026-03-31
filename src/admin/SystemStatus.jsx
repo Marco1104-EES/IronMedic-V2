@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
 import { useNavigate } from 'react-router-dom'
-import { Database, Cpu, HardDrive, CheckCircle, AlertTriangle, Activity, ExternalLink, Loader2, RefreshCw, Cloud, Globe, ChevronRight, Flag, Bell, Users, Github, Bot, FileText, Download, Trash2, Clock, BarChart3, LineChart as LineChartIcon, Radar, X, Server, List, Rocket, Radio, ShieldAlert, FolderTree, CalendarDays, Archive, Tags, ChevronUp, ChevronDown } from 'lucide-react'
+import { Database, Cpu, HardDrive, CheckCircle, AlertTriangle, Activity, ExternalLink, Loader2, RefreshCw, Cloud, Globe, ChevronRight, Flag, Bell, Users, Github, Bot, FileText, Download, Trash2, Clock, BarChart3, LineChart as LineChartIcon, Radar, X, Server, List, Rocket, Radio, ShieldAlert, FolderTree, CalendarDays, Archive, Tags, ChevronUp, ChevronDown, UserCheck } from 'lucide-react'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar as RadarArea, Legend } from 'recharts'
 
 export default function SystemStatus() {
@@ -60,7 +60,7 @@ export default function SystemStatus() {
   };
 
   const handleBroadcastRelease = async () => {
-      if (!window.confirm('確定要發布全域更新嗎？\n這將強制所有在線會員的手機系統重新載入並清除舊快取。')) return;
+      if (!window.confirm('確定要發布全域更新嗎？\n這將透過 WebSocket 強制所有在線會員的手機瞬間清除舊快取並重新載入最新版本。')) return;
 
       try {
           const channel = supabase.channel('global_system_updates');
@@ -75,13 +75,49 @@ export default function SystemStatus() {
                   localStorage.setItem('system_update_logs', '[]');
                   localStorage.setItem('read_release_counts', '{}');
                   window.dispatchEvent(new Event('system_update_changed'));
-                  alert('✅ 全域更新指令已成功發布！');
+                  alert('✅ 全域更新指令已成功發布！會員手機將自動同步最新資料。');
                   supabase.removeChannel(channel);
               }
           });
       } catch (err) {
           alert('發布失敗: ' + err.message);
       }
+  };
+
+  // ==========================================
+  // 🌟 新增：手動刪除日誌功能
+  // ==========================================
+  const handleDeleteLog = (e, logToDelete) => {
+      e.stopPropagation();
+      if(!window.confirm('確定要刪除此筆操作日誌嗎？刪除後無法恢復。')) return;
+      const newLogs = updateLogs.filter(l => l.time !== logToDelete.time || l.action !== logToDelete.action);
+      localStorage.setItem('system_update_logs', JSON.stringify(newLogs));
+      
+      // 更新計數器 (如果大於 0 的話)
+      const currentCount = parseInt(localStorage.getItem('system_update_count') || '0', 10);
+      if (currentCount > 0) {
+          localStorage.setItem('system_update_count', (currentCount - 1).toString());
+      }
+      
+      setUpdateLogs(newLogs);
+      window.dispatchEvent(new Event('system_update_changed'));
+  };
+
+  const handleDeleteMonthLogs = (e, monthKey, logsInMonth) => {
+      e.stopPropagation();
+      if(!window.confirm(`確定要刪除 ${monthKey} 的所有操作日誌嗎？\n共計 ${logsInMonth.length} 筆資料將被永久刪除。`)) return;
+      
+      const logsToDelete = new Set(logsInMonth.map(l => l.time + l.action));
+      const newLogs = updateLogs.filter(l => !logsToDelete.has(l.time + l.action));
+      localStorage.setItem('system_update_logs', JSON.stringify(newLogs));
+      
+      // 更新計數器
+      const currentCount = parseInt(localStorage.getItem('system_update_count') || '0', 10);
+      const newCount = Math.max(0, currentCount - logsInMonth.length);
+      localStorage.setItem('system_update_count', newCount.toString());
+
+      setUpdateLogs(newLogs);
+      window.dispatchEvent(new Event('system_update_changed'));
   };
 
   useEffect(() => {
@@ -112,10 +148,12 @@ export default function SystemStatus() {
       return groups;
   }, [updateLogs]);
 
+  // 預設全部收合
   const [expandedReleaseMonths, setExpandedReleaseMonths] = useState({});
 
   const toggleReleaseMonth = (month) => {
       setExpandedReleaseMonths(prev => ({ ...prev, [month]: !prev[month] }));
+      // 只要打開，就將該月份目前的總筆數記為已讀
       if (!expandedReleaseMonths[month]) {
           setReadReleaseCounts(prev => {
               const newCounts = { ...prev, [month]: groupedReleaseLogs[month].length };
@@ -129,7 +167,7 @@ export default function SystemStatus() {
   // 🌟 全系統異動稽核備查中心 (Global Audit Log) 邏輯
   // ==========================================
   const [auditLogs, setAuditLogs] = useState([]);
-  const [expandedAudit, setExpandedAudit] = useState({});
+  const [expandedAudit, setExpandedAudit] = useState({}); // 預設全部收合
 
   const fetchAuditLogs = async () => {
       try {
@@ -861,7 +899,10 @@ export default function SystemStatus() {
 
           <div className="flex justify-between items-center mb-6 relative z-10">
               <h3 className="font-black text-slate-800 flex items-center gap-2"><Server size={20} className="text-indigo-500"/> 系統版本與發布控制中心</h3>
-              <span className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-1 rounded-full font-black border border-indigo-100 uppercase tracking-wider">Release Management</span>
+              <div className="flex gap-2">
+                  <span className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-1 rounded-full font-black border border-indigo-100 uppercase tracking-wider">Release Management</span>
+                  <span className="text-[10px] bg-rose-50 text-rose-600 px-2 py-1 rounded-full font-black border border-rose-100 uppercase tracking-wider">限管理員可見</span>
+              </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 relative z-10">
@@ -877,8 +918,10 @@ export default function SystemStatus() {
                               {updateCount} <span className="text-sm font-medium text-slate-500">項</span>
                           </div>
                       </div>
-                      <p className={`text-xs font-bold ${updateCount >= 5 ? 'text-rose-500' : 'text-slate-500'}`}>
-                          {updateCount >= 5 ? '已達發布建議門檻，建議立即推送全域更新以確保使用者資料同步。' : '系統將自動記錄後台核心異動，達到 5 項時將提醒您發布更新。'}
+                      <p className={`text-xs font-bold leading-relaxed mt-2 ${updateCount >= 5 ? 'text-rose-500' : 'text-slate-500'}`}>
+                          這些是您與其他管理員在後台執行的異動紀錄。<br/>
+                          點擊下方發布按鈕後，系統將透過 WebSocket 廣播，強制全體在線會員的手機瞬間清除舊快取並重新載入最新資料。<br/>
+                          <span className="text-[10px] text-slate-400 font-medium">※ 發布後僅重置次數，操作日誌將永久保留以供查核。</span>
                       </p>
                   </div>
 
@@ -895,7 +938,7 @@ export default function SystemStatus() {
                   </button>
               </div>
 
-              {/* 右側：防護罩開關與升級版智能備註日誌 (月份收合 + 紅字未讀徽章) */}
+              {/* 右側：防護罩開關與升級版智能備註日誌 (月份收合 + 紅字未讀徽章 + 手動刪除引擎) */}
               <div className="flex flex-col gap-4">
                   <div className="flex items-center justify-between bg-slate-50 p-4 rounded-2xl border border-slate-200">
                       <div>
@@ -914,7 +957,7 @@ export default function SystemStatus() {
                   </div>
 
                   <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex-1 overflow-hidden flex flex-col min-h-[220px]">
-                      <div className="text-xs font-black text-slate-700 mb-3 flex items-center gap-2"><Radio size={14} className="text-slate-400"/> 智能備註日誌 (待發布)</div>
+                      <div className="text-xs font-black text-slate-700 mb-3 flex items-center gap-2"><Radio size={14} className="text-slate-400"/> 備註日誌 (待發布)</div>
                       <div className="overflow-y-auto custom-scrollbar flex-1 space-y-3 pr-2">
                           {Object.keys(groupedReleaseLogs).length > 0 ? (
                               Object.entries(groupedReleaseLogs).map(([month, logs]) => {
@@ -923,12 +966,20 @@ export default function SystemStatus() {
                                   const hasUnread = logs.length > readCount;
 
                                   return (
-                                      <div key={month} className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
+                                      <div key={month} className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm group/month">
                                           <button
                                               onClick={() => toggleReleaseMonth(month)}
                                               className="w-full flex justify-between items-center p-2.5 bg-slate-50 hover:bg-slate-100 transition-colors"
                                           >
-                                              <span className="text-xs font-black text-slate-700">{month}</span>
+                                              <div className="flex items-center gap-2">
+                                                  <span className="text-xs font-black text-slate-700">{month}</span>
+                                                  <Trash2 
+                                                      size={14} 
+                                                      className="text-slate-300 hover:text-rose-500 opacity-0 group-hover/month:opacity-100 transition-opacity" 
+                                                      onClick={(e) => handleDeleteMonthLogs(e, month, logs)}
+                                                      title="刪除此月全部日誌"
+                                                  />
+                                              </div>
                                               <div className="flex items-center gap-2">
                                                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full transition-colors ${hasUnread ? 'bg-rose-500 text-white animate-pulse shadow-md shadow-rose-500/30' : 'bg-slate-200 text-slate-500'}`}>
                                                       {logs.length} 筆
@@ -939,9 +990,12 @@ export default function SystemStatus() {
                                           {isExpanded && (
                                               <div className="p-2 space-y-2 border-t border-slate-100 bg-white">
                                                   {logs.map((log, idx) => (
-                                                      <div key={idx} className={`p-2 rounded-lg border text-xs flex justify-between items-center gap-2 ${idx < (logs.length - readCount) ? 'bg-rose-50 border-rose-100' : 'bg-slate-50 border-slate-100'}`}>
+                                                      <div key={idx} className={`group/log p-2 rounded-lg border text-xs flex justify-between items-center gap-2 ${idx < (logs.length - readCount) ? 'bg-rose-50 border-rose-100' : 'bg-slate-50 border-slate-100'}`}>
                                                           <div className={`font-bold truncate flex-1 ${idx < (logs.length - readCount) ? 'text-rose-700' : 'text-slate-800'}`}>{log.action}</div>
-                                                          <div className="text-[9px] text-slate-400 font-mono shrink-0">{log.time}</div>
+                                                          <div className="flex items-center gap-2">
+                                                              <div className="text-[9px] text-slate-400 font-mono shrink-0">{log.time}</div>
+                                                              <button onClick={(e) => handleDeleteLog(e, log)} className="text-slate-300 hover:text-rose-500 opacity-0 group-hover/log:opacity-100 transition-opacity" title="刪除此日誌"><Trash2 size={12}/></button>
+                                                          </div>
                                                       </div>
                                                   ))}
                                               </div>
@@ -959,7 +1013,7 @@ export default function SystemStatus() {
       </div>
 
       {/* ========================================== */}
-      {/* 🌟 全系統異動稽核備查中心 (Global Audit Log Center) */}
+      {/* 🌟 霸氣新增：全系統異動稽核備查中心 (Global Audit Log Center) */}
       {/* ========================================== */}
       <div className="bg-white rounded-[2rem] shadow-sm border border-slate-200 p-6 md:p-8 mt-6 relative overflow-hidden group">
           <div className="absolute top-0 right-0 w-48 h-48 bg-emerald-50 rounded-bl-full blur-3xl"></div>
@@ -1057,9 +1111,57 @@ export default function SystemStatus() {
       {/* 模態框區塊保留 */}
       {showNotifPanel && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex justify-end animate-fade-in" onClick={() => setShowNotifPanel(false)}>
-              {/* ... (警報 Modal) ... */}
+              <div className="bg-slate-50 w-full sm:w-[400px] h-full flex flex-col shadow-2xl animate-slide-left" onClick={e => e.stopPropagation()}>
+                  <div className="px-6 py-5 border-b border-slate-200 bg-white flex justify-between items-center shrink-0">
+                      <h3 className="text-xl font-black text-slate-800 flex items-center gap-2"><AlertTriangle className="text-rose-600"/> 基礎設施異常警報</h3>
+                      <button onClick={() => setShowNotifPanel(false)} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors active:scale-95"><X size={20}/></button>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                      <div className="flex justify-between items-center mb-2 px-1">
+                          <span className="text-xs font-bold text-slate-400">系統級安全警示</span>
+                          <button onClick={markAllAsRead} className="text-xs font-bold text-blue-600 hover:underline">清除所有警報</button>
+                      </div>
+                      
+                      <div className="p-4 rounded-2xl border border-amber-200 bg-amber-50 shadow-sm relative">
+                          <div className="flex gap-3">
+                              <div className="mt-0.5 w-8 h-8 rounded-full flex items-center justify-center shrink-0 bg-amber-100 text-amber-600"><HardDrive size={16}/></div>
+                              <div className="flex-1 pr-2">
+                                  <div className="text-[10px] text-amber-600/70 font-medium mb-1 flex items-center gap-1"><Clock size={10}/> 系統預設防線</div>
+                                  <p className="text-sm leading-relaxed text-amber-900 font-bold">
+                                      ⚠️ Supabase 免費版資料庫容量上限為 500MB，請定期清理無效日誌與備份檔，若超過將被強制進入 Read-only (唯讀) 模式，導致全系統癱瘓！
+                                  </p>
+                              </div>
+                          </div>
+                      </div>
+
+                      {notifications.length > 0 ? (
+                          notifications.map(notif => {
+                              const isItemRead = notif.isRead || notif.is_read;
+                              return (
+                              <div key={notif.id} className={`p-4 rounded-2xl border transition-all relative group ${isItemRead ? 'bg-slate-100/50 border-slate-200 opacity-80' : 'bg-white border-rose-200 shadow-sm'}`}>
+                                  <button onClick={(e) => { e.stopPropagation(); deleteNotification(notif.id); }} className="absolute top-2 right-2 p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={14}/></button>
+                                  <div className="flex gap-3">
+                                      <div className={`mt-0.5 w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isItemRead ? 'bg-slate-200 text-slate-500' : 'bg-rose-100 text-rose-600'}`}>
+                                          <AlertTriangle size={16}/>
+                                      </div>
+                                      <div className="flex-1 pr-6">
+                                          <div className="text-[10px] text-slate-400 font-medium mb-1 flex items-center gap-1"><Clock size={10}/> {new Date(notif.date).toLocaleString()}</div>
+                                          <p className={`text-sm leading-relaxed whitespace-pre-wrap break-words ${isItemRead ? 'text-slate-600' : 'text-slate-800 font-bold'}`}>
+                                              {notif.message}
+                                          </p>
+                                      </div>
+                                  </div>
+                              </div>
+                          )})
+                      ) : (
+                          <div className="text-center py-10 text-slate-400 font-medium text-sm">目前無其他異常通報</div>
+                      )}
+                  </div>
+              </div>
           </div>
       )}
+
     </div>
   )
 }
