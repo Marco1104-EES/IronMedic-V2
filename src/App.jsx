@@ -3,7 +3,6 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { supabase } from './supabaseClient'
 import { Loader2, X, BellRing, AlertOctagon, RefreshCw } from 'lucide-react'
 
-// 引入 PWA 註冊與自動更新監聽模組
 import { useRegisterSW } from 'virtual:pwa-register/react'
 
 import Login from "./pages/Login";
@@ -29,17 +28,14 @@ class ErrorBoundary extends React.Component {
   }
 
   static getDerivedStateFromError(error) {
-    // 當底層發生崩潰時，立刻啟動防護罩狀態
     return { hasError: true };
   }
 
   componentDidCatch(error, errorInfo) {
-    // 在後台默默記錄崩潰原因
     console.error("🚨 系統發生崩潰，防護罩已攔截 (Error Boundary):", error, errorInfo);
   }
 
   handleForceUpdate = () => {
-      // 💣 核彈級快取清除引擎：炸毀所有 PWA 殘留的 Service Worker 快取
       if ('caches' in window) {
           caches.keys().then((names) => {
               names.forEach((name) => {
@@ -48,16 +44,23 @@ class ErrorBoundary extends React.Component {
           });
       }
       
-      // 清除可能損壞的本地儲存資料
       localStorage.removeItem('iron_medic_races_cache');
-      
-      // 🚀 強制硬刷新頁面，向伺服器索取最新鮮的程式碼
       window.location.reload(true);
   }
 
   render() {
     if (this.state.hasError) {
-      // 崩潰時不顯示黑畫面，改顯示優雅的升級引導 UI
+      const isEnabled = localStorage.getItem('enable_error_boundary') !== 'false';
+      
+      if (!isEnabled) {
+          return (
+              <div className="min-h-screen bg-white p-10 font-sans">
+                  <h2 className="text-2xl font-black text-red-600 mb-4">系統發生致命異常 (防護網已手動停用)</h2>
+                  <p className="text-slate-600 font-bold">請檢查開發者工具 Console 以獲取詳細資訊。</p>
+              </div>
+          );
+      }
+
       return (
         <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 font-sans">
             <div className="bg-slate-800 rounded-[2rem] shadow-2xl w-full max-w-md p-8 text-center border border-slate-700 relative overflow-hidden animate-fade-in-up">
@@ -69,7 +72,7 @@ class ErrorBoundary extends React.Component {
                 
                 <h2 className="text-2xl font-black text-white mb-3 tracking-tight">系統已發布更新</h2>
                 <p className="text-slate-400 text-sm mb-8 leading-relaxed font-medium">
-                    為了提供更流暢的體驗，醫護鐵人系統已進行核心升級。<br/>請點擊下方按鈕獲取最新版本，排除異常。
+                    為了提供更流暢的體驗，系統已進行核心升級。<br/>請點擊下方按鈕獲取最新版本，排除異常。
                 </p>
                 
                 <button 
@@ -84,14 +87,10 @@ class ErrorBoundary extends React.Component {
       );
     }
 
-    // 正常情況下，隱形並正常渲染內部應用程式
     return this.props.children; 
   }
 }
-// ==========================================
 
-
-// 推播金鑰轉換工具函數
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
   const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
@@ -103,7 +102,6 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray;
 }
 
-// 定義四大後台通行權限
 const VALID_ADMIN_ROLES = ['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN'];
 
 const AdminRoute = ({ children, requiredRole = 'ANY_ADMIN' }) => {
@@ -158,7 +156,6 @@ function App() {
 
   const [notificationPermission, setNotificationPermission] = useState('default');
 
-  // 自動向瀏覽器請求推播金鑰並存入資料庫
   const subscribeToPushAndSave = async () => {
     try {
         const registration = await navigator.serviceWorker.ready;
@@ -197,7 +194,6 @@ function App() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // 如果使用者以前就允許過通知，登入時直接更新金鑰
       if ('Notification' in window && Notification.permission === 'granted') {
           subscribeToPushAndSave();
       }
@@ -209,11 +205,11 @@ function App() {
           (payload) => {
             console.log('接收到系統通知', payload);
             if ('Notification' in window && Notification.permission === 'granted') {
-              new Notification('醫護鐵人賽事大廳', {
+              new Notification('賽事大廳通知', {
                 body: payload.new.message,
                 icon: '/pwa-192x192.png',
                 badge: '/pwa-192x192.png',
-                tag: 'iron-medic-notify'
+                tag: 'system-notify'
               });
             }
           }
@@ -227,9 +223,40 @@ function App() {
       if (event === 'SIGNED_IN') { setupRealtime(); }
     });
 
+    // ==========================================
+    // 🌟 全系統版控中心：自動變更計數與廣播監聽
+    // ==========================================
+    window.logSystemChange = (actionName) => {
+        const currentCount = parseInt(localStorage.getItem('system_update_count') || '0', 10);
+        const newCount = currentCount + 1;
+        localStorage.setItem('system_update_count', newCount);
+
+        const logs = JSON.parse(localStorage.getItem('system_update_logs') || '[]');
+        logs.unshift({ time: new Date().toLocaleString(), action: actionName });
+        if (logs.length > 20) logs.pop(); 
+        localStorage.setItem('system_update_logs', JSON.stringify(logs));
+
+        window.dispatchEvent(new Event('system_update_changed'));
+    };
+
+    const globalUpdateChannel = supabase.channel('global_system_updates')
+      .on('broadcast', { event: 'force_reload' }, () => {
+          console.log('接收到全域強制更新指令！');
+          if ('caches' in window) {
+              caches.keys().then((names) => {
+                  names.forEach((name) => caches.delete(name));
+              });
+          }
+          localStorage.removeItem('iron_medic_races_cache');
+          window.location.reload(true);
+      })
+      .subscribe();
+
     return () => {
       if (subscription) supabase.removeChannel(subscription);
       authListener?.subscription.unsubscribe();
+      supabase.removeChannel(globalUpdateChannel);
+      delete window.logSystemChange;
     };
   }, []);
 
@@ -268,10 +295,8 @@ function App() {
   };
 
   return (
-    // 🌟 在最外層包上防護罩
     <ErrorBoundary>
       <BrowserRouter>
-        {/* PWA 更新提示橫幅 */}
         {needRefresh && (
           <div className="fixed bottom-6 right-6 z-[9999] bg-slate-900 text-white p-4 rounded-2xl shadow-2xl border border-slate-700 flex items-center gap-4 animate-bounce-in">
               <div>
@@ -283,7 +308,6 @@ function App() {
           </div>
         )}
 
-        {/* 請求推播授權橫幅 */}
         {notificationPermission === 'default' && (
           <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] bg-white text-slate-800 p-4 rounded-2xl shadow-2xl border border-slate-200 flex items-center gap-4 animate-fade-in-down w-[95%] max-w-md">
               <div className="bg-blue-100 text-blue-600 p-2.5 rounded-xl shrink-0 shadow-inner"><BellRing size={24} className="animate-pulse" /></div>

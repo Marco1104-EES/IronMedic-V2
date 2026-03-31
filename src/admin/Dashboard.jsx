@@ -1,14 +1,12 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from 'recharts'
 import { MapContainer, TileLayer, Marker, Popup, CircleMarker } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
-// 🌟 確保新增了需要的圖示包含 Info, Sprout, 還有新功能需要的 Search, Zap, AlertTriangle, FileSpreadsheet
-import { Users, Activity, Award, ShieldAlert, Map as MapIcon, Loader2, Flag, Mountain, Bike, Footprints, User, MapPin, Bell, UserCheck, Calendar, Clock, History, ChevronUp, ChevronDown, Handshake, Send, Timer, ArrowRight, X, UserMinus, Mail, Phone, Info, Sprout, Search, Zap, AlertTriangle, FileSpreadsheet } from 'lucide-react'
+import { Users, Activity, Award, ShieldAlert, Map as MapIcon, Loader2, Flag, Mountain, Bike, Footprints, User, MapPin, Bell, UserCheck, Calendar, Clock, History, ChevronUp, ChevronDown, Handshake, Send, Timer, ArrowRight, X, UserMinus, Mail, Phone, Info, Sprout, Search, Zap, AlertTriangle, FileSpreadsheet, Server, List, Rocket, Radio, GraduationCap, UserX } from 'lucide-react'
 
-// 修正 Leaflet icon 消失問題
 import icon from 'leaflet/dist/images/marker-icon.png';
 import iconShadow from 'leaflet/dist/images/marker-shadow.png';
 let DefaultIcon = L.icon({
@@ -16,7 +14,6 @@ let DefaultIcon = L.icon({
 });
 L.Marker.prototype.options.icon = DefaultIcon;
 
-// 台灣縣市賽事座標對應表
 const cityCoordinates = {
     "台北": [25.0330, 121.5654], "新北": [25.0172, 121.4625], "桃園": [24.9936, 121.3010],
     "台中": [24.1477, 120.6736], "台南": [22.9997, 120.2270], "高雄": [22.6273, 120.3014],
@@ -27,7 +24,6 @@ const cityCoordinates = {
     "連江": [26.1505, 119.9360]
 }
 
-// 區域中心圓點座標 (用於會員分佈地圖)
 const regionCenters = {
     north: [24.9, 121.3],
     central: [24.0, 120.5],
@@ -45,62 +41,144 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const CURRENT_YEAR = new Date().getFullYear();
 
-  // 頂部四大指標 + 轉換率指標
   const [stats, setStats] = useState({
-      totalMembers: 0,
-      currentMembers: 0,
-      newMembers: 0,
-      teamLeaders: 0,
-      vipMembers: 0,
-      loggedMembers: 0,          
-      unloggedMembersCount: 0    
+      totalMembers: 0, currentMembers: 0, newMembers: 0, teamLeaders: 0,
+      vipMembers: 0, loggedMembers: 0, unloggedMembersCount: 0, unlinkedCount: 0, trainedCount: 0    
   })
   
-  // 🌟 追蹤名單狀態 (包含未登入、已登入、新人名單)
   const [unloggedList, setUnloggedList] = useState([])
   const [loggedList, setLoggedList] = useState([])
-  const [newcomersList, setNewcomersList] = useState([]) // 🌟 新增：新人名單
+  const [unlinkedList, setUnlinkedList] = useState([]) 
+  const [newcomersList, setNewcomersList] = useState([]) 
+  const [leaderList, setLeaderList] = useState([])
+  const [vipList, setVipList] = useState([])
+  const [trainedList, setTrainedList] = useState([])
   
   const [showUnloggedModal, setShowUnloggedModal] = useState(false)
   const [showLoggedModal, setShowLoggedModal] = useState(false)
-  const [showNewcomersModal, setShowNewcomersModal] = useState(false) // 🌟 新增：新人彈窗控制
+  const [showUnlinkedModal, setShowUnlinkedModal] = useState(false) 
+  const [showNewcomersModal, setShowNewcomersModal] = useState(false) 
+  const [showLeaderModal, setShowLeaderModal] = useState(false)
+  const [showVipModal, setShowVipModal] = useState(false)
+  const [showTrainedModal, setShowTrainedModal] = useState(false)
 
-  // 原本的賽事地圖分類資料
-  const [raceStats, setRaceStats] = useState({
-      marathon: 0, trail: 0, bike: 0, tri: 0
-  })
+  const [raceStats, setRaceStats] = useState({ marathon: 0, trail: 0, bike: 0, tri: 0 })
   const [raceLocations, setRaceLocations] = useState([])
 
-  // 會員分佈資料
   const [demoStats, setDemostats] = useState({
-      male: 0, female: 0,
-      north: 0, central: 0, south: 0, east: 0, islands: 0
+      male: 0, female: 0, north: 0, central: 0, south: 0, east: 0, islands: 0
   })
 
-  // 通知狀態
   const [recentRaces, setRecentRaces] = useState([])
   const [profileUpdates, setProfileUpdates] = useState([])
 
-  // 移植專用狀態：保留所有賽事原始資料供總表計算
   const [allRacesData, setAllRacesData] = useState([])
   const [showRaceOverview, setShowRaceOverview] = useState(true)
 
-  // ==========================================
-  // ⚡ 新增功能：單一帳號媒合管理 (智能搜尋) 狀態
-  // ==========================================
   const [searchAccountInput, setSearchAccountInput] = useState('');
   const [searchAccountResult, setSearchAccountResult] = useState(null);
   const [isSearchingAccount, setIsSearchingAccount] = useState(false);
   const [isUnlinkingAccount, setIsUnlinkingAccount] = useState(false);
+
+  // ==========================================
+  // 🌟 系統版本與發布控制中心 狀態
+  // ==========================================
+  const [updateCount, setUpdateCount] = useState(0);
+  const [updateLogs, setUpdateLogs] = useState([]);
+  const [errorBoundaryEnabled, setErrorBoundaryEnabled] = useState(true);
+  const [readReleaseCounts, setReadReleaseCounts] = useState({});
+
+  const loadSystemReleaseData = useCallback(() => {
+      setUpdateCount(parseInt(localStorage.getItem('system_update_count') || '0', 10));
+      setUpdateLogs(JSON.parse(localStorage.getItem('system_update_logs') || '[]'));
+      setErrorBoundaryEnabled(localStorage.getItem('enable_error_boundary') !== 'false');
+      try {
+          setReadReleaseCounts(JSON.parse(localStorage.getItem('read_release_counts') || '{}'));
+      } catch (e) {
+          setReadReleaseCounts({});
+      }
+  }, []);
+
+  const handleToggleErrorBoundary = () => {
+      const newValue = !errorBoundaryEnabled;
+      localStorage.setItem('enable_error_boundary', String(newValue));
+      setErrorBoundaryEnabled(newValue);
+  };
+
+  const handleBroadcastRelease = async () => {
+      if (!window.confirm('確定要發布全域更新嗎？\n這將強制所有在線會員的手機系統重新載入並清除舊快取。')) return;
+
+      try {
+          const channel = supabase.channel('global_system_updates');
+          channel.subscribe(async (status) => {
+              if (status === 'SUBSCRIBED') {
+                  await channel.send({
+                      type: 'broadcast',
+                      event: 'force_reload',
+                      payload: { timestamp: Date.now() }
+                  });
+                  localStorage.setItem('system_update_count', '0');
+                  localStorage.setItem('system_update_logs', '[]');
+                  localStorage.setItem('read_release_counts', '{}');
+                  window.dispatchEvent(new Event('system_update_changed'));
+                  alert('✅ 全域更新指令已成功發布！');
+                  supabase.removeChannel(channel);
+              }
+          });
+      } catch (err) {
+          alert('發布失敗: ' + err.message);
+      }
+  };
+
+  useEffect(() => {
+      loadSystemReleaseData();
+      window.addEventListener('system_update_changed', loadSystemReleaseData);
+      return () => window.removeEventListener('system_update_changed', loadSystemReleaseData);
+  }, [loadSystemReleaseData]);
+
+  // ==========================================
+  // ⚡ 日誌月份分群與智能未讀狀態引擎
+  // ==========================================
+  const groupedReleaseLogs = useMemo(() => {
+      const groups = {};
+      updateLogs.forEach(log => {
+          let monthKey = "近期異動";
+          try {
+              const d = new Date(log.time.replace(/上午|下午/g, '').trim());
+              if (!isNaN(d.getTime())) monthKey = `${d.getFullYear()}年${d.getMonth() + 1}月`;
+              else {
+                  const match = log.time.match(/^(\d{4})[\/\-](\d{1,2})/);
+                  if (match) monthKey = `${match[1]}年${match[2]}月`;
+              }
+          } catch (e) {}
+
+          if (!groups[monthKey]) groups[monthKey] = [];
+          groups[monthKey].push(log);
+      });
+      return groups;
+  }, [updateLogs]);
+
+  // 預設全部收合 (移除了自動展開的邏輯)
+  const [expandedReleaseMonths, setExpandedReleaseMonths] = useState({});
+
+  const toggleReleaseMonth = (month) => {
+      setExpandedReleaseMonths(prev => ({ ...prev, [month]: !prev[month] }));
+      // 只要打開，就將該月份目前的總筆數記為已讀
+      if (!expandedReleaseMonths[month]) {
+          setReadReleaseCounts(prev => {
+              const newCounts = { ...prev, [month]: groupedReleaseLogs[month].length };
+              localStorage.setItem('read_release_counts', JSON.stringify(newCounts));
+              return newCounts;
+          });
+      }
+  };
+  // ==========================================
 
   useEffect(() => {
       fetchDashboardData()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ==========================================
-  // ⚡ 新增功能：漸進式防抖搜尋引擎
-  // ==========================================
   useEffect(() => {
       const timer = setTimeout(() => {
           if (searchAccountInput.trim().length > 1) {
@@ -108,7 +186,7 @@ export default function Dashboard() {
           } else {
               setSearchAccountResult(null);
           }
-      }, 500); // 500ms 防抖
+      }, 500); 
       return () => clearTimeout(timer);
   }, [searchAccountInput]);
 
@@ -133,11 +211,12 @@ export default function Dashboard() {
   const handleUnlinkAccount = async () => {
       if (!searchAccountResult) return;
       
-      const confirmMsg = `🛡️ 系統警報 🛡️\n\n確定要強制將【${searchAccountResult.full_name}】解除帳號媒合狀態嗎？\n\n執行後，系統將賦予全新 ID 並將信箱重置為預設 (marietai@ms1.url.com.tw)。該人員下次登入系統時，必須重新進行帳號媒合。`;
+      const confirmMsg = `🛡️ 系統警報 🛡️\n\n確定要強制將【${searchAccountResult.full_name}】解除帳號媒合狀態嗎？\n\n執行後，系統將賦予全新 ID 並將信箱重置為預設 (marietai@ms1.url.com.tw)。該人員下次登入系統時，必須重新進行身份驗證。`;
       if (!window.confirm(confirmMsg)) return;
 
       setIsUnlinkingAccount(true);
       try {
+          const unlinkedUser = { ...searchAccountResult };
           const newRandomUuid = crypto.randomUUID(); 
           const originalEmail = 'marietai@ms1.url.com.tw'; 
 
@@ -147,13 +226,45 @@ export default function Dashboard() {
                   id: newRandomUuid, 
                   email: originalEmail 
               })
-              .eq('id', searchAccountResult.id);
+              .eq('id', unlinkedUser.id);
 
           if (error) throw error;
 
-          alert(`🎉【${searchAccountResult.full_name}】已強制解除帳號媒合！\n信箱已恢復為：${originalEmail}`);
+          alert(`🎉【${unlinkedUser.full_name}】已強制解除帳號媒合！\n信箱已恢復為：${originalEmail}`);
+          
+          if (window.logSystemChange) {
+              window.logSystemChange(`解除帳號媒合：${unlinkedUser.full_name}`);
+          }
+          
           setSearchAccountInput('');
           setSearchAccountResult(null);
+          
+          const wasLogged = loggedList.some(m => m.id === unlinkedUser.id);
+          const wasUnlogged = unloggedList.some(m => m.id === unlinkedUser.id);
+
+          setStats(prev => ({
+              ...prev,
+              loggedMembers: wasLogged ? Math.max(0, prev.loggedMembers - 1) : prev.loggedMembers,
+              unloggedMembersCount: wasUnlogged ? Math.max(0, prev.unloggedMembersCount - 1) : prev.unloggedMembersCount,
+              unlinkedCount: prev.unlinkedCount + 1
+          }));
+
+          setLoggedList(prev => prev.filter(m => m.id !== unlinkedUser.id));
+          setUnloggedList(prev => prev.filter(m => m.id !== unlinkedUser.id));
+          
+          setUnlinkedList(prev => [
+              {
+                  id: newRandomUuid,
+                  full_name: unlinkedUser.full_name,
+                  email: originalEmail,
+                  phone: unlinkedUser.phone
+              },
+              ...prev
+          ]);
+
+          setTimeout(() => {
+              fetchDashboardData();
+          }, 3000);
 
       } catch (error) {
           console.error("解除媒合失敗:", error)
@@ -162,54 +273,57 @@ export default function Dashboard() {
           setIsUnlinkingAccount(false);
       }
   };
-  // ==========================================
-
 
   const fetchDashboardData = async () => {
       try {
-          // 1. 抓取基本數量統計
           const [
               { count: total },
               { count: current },
               { count: newM },
               { count: leaders },
-              { count: vips }
+              { count: vips },
+              { count: trained } 
           ] = await Promise.all([
               supabase.from('profiles').select('*', { count: 'exact', head: true }),
               supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_current_member', 'Y'),
               supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_current_member', 'Y').eq('is_new_member', 'Y'),
               supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_team_leader', 'Y'),
-              supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_vip', 'Y')
+              supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_vip', 'Y'),
+              supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_current_member', 'Y').eq('training_status', 'Y')
           ]);
 
-          // 2. 後端 API 直連：呼叫 PostgreSQL 函數，取得最真實的 auth.users 交叉比對資料
           const { data: activationData, error: rpcError } = await supabase.rpc('get_member_activation_stats');
-          
-          let loggedInCount = 0;
-          let unloggedArray = [];
-          let loggedArray = [];
+          const rpcUnloggedIds = new Set(activationData?.unlogged_list?.map(u => u.id) || []);
 
-          if (!rpcError && activationData) {
-              loggedInCount = activationData.logged_count || 0;
-              unloggedArray = activationData.unlogged_list || [];
+          const { data: allCurrentMembers, error: membersError } = await supabase.from('profiles')
+              .select('id, full_name, email, phone')
+              .eq('is_current_member', 'Y')
+              .limit(5000);
 
-              // 獲取已登入名單：從 profile 抓取所有當屆會員，扣除未登入名單
-              const { data: allCurrentMembers } = await supabase.from('profiles')
-                  .select('id, full_name, email, phone')
-                  .eq('is_current_member', 'Y')
-                  .limit(5000);
+          if (membersError) throw membersError;
 
-              if (allCurrentMembers) {
-                  loggedArray = allCurrentMembers.filter(m => !unloggedArray.some(u => u.id === m.id));
-              }
-          } else {
-              console.error("後端 RPC 呼叫失敗", rpcError);
+          let arrayLogged = [];
+          let arrayUnlogged = [];
+          let arrayUnlinked = [];
+
+          if (allCurrentMembers) {
+              allCurrentMembers.forEach(m => {
+                  if (m.email && m.email.toLowerCase() === 'marietai@ms1.url.com.tw') {
+                      arrayUnlinked.push(m);
+                  } 
+                  else if (rpcUnloggedIds.has(m.id)) {
+                      arrayUnlogged.push(m);
+                  } 
+                  else {
+                      arrayLogged.push(m);
+                  }
+              });
           }
           
-          setUnloggedList(unloggedArray);
-          setLoggedList(loggedArray);
+          setLoggedList(arrayLogged);
+          setUnloggedList(arrayUnlogged);
+          setUnlinkedList(arrayUnlinked);
 
-          // 🌟 3. 獨立抓取「當屆新人名單」並附帶 newbie_passes 欄位
           const { data: newMembersData } = await supabase.from('profiles')
               .select('id, full_name, email, phone, newbie_passes')
               .eq('is_current_member', 'Y')
@@ -218,22 +332,30 @@ export default function Dashboard() {
           
           let sortedNewcomers = [];
           if (newMembersData) {
-              // 🌟 智能排序：依據剩餘權利次數「由少到多 (Ascending)」排序
               sortedNewcomers = newMembersData.sort((a, b) => (a.newbie_passes || 0) - (b.newbie_passes || 0));
           }
           setNewcomersList(sortedNewcomers);
+
+          const { data: leaderData } = await supabase.from('profiles').select('id, full_name, email, phone').eq('is_team_leader', 'Y').limit(1000);
+          const { data: vipData } = await supabase.from('profiles').select('id, full_name, email, phone').eq('is_vip', 'Y').limit(1000);
+          const { data: trainedData } = await supabase.from('profiles').select('id, full_name, email, phone').eq('is_current_member', 'Y').eq('training_status', 'Y').limit(2000);
+
+          setLeaderList(leaderData || []);
+          setVipList(vipData || []);
+          setTrainedList(trainedData || []);
           
           setStats({
               totalMembers: total || 0, 
               currentMembers: current || 0,
-              newMembers: sortedNewcomers.length || newM || 0, // 確保數據一致性
+              newMembers: sortedNewcomers.length || newM || 0, 
               teamLeaders: leaders || 0,
               vipMembers: vips || 0,
-              loggedMembers: loggedInCount,
-              unloggedMembersCount: unloggedArray.length
+              loggedMembers: arrayLogged.length,
+              unloggedMembersCount: arrayUnlogged.length,
+              unlinkedCount: arrayUnlinked.length,
+              trainedCount: trained || 0 
           })
 
-          // 4. 抓取賽事資料
           const { data: races } = await supabase.from('races').select('id, name, date, type, location, status, medic_required, medic_registered').order('created_at', { ascending: false })
           let rMarathon = 0, rTrail = 0, rBike = 0, rTri = 0;
           let locations = []
@@ -263,7 +385,6 @@ export default function Dashboard() {
               setRaceLocations(locations)
           }
 
-          // 5. 抓取地圖與性別分佈
           const { data: memberData } = await supabase.from('profiles').select('gender, address')
           if (memberData) {
               let mMale = 0, mFemale = 0;
@@ -287,7 +408,6 @@ export default function Dashboard() {
               })
           }
 
-          // 6. 抓取通知
           try {
               const { data: notifs } = await supabase.from('admin_notifications').select('*').eq('type', 'PROFILE_UPDATE').order('created_at', { ascending: false }).limit(20)
               if (notifs) {
@@ -332,7 +452,6 @@ export default function Dashboard() {
   const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444']
   const TAIWAN_CENTER = [23.6978, 120.9605]
 
-  // 送出隱形包裹的導航函數 (支援雷達 ID 掃描)
   const handleReviewClick = (log) => {
       const match = log.message.match(/\(ID:\s*(.*?)\)/);
       if (match && match[1]) {
@@ -347,14 +466,14 @@ export default function Dashboard() {
       }
   }
 
-  if (loading) return <div className="h-[60vh] flex items-center justify-center text-slate-400"><Loader2 className="animate-spin mr-2"/> 正在載入醫鐵總部賽事數據...</div>
+  if (loading) return <div className="h-[60vh] flex items-center justify-center text-slate-400"><Loader2 className="animate-spin mr-2"/> 正在載入系統數據...</div>
 
   if (currentView === 'NOTIFICATIONS') {
       return (
           <div className="space-y-6 md:space-y-8 animate-fade-in pb-20">
               <div className="mb-6">
                   <h2 className="text-3xl font-black text-slate-800 mb-2 flex items-center gap-2">
-                      <Bell className="text-amber-500"/> 醫鐵通知中心
+                      <Bell className="text-amber-500"/> 通知中心
                   </h2>
                   <p className="text-slate-500 font-medium">即時掌握最新建立的賽事與會員資料異動</p>
               </div>
@@ -428,12 +547,11 @@ export default function Dashboard() {
   return (
     <div className="space-y-6 md:space-y-8 animate-fade-in pb-20 max-w-[1600px] mx-auto">
       <div className="mb-8">
-          <h2 className="text-3xl font-black text-slate-800 mb-2">醫鐵數據儀表板</h2>
-          <p className="text-slate-500 font-medium">即時掌握全台醫護鐵人會員與賽事分佈</p>
+          <h2 className="text-3xl font-black text-slate-800 mb-2">數據儀表板</h2>
+          <p className="text-slate-500 font-medium">即時掌握全台會員與賽事分佈</p>
       </div>
 
-      {/* 🌟 擴充為 5 格排版，包含當屆轉換追蹤 */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 md:gap-6">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 md:gap-6">
           <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow group">
               <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform"><Users size={24}/></div>
               <h3 className="text-slate-500 font-bold text-sm">註冊總人數</h3>
@@ -447,7 +565,6 @@ export default function Dashboard() {
               <div className="text-2xl md:text-3xl font-black text-slate-800 mt-1 flex items-baseline gap-1 relative z-10">
                   <span className="text-green-600">{stats.currentMembers}</span>
                   <span className="text-lg text-slate-400">/</span>
-                  {/* 🌟 修改為可點擊的按鈕，觸發新人名單彈窗 */}
                   <button 
                       onClick={() => setShowNewcomersModal(true)}
                       className="text-xl md:text-2xl text-emerald-500 hover:text-emerald-600 hover:scale-110 transition-transform underline decoration-emerald-300 decoration-2 underline-offset-4 cursor-pointer"
@@ -461,7 +578,7 @@ export default function Dashboard() {
           <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow group relative overflow-hidden md:col-span-1 lg:col-span-1 col-span-2">
               <div className="absolute top-0 right-0 w-24 h-24 bg-blue-50 rounded-bl-full -z-10 transition-transform group-hover:scale-125"></div>
               <div className="w-12 h-12 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform relative z-10"><UserCheck size={24}/></div>
-              <h3 className="text-slate-500 font-bold text-[13px] md:text-sm whitespace-nowrap">當屆登入 / 未登入追蹤</h3>
+              <h3 className="text-slate-500 font-bold text-[13px] md:text-sm whitespace-nowrap">登入 / 未登入 / 媒合取消</h3>
               <div className="text-2xl md:text-3xl font-black text-slate-800 mt-1 flex items-baseline gap-1 relative z-10">
                   <button 
                       onClick={() => setShowLoggedModal(true)}
@@ -470,13 +587,21 @@ export default function Dashboard() {
                   >
                       {stats.loggedMembers}
                   </button>
-                  <span className="text-lg text-slate-400">/</span>
+                  <span className="text-lg text-slate-300">/</span>
                   <button 
                       onClick={() => setShowUnloggedModal(true)}
                       className="text-xl md:text-2xl text-rose-500 hover:text-rose-600 hover:scale-110 transition-transform underline decoration-rose-300 decoration-2 underline-offset-4 cursor-pointer"
-                      title="點擊查看尚未登入新系統名單"
+                      title="點擊查看尚未登入名單"
                   >
                       {stats.unloggedMembersCount}
+                  </button>
+                  <span className="text-lg text-slate-300">/</span>
+                  <button 
+                      onClick={() => setShowUnlinkedModal(true)}
+                      className="text-xl md:text-2xl text-slate-500 hover:text-slate-600 hover:scale-110 transition-transform underline decoration-slate-300 decoration-2 underline-offset-4 cursor-pointer"
+                      title="點擊查看遭解除媒合名單"
+                  >
+                      {stats.unlinkedCount}
                   </button>
               </div>
           </div>
@@ -484,17 +609,47 @@ export default function Dashboard() {
           <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow group">
               <div className="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform"><ShieldAlert size={24}/></div>
               <h3 className="text-slate-500 font-bold text-sm">帶隊教官</h3>
-              <div className="text-3xl font-black text-slate-800 mt-1">{stats.teamLeaders}</div>
+              <div className="text-3xl font-black text-slate-800 mt-1 flex items-baseline gap-1 relative z-10">
+                  <button 
+                      onClick={() => setShowLeaderModal(true)}
+                      className="text-3xl font-black text-indigo-600 hover:text-indigo-700 hover:scale-110 transition-transform underline decoration-indigo-300 decoration-2 underline-offset-4 cursor-pointer"
+                      title="點擊查看帶隊教官名單"
+                  >
+                      {stats.teamLeaders}
+                  </button>
+              </div>
           </div>
 
           <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow group">
               <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-500 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform"><Award size={24}/></div>
               <h3 className="text-slate-500 font-bold text-sm">VIP 會員</h3>
-              <div className="text-3xl font-black text-slate-800 mt-1">{stats.vipMembers}</div>
+              <div className="text-3xl font-black text-slate-800 mt-1 flex items-baseline gap-1 relative z-10">
+                  <button 
+                      onClick={() => setShowVipModal(true)}
+                      className="text-3xl font-black text-amber-500 hover:text-amber-600 hover:scale-110 transition-transform underline decoration-amber-300 decoration-2 underline-offset-4 cursor-pointer"
+                      title="點擊查看 VIP 會員名單"
+                  >
+                      {stats.vipMembers}
+                  </button>
+              </div>
+          </div>
+
+          <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow group">
+              <div className="w-12 h-12 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform"><GraduationCap size={24}/></div>
+              <h3 className="text-slate-500 font-bold text-[13px] md:text-sm">當屆訓練完成</h3>
+              <div className="text-3xl font-black text-slate-800 mt-1 flex items-baseline gap-1 relative z-10">
+                  <button 
+                      onClick={() => setShowTrainedModal(true)}
+                      className="text-3xl font-black text-purple-600 hover:text-purple-700 hover:scale-110 transition-transform underline decoration-purple-300 decoration-2 underline-offset-4 cursor-pointer"
+                      title="點擊查看當屆訓練結業名單"
+                  >
+                      {stats.trainedCount}
+                  </button>
+              </div>
           </div>
       </div>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden transition-all duration-300">
+      <div className="bg-white rounded-[2rem] shadow-sm border border-slate-200 overflow-hidden transition-all duration-300">
           <div 
               className="px-6 py-4 flex justify-between items-center cursor-pointer bg-slate-50 hover:bg-slate-100 transition-colors"
               onClick={() => setShowRaceOverview(!showRaceOverview)}
@@ -586,7 +741,7 @@ export default function Dashboard() {
 
           <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200 flex flex-col h-full">
               <h3 className="text-lg font-black text-slate-800 mb-6 flex items-center gap-2">
-                  <Users className="text-indigo-500"/> 醫護鐵人會員分佈
+                  <Users className="text-indigo-500"/> 會員分佈
               </h3>
               
               <div className="flex flex-col md:flex-row gap-6 flex-1">
@@ -664,14 +819,14 @@ export default function Dashboard() {
 
       </div>
 
-      {/* 🌟 追蹤名單：當屆未登入新系統名單 Modal */}
+      {/* 🌟 追蹤名單：當屆未登入名單 Modal */}
       {showUnloggedModal && (
           <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[200] p-4 animate-fade-in backdrop-blur-sm" onClick={() => setShowUnloggedModal(false)}>
               <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-2xl flex flex-col max-h-[85vh] overflow-hidden animate-bounce-in" onClick={e => e.stopPropagation()}>
                   
                   <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
                       <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
-                          <UserMinus className="text-rose-500"/> 當屆未登入新系統名單
+                          <UserMinus className="text-rose-500"/> 未登入名單
                           <span className="bg-rose-100 text-rose-700 text-[10px] font-black px-2 py-0.5 rounded-full ml-2">共 {unloggedList.length} 人</span>
                       </h3>
                       <button onClick={() => setShowUnloggedModal(false)} className="p-2 text-slate-400 hover:bg-slate-200 rounded-full transition-colors active:scale-95"><X size={20}/></button>
@@ -680,7 +835,7 @@ export default function Dashboard() {
                   <div className="bg-blue-50 text-blue-700 text-[11px] p-4 font-bold flex items-start gap-2 border-b border-blue-100 shrink-0">
                       <Info size={16} className="shrink-0 mt-0.5"/>
                       <p className="leading-relaxed">
-                          判定基準說明：此數據由系統後端 (RPC) 直接連線至真實身份驗證庫 (auth.users) 取得，擁有最高準確度。清單中之人員代表「尚未透過 Google 帳號授權登入新系統」。
+                          此名單為尚未透過 Google 帳號授權登入新系統之有效會員（不含已強制解除媒合之異常帳號）。
                       </p>
                   </div>
 
@@ -701,9 +856,7 @@ export default function Dashboard() {
                           </div>
                       )) : (
                           <div className="text-center py-12 flex flex-col items-center justify-center gap-3">
-                              <div className="w-16 h-16 bg-green-100 text-green-500 rounded-full flex items-center justify-center mb-2"><CheckCircle size={32}/></div>
-                              <div className="text-lg font-black text-slate-800">太棒了！</div>
-                              <div className="text-sm font-bold text-slate-500">所有當屆會員都已經成功轉換並登入新系統！</div>
+                              <div className="text-sm font-bold text-slate-500">目前尚無未登入資料</div>
                           </div>
                       )}
                   </div>
@@ -715,14 +868,14 @@ export default function Dashboard() {
           </div>
       )}
 
-      {/* 🌟 追蹤名單：當屆已登入新系統名單 Modal */}
+      {/* 🌟 追蹤名單：當屆登入名單 Modal */}
       {showLoggedModal && (
           <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[200] p-4 animate-fade-in backdrop-blur-sm" onClick={() => setShowLoggedModal(false)}>
               <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-2xl flex flex-col max-h-[85vh] overflow-hidden animate-bounce-in" onClick={e => e.stopPropagation()}>
                   
                   <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
                       <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
-                          <UserCheck className="text-blue-500"/> 當屆已登入新系統名單
+                          <UserCheck className="text-blue-500"/> 當屆登入名單
                           <span className="bg-blue-100 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded-full ml-2">共 {loggedList.length} 人</span>
                       </h3>
                       <button onClick={() => setShowLoggedModal(false)} className="p-2 text-slate-400 hover:bg-slate-200 rounded-full transition-colors active:scale-95"><X size={20}/></button>
@@ -731,7 +884,7 @@ export default function Dashboard() {
                   <div className="bg-blue-50 text-blue-700 text-[11px] p-4 font-bold flex items-start gap-2 border-b border-blue-100 shrink-0">
                       <Info size={16} className="shrink-0 mt-0.5"/>
                       <p className="leading-relaxed">
-                          判定基準說明：名單為系統後端 (RPC) 交叉比對真實身份驗證庫 (auth.users) 後，已成功登入之人員名單。
+                          此名單為前端過濾排除「未登入」與「已解除媒合」之異常帳號，代表擁有真實有效登入憑證的現役會員。
                       </p>
                   </div>
 
@@ -759,6 +912,55 @@ export default function Dashboard() {
 
                   <div className="p-4 bg-slate-50 border-t border-slate-100 shrink-0">
                       <button onClick={() => setShowLoggedModal(false)} className="w-full py-3.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-black rounded-xl transition-colors active:scale-95">關閉名單</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* 🌟 追蹤名單：媒合取消名單 Modal */}
+      {showUnlinkedModal && (
+          <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[200] p-4 animate-fade-in backdrop-blur-sm" onClick={() => setShowUnlinkedModal(false)}>
+              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-2xl flex flex-col max-h-[85vh] overflow-hidden animate-bounce-in" onClick={e => e.stopPropagation()}>
+                  
+                  <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
+                      <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
+                          <UserX className="text-slate-500"/> 媒合取消名單
+                          <span className="bg-slate-200 text-slate-700 text-[10px] font-black px-2 py-0.5 rounded-full ml-2">共 {unlinkedList.length} 人</span>
+                      </h3>
+                      <button onClick={() => setShowUnlinkedModal(false)} className="p-2 text-slate-400 hover:bg-slate-200 rounded-full transition-colors active:scale-95"><X size={20}/></button>
+                  </div>
+                  
+                  <div className="bg-slate-50 text-slate-600 text-[11px] p-4 font-bold flex items-start gap-2 border-b border-slate-200 shrink-0">
+                      <Info size={16} className="shrink-0 mt-0.5"/>
+                      <p className="leading-relaxed">
+                          此名單為經由管理員強制執行「解除帳號媒合」之人員，該員須於下次重新進行身份驗證，方可恢復登入狀態。
+                      </p>
+                  </div>
+
+                  <div className="p-6 overflow-y-auto custom-scrollbar flex-1 bg-white space-y-3">
+                      {unlinkedList.length > 0 ? unlinkedList.map(m => (
+                          <div key={m.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl border border-slate-100 hover:bg-slate-50 hover:border-slate-300 transition-colors gap-3">
+                              <div className="flex items-center gap-3">
+                                  <div className="w-10 h-10 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center font-black text-sm">{m.full_name?.charAt(0) || '?'}</div>
+                                  <div>
+                                      <div className="font-black text-slate-800 text-sm flex items-center gap-2">{m.full_name}</div>
+                                      <div className="text-[10px] text-slate-400 font-mono mt-0.5" title="資料庫 UUID">系統 ID: {m.id?.substring(0,8)}...</div>
+                                  </div>
+                              </div>
+                              <div className="flex flex-col sm:items-end gap-1.5">
+                                  <span className="text-xs font-bold text-rose-500 flex items-center gap-1.5"><Mail size={12} className="text-rose-400"/> {m.email || '未建檔信箱'}</span>
+                                  <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><Phone size={12} className="text-slate-400"/> {m.phone || '未建檔電話'}</span>
+                              </div>
+                          </div>
+                      )) : (
+                          <div className="text-center py-12 flex flex-col items-center justify-center gap-3">
+                              <div className="text-sm font-bold text-slate-500">目前尚無媒合取消資料</div>
+                          </div>
+                      )}
+                  </div>
+
+                  <div className="p-4 bg-slate-50 border-t border-slate-100 shrink-0">
+                      <button onClick={() => setShowUnlinkedModal(false)} className="w-full py-3.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-black rounded-xl transition-colors active:scale-95">關閉名單</button>
                   </div>
               </div>
           </div>
@@ -816,7 +1018,130 @@ export default function Dashboard() {
           </div>
       )}
 
-      {/* 🌟 您原生的：系統資料庫管理 / 匯入中心 + 獨立插入的新區塊 */}
+      {/* 🌟 追蹤名單：帶隊教官名單 Modal */}
+      {showLeaderModal && (
+          <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[200] p-4 animate-fade-in backdrop-blur-sm" onClick={() => setShowLeaderModal(false)}>
+              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-2xl flex flex-col max-h-[85vh] overflow-hidden animate-bounce-in" onClick={e => e.stopPropagation()}>
+                  <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
+                      <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
+                          <ShieldAlert className="text-indigo-500"/> 帶隊教官名單
+                          <span className="bg-indigo-100 text-indigo-700 text-[10px] font-black px-2 py-0.5 rounded-full ml-2">共 {leaderList.length} 人</span>
+                      </h3>
+                      <button onClick={() => setShowLeaderModal(false)} className="p-2 text-slate-400 hover:bg-slate-200 rounded-full transition-colors active:scale-95"><X size={20}/></button>
+                  </div>
+
+                  <div className="p-6 overflow-y-auto custom-scrollbar flex-1 bg-white space-y-3">
+                      {leaderList.length > 0 ? leaderList.map(m => (
+                          <div key={m.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl border border-slate-100 hover:bg-indigo-50/30 hover:border-indigo-200 transition-colors gap-3">
+                              <div className="flex items-center gap-3">
+                                  <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center font-black text-sm">{m.full_name?.charAt(0) || '?'}</div>
+                                  <div>
+                                      <div className="font-black text-slate-800 text-sm flex items-center gap-2">{m.full_name}</div>
+                                      <div className="text-[10px] text-slate-400 font-mono mt-0.5">系統 ID: {m.id?.substring(0,8)}...</div>
+                                  </div>
+                              </div>
+                              <div className="flex flex-col sm:items-end gap-1.5">
+                                  <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><Mail size={12} className="text-slate-400"/> {m.email || '未建檔信箱'}</span>
+                                  <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><Phone size={12} className="text-slate-400"/> {m.phone || '未建檔電話'}</span>
+                              </div>
+                          </div>
+                      )) : (
+                          <div className="text-center py-12 flex flex-col items-center justify-center gap-3">
+                              <div className="text-sm font-bold text-slate-500">目前尚無帶隊教官資料</div>
+                          </div>
+                      )}
+                  </div>
+
+                  <div className="p-4 bg-slate-50 border-t border-slate-100 shrink-0">
+                      <button onClick={() => setShowLeaderModal(false)} className="w-full py-3.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-black rounded-xl transition-colors active:scale-95">關閉名單</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* 🌟 追蹤名單：VIP 會員名單 Modal */}
+      {showVipModal && (
+          <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[200] p-4 animate-fade-in backdrop-blur-sm" onClick={() => setShowVipModal(false)}>
+              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-2xl flex flex-col max-h-[85vh] overflow-hidden animate-bounce-in" onClick={e => e.stopPropagation()}>
+                  <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
+                      <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
+                          <Award className="text-amber-500"/> VIP 會員名單
+                          <span className="bg-amber-100 text-amber-700 text-[10px] font-black px-2 py-0.5 rounded-full ml-2">共 {vipList.length} 人</span>
+                      </h3>
+                      <button onClick={() => setShowVipModal(false)} className="p-2 text-slate-400 hover:bg-slate-200 rounded-full transition-colors active:scale-95"><X size={20}/></button>
+                  </div>
+
+                  <div className="p-6 overflow-y-auto custom-scrollbar flex-1 bg-white space-y-3">
+                      {vipList.length > 0 ? vipList.map(m => (
+                          <div key={m.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl border border-slate-100 hover:bg-amber-50/30 hover:border-amber-200 transition-colors gap-3">
+                              <div className="flex items-center gap-3">
+                                  <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center font-black text-sm">{m.full_name?.charAt(0) || '?'}</div>
+                                  <div>
+                                      <div className="font-black text-slate-800 text-sm flex items-center gap-2">{m.full_name}</div>
+                                      <div className="text-[10px] text-slate-400 font-mono mt-0.5">系統 ID: {m.id?.substring(0,8)}...</div>
+                                  </div>
+                              </div>
+                              <div className="flex flex-col sm:items-end gap-1.5">
+                                  <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><Mail size={12} className="text-slate-400"/> {m.email || '未建檔信箱'}</span>
+                                  <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><Phone size={12} className="text-slate-400"/> {m.phone || '未建檔電話'}</span>
+                              </div>
+                          </div>
+                      )) : (
+                          <div className="text-center py-12 flex flex-col items-center justify-center gap-3">
+                              <div className="text-sm font-bold text-slate-500">目前尚無 VIP 會員資料</div>
+                          </div>
+                      )}
+                  </div>
+
+                  <div className="p-4 bg-slate-50 border-t border-slate-100 shrink-0">
+                      <button onClick={() => setShowVipModal(false)} className="w-full py-3.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-black rounded-xl transition-colors active:scale-95">關閉名單</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* 🌟 追蹤名單：當屆訓練結業名單 Modal */}
+      {showTrainedModal && (
+          <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[200] p-4 animate-fade-in backdrop-blur-sm" onClick={() => setShowTrainedModal(false)}>
+              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-2xl flex flex-col max-h-[85vh] overflow-hidden animate-bounce-in" onClick={e => e.stopPropagation()}>
+                  <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
+                      <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
+                          <GraduationCap className="text-purple-500"/> 當屆訓練結業名單
+                          <span className="bg-purple-100 text-purple-700 text-[10px] font-black px-2 py-0.5 rounded-full ml-2">共 {trainedList.length} 人</span>
+                      </h3>
+                      <button onClick={() => setShowTrainedModal(false)} className="p-2 text-slate-400 hover:bg-slate-200 rounded-full transition-colors active:scale-95"><X size={20}/></button>
+                  </div>
+
+                  <div className="p-6 overflow-y-auto custom-scrollbar flex-1 bg-white space-y-3">
+                      {trainedList.length > 0 ? trainedList.map(m => (
+                          <div key={m.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl border border-slate-100 hover:bg-purple-50/30 hover:border-purple-200 transition-colors gap-3">
+                              <div className="flex items-center gap-3">
+                                  <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center font-black text-sm">{m.full_name?.charAt(0) || '?'}</div>
+                                  <div>
+                                      <div className="font-black text-slate-800 text-sm flex items-center gap-2">{m.full_name}</div>
+                                      <div className="text-[10px] text-slate-400 font-mono mt-0.5">系統 ID: {m.id?.substring(0,8)}...</div>
+                                  </div>
+                              </div>
+                              <div className="flex flex-col sm:items-end gap-1.5">
+                                  <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><Mail size={12} className="text-slate-400"/> {m.email || '未建檔信箱'}</span>
+                                  <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><Phone size={12} className="text-slate-400"/> {m.phone || '未建檔電話'}</span>
+                              </div>
+                          </div>
+                      )) : (
+                          <div className="text-center py-12 flex flex-col items-center justify-center gap-3">
+                              <div className="text-sm font-bold text-slate-500">目前尚無訓練結業資料</div>
+                          </div>
+                      )}
+                  </div>
+
+                  <div className="p-4 bg-slate-50 border-t border-slate-100 shrink-0">
+                      <button onClick={() => setShowTrainedModal(false)} className="w-full py-3.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-black rounded-xl transition-colors active:scale-95">關閉名單</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* 🌟 系統資料庫管理 / 匯入中心 + 獨立插入的控制中心與媒合區塊 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8 mt-6 md:mt-8">
           
           <div className="bg-white rounded-[2rem] shadow-sm border border-slate-200 p-6 relative overflow-hidden group">
@@ -827,9 +1152,6 @@ export default function Dashboard() {
               </button>
           </div>
 
-          {/* ========================================== */}
-          {/* ⚡ 新增功能區塊：單一帳號媒合管理 (智能搜尋) */}
-          {/* ========================================== */}
           <div className="bg-gradient-to-b from-slate-900 to-slate-800 rounded-[2rem] shadow-xl border border-slate-700 p-6 relative overflow-hidden flex-1 flex flex-col group">
               <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-bl-full blur-2xl"></div>
               
@@ -862,7 +1184,7 @@ export default function Dashboard() {
                           <div className="flex justify-between items-start mb-3">
                               <div>
                                   <div className="font-black text-white text-lg">{searchAccountResult.full_name}</div>
-                                  <div className="text-[10px] text-slate-400 font-mono mt-0.5">{searchAccountResult.id.slice(0, 13)}...</div>
+                                  <div className="text-[10px] text-slate-400 font-mono mt-0.5">{searchAccountResult.id?.slice(0, 13)}...</div>
                               </div>
                               <span className={`text-[10px] px-2 py-1 rounded font-black ${searchAccountResult.is_current_member === 'Y' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-700 text-slate-400'}`}>
                                   {searchAccountResult.is_current_member === 'Y' ? '當屆會員' : '非當屆'}
@@ -897,9 +1219,108 @@ export default function Dashboard() {
                   )}
               </div>
           </div>
-          {/* ========================================== */}
 
+          <div className="bg-white rounded-[2rem] shadow-sm border border-slate-200 p-6 md:p-8 lg:col-span-2 relative overflow-hidden group">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-50 rounded-bl-full blur-2xl"></div>
+
+              <div className="flex justify-between items-center mb-6 relative z-10">
+                  <h3 className="font-black text-slate-800 flex items-center gap-2"><Server size={20} className="text-indigo-500"/> 系統版本與發布控制中心</h3>
+                  <span className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-1 rounded-full font-black border border-indigo-100 uppercase tracking-wider">Release Management</span>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 relative z-10">
+                  <div className="flex flex-col gap-4">
+                      <div className={`p-5 rounded-2xl border ${updateCount >= 5 ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'} transition-colors`}>
+                          <div className="flex justify-between items-start mb-2">
+                              <div className="text-sm font-black text-slate-700 flex items-center gap-2">
+                                  <List size={16} className={updateCount >= 5 ? 'text-rose-500' : 'text-slate-500'}/>
+                                  待發布的系統變更
+                              </div>
+                              <div className={`text-2xl font-black ${updateCount >= 5 ? 'text-rose-600' : 'text-slate-800'}`}>
+                                  {updateCount} <span className="text-sm font-medium text-slate-500">項</span>
+                              </div>
+                          </div>
+                          <p className={`text-xs font-bold ${updateCount >= 5 ? 'text-rose-500' : 'text-slate-500'}`}>
+                              {updateCount >= 5 ? '已達發布建議門檻，建議立即推送全域更新以確保使用者資料同步。' : '系統將自動記錄後台核心異動，達到 5 項時將提醒您發布更新。'}
+                          </p>
+                      </div>
+
+                      <button
+                          onClick={handleBroadcastRelease}
+                          disabled={updateCount === 0}
+                          className={`w-full py-4 rounded-xl font-black text-sm flex justify-center items-center gap-2 transition-all active:scale-95 shadow-lg
+                              ${updateCount >= 5 ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-rose-600/30 animate-pulse' :
+                                updateCount > 0 ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-600/30' :
+                                'bg-slate-100 text-slate-400 shadow-none cursor-not-allowed'}`}
+                      >
+                          <Rocket size={18}/>
+                          發布全域更新 (強制全體會員重載)
+                      </button>
+                  </div>
+
+                  <div className="flex flex-col gap-4">
+                      <div className="flex items-center justify-between bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                          <div>
+                              <div className="text-sm font-black text-slate-800 flex items-center gap-2">
+                                  <ShieldAlert size={16} className={errorBoundaryEnabled ? 'text-green-500' : 'text-slate-400'}/>
+                                  系統異常防護網 (Error Boundary)
+                              </div>
+                              <div className="text-[10px] font-bold text-slate-500 mt-1">攔截前端致命崩潰並引導重新載入</div>
+                          </div>
+                          <button
+                              onClick={handleToggleErrorBoundary}
+                              className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${errorBoundaryEnabled ? 'bg-green-500' : 'bg-slate-300'}`}
+                          >
+                              <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${errorBoundaryEnabled ? 'translate-x-6' : 'translate-x-1'}`}/>
+                          </button>
+                      </div>
+
+                      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex-1 overflow-hidden flex flex-col min-h-[220px]">
+                          <div className="text-xs font-black text-slate-700 mb-3 flex items-center gap-2"><Radio size={14} className="text-slate-400"/> 智能備註日誌 (待發布)</div>
+                          <div className="overflow-y-auto custom-scrollbar flex-1 space-y-3 pr-2">
+                              {Object.keys(groupedReleaseLogs).length > 0 ? (
+                                  Object.entries(groupedReleaseLogs).map(([month, logs]) => {
+                                      const isExpanded = expandedReleaseMonths[month];
+                                      const readCount = readReleaseCounts[month] || 0;
+                                      const hasUnread = logs.length > readCount;
+
+                                      return (
+                                          <div key={month} className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
+                                              <button
+                                                  onClick={() => toggleReleaseMonth(month)}
+                                                  className="w-full flex justify-between items-center p-2.5 bg-slate-50 hover:bg-slate-100 transition-colors"
+                                              >
+                                                  <span className="text-xs font-black text-slate-700">{month}</span>
+                                                  <div className="flex items-center gap-2">
+                                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full transition-colors ${hasUnread ? 'bg-rose-500 text-white animate-pulse shadow-md shadow-rose-500/30' : 'bg-slate-200 text-slate-500'}`}>
+                                                          {logs.length} 筆
+                                                      </span>
+                                                      {isExpanded ? <ChevronUp size={14} className="text-slate-400"/> : <ChevronDown size={14} className="text-slate-400"/>}
+                                                  </div>
+                                              </button>
+                                              {isExpanded && (
+                                                  <div className="p-2 space-y-2 border-t border-slate-100 bg-white">
+                                                      {logs.map((log, idx) => (
+                                                          <div key={idx} className={`p-2 rounded-lg border text-xs flex justify-between items-center gap-2 ${idx < (logs.length - readCount) ? 'bg-rose-50 border-rose-100' : 'bg-slate-50 border-slate-100'}`}>
+                                                              <div className={`font-bold truncate flex-1 ${idx < (logs.length - readCount) ? 'text-rose-700' : 'text-slate-800'}`}>{log.action}</div>
+                                                              <div className="text-[9px] text-slate-400 font-mono shrink-0">{log.time}</div>
+                                                          </div>
+                                                      ))}
+                                                  </div>
+                                              )}
+                                          </div>
+                                      )
+                                  })
+                              ) : (
+                                  <div className="text-center py-6 text-slate-400 text-xs font-bold">目前尚無未發布之異動</div>
+                              )}
+                          </div>
+                      </div>
+                  </div>
+              </div>
+          </div>
       </div>
+
     </div>
   )
 }
