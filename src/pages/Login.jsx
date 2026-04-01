@@ -12,9 +12,6 @@ export default function Login() {
   const [loginMessage, setLoginMessage] = useState({ type: '', text: '' }) 
   const navigate = useNavigate()
 
-  // 🌟 智能輸入引擎專用狀態 (Super Admin Datalist)
-  const [smartUsers, setSmartUsers] = useState([])
-
   // 🌟 首次帳號媒合 Modal 專用狀態 (嚴格雙資料認證：信箱 + 身分證 + 電話)
   const [showEmailVerifyModal, setShowEmailVerifyModal] = useState(false)
   const [verifyEmail, setVerifyEmail] = useState('')
@@ -49,9 +46,6 @@ export default function Login() {
     };
     checkInAppBrowser();
 
-    // 🌟 初始化：抓取資料庫名單，建立超級管理員的智能輸入下拉清單
-    fetchSmartUsersForAutocomplete();
-
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (event === 'SIGNED_IN' && session?.user) {
             checkUserIdentity(session.user);
@@ -69,31 +63,6 @@ export default function Login() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  // 🌟 智能輸入引擎：從資料庫抓取名單供快速測試與登入
-  const fetchSmartUsersForAutocomplete = async () => {
-      try {
-          const { data } = await supabase
-              .from('profiles')
-              .select('full_name, national_id, email, is_current_member')
-              .limit(1000);
-          if (data) setSmartUsers(data);
-      } catch (e) {
-          console.log("智能輸入名單載入略過 (可能受限於未登入權限)");
-      }
-  }
-
-  // 🌟 智能連動填入：選信箱自動帶出密碼(身分證)
-  const handleEmailSmartChange = (e) => {
-      const selectedEmail = e.target.value;
-      setLoginEmail(selectedEmail);
-
-      // 檢查是否選中了智能清單中的某個人
-      const matchedUser = smartUsers.find(u => u.email?.toLowerCase() === selectedEmail.toLowerCase());
-      if (matchedUser && matchedUser.national_id) {
-          setLoginPassword(matchedUser.national_id);
-      }
-  }
 
   // 🌟 核心閘門驗證引擎 (已拆除死胡同，全面放行至大廳)
   const checkUserIdentity = async (user) => {
@@ -412,7 +381,7 @@ export default function Login() {
             </div>
           </div>
 
-          {/* 🌟 日常登入表單 (加入智能輸入引擎與自動帶出屬性) */}
+          {/* 🌟 日常登入表單 (已徹底拆除資料庫自動完成，回歸原生裝置記憶) */}
           <form className="space-y-5 relative z-10" onSubmit={handleEmailLogin}>
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1" htmlFor="loginEmail">
@@ -425,25 +394,14 @@ export default function Login() {
                 <input
                   type="email"
                   id="loginEmail"
-                  name="email"             // 🌟 恢復瀏覽器原生記憶功能
-                  autoComplete="email"      // 🌟 恢復瀏覽器原生記憶功能
-                  list="smart-users-list"   // 🌟 綁定終極智能輸入清單
+                  name="email"             
+                  autoComplete="email"      
                   required
                   className="appearance-none block w-full pl-10 pr-3 py-3 border border-slate-300 rounded-xl shadow-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm font-medium transition-colors"
-                  placeholder="請輸入或點選下拉選單"
+                  placeholder="請輸入系統建檔信箱"
                   value={loginEmail}
-                  onChange={handleEmailSmartChange} // 🌟 啟動自動填入密碼引擎
+                  onChange={(e) => setLoginEmail(e.target.value)} 
                 />
-                
-                {/* 🌟 隱藏的智能下拉選單引擎 */}
-                <datalist id="smart-users-list">
-                    {smartUsers.map((u, idx) => (
-                        <option key={idx} value={u.email}>
-                            {u.full_name} | {u.national_id} {u.is_current_member !== 'Y' ? '(非當屆)' : ''}
-                        </option>
-                    ))}
-                </datalist>
-
               </div>
             </div>
 
@@ -461,8 +419,8 @@ export default function Login() {
                 <input
                   type={showLoginId ? "text" : "password"}
                   id="loginPassword"
-                  name="password"                   // 🌟 恢復瀏覽器原生記憶功能
-                  autoComplete="current-password"   // 🌟 恢復瀏覽器原生記憶功能
+                  name="password"                   
+                  autoComplete="current-password"   
                   required
                   className="appearance-none block w-full pl-10 pr-10 py-3 border border-slate-300 rounded-xl shadow-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm font-medium transition-colors uppercase"
                   placeholder="例如：A123456789"
