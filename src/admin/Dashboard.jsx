@@ -80,6 +80,9 @@ export default function Dashboard() {
   const [isSearchingAccount, setIsSearchingAccount] = useState(false);
   const [isUnlinkingAccount, setIsUnlinkingAccount] = useState(false);
 
+  // ==========================================
+  // 🌟 系統版本與發布控制中心 狀態
+  // ==========================================
   const [updateCount, setUpdateCount] = useState(0);
   const [updateLogs, setUpdateLogs] = useState([]);
   const [errorBoundaryEnabled, setErrorBoundaryEnabled] = useState(true);
@@ -114,11 +117,9 @@ export default function Dashboard() {
                       event: 'force_reload',
                       payload: { timestamp: Date.now() }
                   });
-                  // 🌟 核心修正：發布後只歸零發布次數，保留所有的操作日誌備查
                   localStorage.setItem('system_update_count', '0');
-                  
                   window.dispatchEvent(new Event('system_update_changed'));
-                  alert('✅ 全域更新指令已成功發布！');
+                  alert('✅ 全域更新指令已成功發布！會員手機將自動同步最新資料。');
                   supabase.removeChannel(channel);
               }
           });
@@ -211,13 +212,12 @@ export default function Dashboard() {
           const newRandomUuid = crypto.randomUUID(); 
           const originalEmail = 'marietai@ms1.url.com.tw'; 
 
-          const { error } = await supabase
-              .from('profiles')
-              .update({ 
-                  id: newRandomUuid, 
-                  email: originalEmail 
-              })
-              .eq('id', unlinkedUser.id);
+          // 🌟 修改點：改用呼叫後端具有系統管理員權限的 RPC 函式，完美繞過前端 RLS 阻擋
+          const { error } = await supabase.rpc('force_unlink_profile', {
+              target_id: unlinkedUser.id,
+              new_uuid: newRandomUuid,
+              default_email: originalEmail
+          });
 
           if (error) throw error;
 
@@ -259,7 +259,7 @@ export default function Dashboard() {
 
       } catch (error) {
           console.error("解除媒合失敗:", error)
-          alert('❌ 解除媒合失敗：' + error.message);
+          alert('❌ 解除媒合失敗：\n' + error.message);
       } finally {
           setIsUnlinkingAccount(false);
       }
@@ -457,7 +457,7 @@ export default function Dashboard() {
       }
   }
 
-  if (loading) return <div className="h-[60vh] flex items-center justify-center text-slate-400"><Loader2 className="animate-spin mr-2"/> 正在載入系統數據...</div>
+  if (loading) return <div className="h-[60vh] flex items-center justify-center text-slate-400"><Loader2 className="animate-spin mr-2"/> 正在載入系統資料...</div>
 
   if (currentView === 'NOTIFICATIONS') {
       return (
@@ -1272,7 +1272,7 @@ export default function Dashboard() {
                       </div>
 
                       <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex-1 overflow-hidden flex flex-col min-h-[220px]">
-                          <div className="text-xs font-black text-slate-700 mb-3 flex items-center gap-2"><Radio size={14} className="text-slate-400"/> 備註日誌</div>
+                          <div className="text-xs font-black text-slate-700 mb-3 flex items-center gap-2"><Radio size={14} className="text-slate-400"/> 智能備註日誌 (待發布)</div>
                           <div className="overflow-y-auto custom-scrollbar flex-1 space-y-3 pr-2">
                               {Object.keys(groupedReleaseLogs).length > 0 ? (
                                   Object.entries(groupedReleaseLogs).map(([month, logs]) => {
@@ -1308,7 +1308,7 @@ export default function Dashboard() {
                                       )
                                   })
                               ) : (
-                                  <div className="text-center py-6 text-slate-400 text-xs font-bold">目前尚無日誌紀錄</div>
+                                  <div className="text-center py-6 text-slate-400 text-xs font-bold">目前尚無未發布之異動</div>
                               )}
                           </div>
                       </div>
