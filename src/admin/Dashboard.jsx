@@ -203,25 +203,31 @@ export default function Dashboard() {
   const handleUnlinkAccount = async () => {
       if (!searchAccountResult) return;
       
-      const confirmMsg = `🛡️ 系統警報 🛡️\n\n確定要強制將【${searchAccountResult.full_name}】解除帳號媒合狀態嗎？\n\n執行後，系統將賦予全新 ID 並將信箱重置為預設 (marietai@ms1.url.com.tw)。該人員下次登入系統時，必須重新進行身份驗證。`;
+      const confirmMsg = `【系統確認】\n\n確定要將【${searchAccountResult.full_name}】解除帳號媒合狀態嗎？\n\n執行後，系統將還原其信箱並重置關聯。該人員下次登入系統時，必須重新進行身份驗證。`;
       if (!window.confirm(confirmMsg)) return;
 
       setIsUnlinkingAccount(true);
       try {
           const unlinkedUser = { ...searchAccountResult };
+          
+          // 🚨 終極智能歸復引擎：
+          // 1. 同時更新 ID，徹底斷開與 auth.users 的連結，確保 RPC 將其視為「未登入」。
+          // 2. 若有 original_email 則完美復原，若無則使用帶時間戳的唯一假信箱(避開 Duplicate Key 錯誤)。
           const newRandomUuid = crypto.randomUUID(); 
-          const originalEmail = 'marietai@ms1.url.com.tw'; 
+          const targetEmail = unlinkedUser.original_email || `marietai+unlinked_${Date.now()}@ms1.url.com.tw`; 
 
-          // 🌟 修改點：改用呼叫後端具有系統管理員權限的 RPC 函式，完美繞過前端 RLS 阻擋
-          const { error } = await supabase.rpc('force_unlink_profile', {
-              target_id: unlinkedUser.id,
-              new_uuid: newRandomUuid,
-              default_email: originalEmail
-          });
+          const { error } = await supabase
+              .from('profiles')
+              .update({ 
+                  id: newRandomUuid,
+                  email: targetEmail 
+              })
+              .eq('id', unlinkedUser.id);
 
           if (error) throw error;
 
-          alert(`🎉【${unlinkedUser.full_name}】已強制解除帳號媒合！\n信箱已恢復為：${originalEmail}`);
+          const displayEmail = unlinkedUser.original_email ? unlinkedUser.original_email : '原始登入mail';
+          alert(`🎉【${unlinkedUser.full_name}】已成功解除帳號媒合！\n狀態已還原為未登入，信箱：${displayEmail}`);
           
           if (window.logSystemChange) {
               window.logSystemChange(`解除帳號媒合：${unlinkedUser.full_name}`);
@@ -229,37 +235,15 @@ export default function Dashboard() {
           
           setSearchAccountInput('');
           setSearchAccountResult(null);
-          
-          const wasLogged = loggedList.some(m => m.id === unlinkedUser.id);
-          const wasUnlogged = unloggedList.some(m => m.id === unlinkedUser.id);
 
-          setStats(prev => ({
-              ...prev,
-              loggedMembers: wasLogged ? Math.max(0, prev.loggedMembers - 1) : prev.loggedMembers,
-              unloggedMembersCount: wasUnlogged ? Math.max(0, prev.unloggedMembersCount - 1) : prev.unloggedMembersCount,
-              unlinkedCount: prev.unlinkedCount + 1
-          }));
-
-          setLoggedList(prev => prev.filter(m => m.id !== unlinkedUser.id));
-          setUnloggedList(prev => prev.filter(m => m.id !== unlinkedUser.id));
-          
-          setUnlinkedList(prev => [
-              {
-                  id: newRandomUuid,
-                  full_name: unlinkedUser.full_name,
-                  email: originalEmail,
-                  phone: unlinkedUser.phone
-              },
-              ...prev
-          ]);
-
+          // 解除後給予系統1.5秒緩衝，隨即觸發全面數據重載以確保畫面一致
           setTimeout(() => {
               fetchDashboardData();
-          }, 3000);
+          }, 1500);
 
       } catch (error) {
           console.error("解除媒合失敗:", error)
-          alert('❌ 解除媒合失敗：\n' + error.message);
+          alert('解除媒合失敗：\n' + error.message);
       } finally {
           setIsUnlinkingAccount(false);
       }
@@ -299,10 +283,15 @@ export default function Dashboard() {
 
           if (allCurrentMembers) {
               allCurrentMembers.forEach(m => {
-                  if (m.email && m.email.toLowerCase() === 'marietai@ms1.url.com.tw') {
-                      arrayUnlinked.push(m);
+                  // 🚨 精準過濾：抓出我們為了避開 Duplicate Key 而產生的動態假信箱
+                  const isUnlinkedFallback = m.email && m.email.toLowerCase().includes('unlinked_') && m.email.toLowerCase().includes('ms1.url.com.tw');
+                  
+                  if (isUnlinkedFallback) {
+                      // 🌟 UI 視覺遮罩：在畫面上強制顯示乾淨的信箱，隱藏底層亂碼
+                      arrayUnlinked.push({ ...m, email: '原始登入mail' });
                   } 
                   else if (rpcUnloggedIds.has(m.id)) {
+                      // 擁有 original_email 並成功被斷開 ID 的人，會自然落入此「未登入」區塊，達成「回復原狀」
                       arrayUnlogged.push(m);
                   } 
                   else {
@@ -1281,7 +1270,7 @@ export default function Dashboard() {
                                       const hasUnread = logs.length > readCount;
 
                                       return (
-                                          <div key={month} className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
+                                          <div key={month} className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm group/month">
                                               <button
                                                   onClick={() => toggleReleaseMonth(month)}
                                                   className="w-full flex justify-between items-center p-2.5 bg-slate-50 hover:bg-slate-100 transition-colors"

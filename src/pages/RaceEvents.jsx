@@ -20,15 +20,16 @@ export default function RaceEvents() {
   const [userRole, setUserRole] = useState(() => localStorage.getItem('iron_medic_user_role') || 'USER') 
   const [currentUserProfile, setCurrentUserProfile] = useState(null)
 
-  // 🌟 鐵壁防護狀態
   const [showAbsoluteBlocker, setShowAbsoluteBlocker] = useState(false)
+  const [blockerMessage, setBlockerMessage] = useState("")
 
   const [onlineCount, setOnlineCount] = useState(1) 
   const [newcomersOnline, setNewcomersOnline] = useState([])
 
   const [notifications, setNotifications] = useState([])
   const [showNotifPanel, setShowNotifPanel] = useState(false)
-  const [notifTab, setNotifTab] = useState('system')
+  const [notifTab, setNotifTab] = useState('system') 
+  const [unreadCount, setUnreadCount] = useState(0)
 
   const [showStats, setShowStats] = useState(false)
   
@@ -36,6 +37,10 @@ export default function RaceEvents() {
   const [serverLatency, setServerLatency] = useState(0)
 
   const [showAdminMenu, setShowAdminMenu] = useState(false) 
+
+  const [searchQuery, setSearchQuery] = useState('')
+
+  const [showMenu, setShowMenu] = useState(false) 
 
   const navigate = useNavigate()
   const CURRENT_YEAR = new Date().getFullYear()
@@ -69,6 +74,22 @@ export default function RaceEvents() {
       if (user.training_status === 'Y' || user.training_status === true || user.training_status === 'true' || user.training_status === 1) return 4;
       if (user.is_current_member === 'Y') return 5;
       return 6;
+  }
+
+  // 🌟 穩定時間格式化引擎，避免時區與瀏覽器語系亂跳
+  const formatTime = (timeStr) => {
+      if (!timeStr) return '未設定';
+      try {
+          const d = new Date(timeStr);
+          if (isNaN(d.getTime())) return timeStr;
+          const mm = String(d.getMonth() + 1).padStart(2, '0');
+          const dd = String(d.getDate()).padStart(2, '0');
+          const hh = String(d.getHours()).padStart(2, '0');
+          const min = String(d.getMinutes()).padStart(2, '0');
+          return `${mm}/${dd} ${hh}:${min}`;
+      } catch(e) {
+          return timeStr;
+      }
   }
 
   useEffect(() => {
@@ -210,25 +231,68 @@ export default function RaceEvents() {
       }
   }
 
+  const markAllAsRead = async () => {
+      setNotifications(prev => prev.map(n => ({ ...n, is_read: true, isRead: true })));
+      setUnreadCount(0);
+      try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) await supabase.from('user_notifications').update({ is_read: true }).eq('user_id', user.id).eq('is_read', false);
+      } catch(e){}
+  }
+
+  const deleteNotification = async (id) => {
+      setNotifications(prev => prev.filter(n => n.id !== id));
+      setUnreadCount(prev => Math.max(0, prev - 1));
+      try { 
+          if (String(id).startsWith('admin_')) {
+              await supabase.from('admin_notifications').delete().eq('id', id.replace('admin_', ''));
+          } else {
+              await supabase.from('user_notifications').delete().eq('id', id); 
+          }
+      } catch(e){}
+  }
+
+  const getNotifIcon = (category) => {
+      switch(category) {
+          case 'race': return <Flag size={16} className="text-blue-500"/>;
+          case 'cert': return <AlertTriangle size={16} className="text-red-500"/>;
+          case 'shop': return <Medal size={16} className="text-amber-500"/>;
+          default: return <Bell size={16} className="text-slate-500"/>;
+      }
+  }
+
   const fetchUserDataAndRaces = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser()
       
       if (user && user.email) {
           try {
-              const { data: profile } = await supabase.from('profiles').select('id, role, full_name, is_new_member, is_current_member, license_expiry, newbie_passes, total_races, is_team_leader, is_vip').eq('email', user.email).maybeSingle()
+              const { data: profile } = await supabase.from('profiles').select('id, role, full_name, is_new_member, is_current_member, license_expiry, newbie_passes, total_races, is_team_leader, is_vip, is_blacklisted, training_status').eq('email', user.email).maybeSingle()
               if (profile) {
-                  // 🌟 鐵壁判定：如果不是當屆會員，立刻啟動全螢幕阻擋！
-                  if (profile.is_current_member !== 'Y') {
+                  if (profile.is_blacklisted === 'Y') {
+                      setBlockerMessage("您的帳號目前已被限制存取，無法瀏覽或報名任何賽事。\n如有疑問請聯繫系統管理員。");
                       setShowAbsoluteBlocker(true);
                       setLoading(false);
-                      return; // 終止後續載入
+                      return;
+                  } else if (profile.is_current_member !== 'Y') {
+                      setBlockerMessage("您目前並非當屆會員。\n請完成年度會籍更新後，方可解鎖賽事大廳。");
+                      setShowAbsoluteBlocker(true);
+                      setLoading(false);
+                      return;
+                  } else if (profile.training_status !== 'Y') {
+                      setBlockerMessage("您尚未完成當屆安全訓練。\n請完成訓練並經審核通過後，方可解鎖賽事報名權限。");
+                      setShowAbsoluteBlocker(true);
+                      setLoading(false);
+                      return;
                   }
 
                   const role = profile.role ? profile.role.toUpperCase().trim() : 'USER';
                   setUserRole(role);
                   setCurrentUserProfile(profile); 
                   localStorage.setItem('iron_medic_user_role', role); 
+
+                  const { data: notifs } = await supabase.from('user_notifications').select('id').eq('user_id', user.id).eq('is_read', false)
+                  if (notifs) setUnreadCount(notifs.length)
 
                   if (ADMIN_ROLES.some(r => role.includes(r))) {
                       const { data: membersData } = await supabase.from('profiles').select('*').eq('is_current_member', 'Y');
@@ -245,7 +309,7 @@ export default function RaceEvents() {
                   }
                   await fetchNotifs();
               } else {
-                  // 連 Profile 都沒有 (極端情況)
+                  setBlockerMessage("查無會員資料，請聯繫管理員。");
                   setShowAbsoluteBlocker(true);
                   setLoading(false);
                   return;
@@ -267,32 +331,10 @@ export default function RaceEvents() {
     }
   }
 
-  const markAllAsRead = async () => {
-      setNotifications(prev => prev.map(n => ({ ...n, is_read: true, isRead: true })));
-      try {
-          const { data: { user } } = await supabase.auth.getUser();
-          if (user) await supabase.from('user_notifications').update({ is_read: true }).eq('user_id', user.id).eq('is_read', false);
-      } catch(e){}
-  }
-
-  const deleteNotification = async (id) => {
-      setNotifications(prev => prev.filter(n => n.id !== id));
-      try { 
-          if (String(id).startsWith('admin_')) {
-              await supabase.from('admin_notifications').delete().eq('id', id.replace('admin_', ''));
-          } else {
-              await supabase.from('user_notifications').delete().eq('id', id); 
-          }
-      } catch(e){}
-  }
-
-  const getNotifIcon = (category) => {
-      switch(category) {
-          case 'race': return <Flag size={16} className="text-blue-500"/>;
-          case 'cert': return <AlertTriangle size={16} className="text-red-500"/>;
-          case 'shop': return <Medal size={16} className="text-amber-500"/>;
-          default: return <Bell size={16} className="text-slate-500"/>;
-      }
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    localStorage.removeItem('iron_medic_user_role')
+    navigate('/login')
   }
 
   const handleTimeFilterChange = (newTimeFilter) => {
@@ -312,14 +354,100 @@ export default function RaceEvents() {
       }
   }
 
+  const isAdmin = ADMIN_ROLES.some(r => userRole.toUpperCase().includes(r));
   const isSuperAdmin = ADMIN_ROLES.some(r => userRole.toUpperCase().includes(r));
+
+  // useMemo 的變數要在之前就宣告
+  const isPrivileged = currentUserProfile?.role === 'SUPER_ADMIN' || 
+                       currentUserProfile?.role === 'TOURNAMENT_DIRECTOR' || 
+                       currentUserProfile?.is_team_leader === 'Y' || 
+                       currentUserProfile?.is_vip === 'Y';
+  
+  const isAdminOrDirector = userRole === 'SUPER_ADMIN' || userRole === 'TOURNAMENT_DIRECTOR';
+  const isGeneralUser = userRole === 'USER';
+
   const unreadCountReal = notifications.filter(n => !(n.isRead || n.is_read)).length;
+
+  const filteredRaces = useMemo(() => {
+    let result = races;
+
+    if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase();
+        result = result.filter(r => 
+            (r.name && r.name.toLowerCase().includes(query)) ||
+            (r.location && r.location.toLowerCase().includes(query)) ||
+            (r.type && r.type.toLowerCase().includes(query))
+        );
+    }
+
+    const currentYear = new Date().getFullYear();
+
+    if (timeFilter === 'CURRENT_YEAR') {
+        result = result.filter(r => {
+            if (!r.date) return false;
+            return new Date(r.date).getFullYear() === currentYear;
+        });
+    } else if (timeFilter === 'PAST') {
+        result = result.filter(r => {
+            if (!r.date) return false;
+            return new Date(r.date).getFullYear() < currentYear;
+        });
+    } else if (timeFilter === 'FUTURE') {
+        result = result.filter(r => {
+            if (!r.date) return false;
+            return new Date(r.date).getFullYear() > currentYear;
+        });
+    }
+
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const now = new Date(); 
+
+    if (statusFilter !== 'ALL') {
+        result = result.filter(r => {
+            const raceDate = new Date(r.date);
+            const isPastRace = raceDate < today;
+
+            const earlyOpenTime = r.leader_early_open_time ? new Date(r.leader_early_open_time) : null;
+            const standardOpenTime = r.open_time ? new Date(r.open_time) : null;
+            
+            // 🌟 核心修復：早鳥期間判定（已到教官時間，且還沒到一般人的時間 或 無一般時間）
+            const isEarlyOpenActive = earlyOpenTime && now >= earlyOpenTime && (!standardOpenTime || now < standardOpenTime);
+            // 🌟 核心修復：徹底解開 status 的枷鎖，只要符合時間條件與身分特權，就是早鳥！
+            const earlyAccess = isEarlyOpenActive && isPrivileged && !['CANCELLED', 'COMPLETED', 'CLOSED', 'SUBMITTED'].includes(r.status);
+
+            if (statusFilter === 'LEADER_EARLY') {
+                return earlyAccess && !isPastRace;
+            }
+
+            if (statusFilter === 'RECRUITING') {
+                // 只要是招募中，或是專屬您的早鳥階段，都顯示給您看
+                return (r.status === 'OPEN' || earlyAccess) && !isPastRace;
+            }
+
+            if (statusFilter === 'NEGOTIATING') {
+                return r.status === 'NEGOTIATING' && !isPastRace;
+            }
+
+            if (statusFilter === 'CLOSED') {
+                return ['SUBMITTED', 'COMPLETED', 'CANCELLED', 'CLOSED'].includes(r.status) || isPastRace;
+            }
+
+            if (statusFilter === 'ALL_ACTIVE') {
+                return !['CANCELLED', 'COMPLETED', 'CLOSED', 'SUBMITTED'].includes(r.status) && !isPastRace;
+            }
+
+            return r.status === statusFilter && !isPastRace;
+        });
+    }
+
+    return result.sort((a, b) => new Date(a.date) - new Date(b.date));
+  }, [races, statusFilter, timeFilter, searchQuery, isPrivileged])
 
   const showWarning = useMemo(() => {
       if (!currentUserProfile) return null;
       if (isSuperAdmin) return null; 
       
-      // 🌟 當屆「一般人員」降級警告
       if (currentUserProfile.role === 'USER') {
           return { type: 'warning', title: '帳號權限尚未開通', msg: '您目前身分為「一般人員」，請至數位 ID 完善醫護證照與審核，即可開通報名權限。' };
       }
@@ -357,6 +485,19 @@ export default function RaceEvents() {
     }
   }
 
+  const getStatusDisplay = (status) => {
+    switch (status) {
+      case 'OPEN': return <span className="flex items-center gap-1.5 text-green-700 bg-green-100 px-3 py-1.5 rounded-full font-black text-xs border border-green-200 shadow-sm"><Activity size={14}/> 報名中</span>
+      case 'FULL': return <span className="flex items-center gap-1.5 text-amber-700 bg-amber-100 px-3 py-1.5 rounded-full font-black text-xs border border-amber-200 shadow-sm"><UsersRound size={14}/> 名額已滿</span>
+      case 'SUBMITTED': return <span className="flex items-center gap-1.5 text-blue-700 bg-blue-100 px-3 py-1.5 rounded-full font-black text-xs border border-blue-200 shadow-sm"><Send size={14}/> 名單已送出</span>
+      case 'NEGOTIATING': return <span className="flex items-center gap-1.5 text-indigo-700 bg-indigo-100 px-3 py-1.5 rounded-full font-black text-xs border border-indigo-200 shadow-sm"><Handshake size={14}/> 單位洽談中</span>
+      case 'UPCOMING': return <span className="flex items-center gap-1.5 text-slate-700 bg-slate-100 px-3 py-1.5 rounded-full font-black text-xs border border-slate-200 shadow-sm"><Timer size={14}/> 即將開放</span>
+      case 'COMPLETED': return <span className="flex items-center gap-1.5 text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full font-black text-xs border border-slate-200 shadow-sm"><CheckCircle size={14}/> 賽事結束</span>
+      case 'CANCELLED': return <span className="flex items-center gap-1.5 text-red-700 bg-red-100 px-3 py-1.5 rounded-full font-black text-xs border border-red-200 shadow-sm"><X size={14}/> 賽事取消</span>
+      default: return <span className="text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full font-black text-xs">{status}</span>
+    }
+  }
+
   const extractParticipantsData = (race) => {
       let totalRegistered = 0;
       let newcomerCount = 0; 
@@ -390,59 +531,6 @@ export default function RaceEvents() {
 
   const getInitial = (name) => name ? name.replace(/[^a-zA-Z\u4e00-\u9fa5]/g, '').charAt(0) || '?' : '?'
 
-  const isPrivileged = currentUserProfile?.role === 'SUPER_ADMIN' || 
-                       currentUserProfile?.role === 'TOURNAMENT_DIRECTOR' || 
-                       currentUserProfile?.is_team_leader === 'Y' || 
-                       currentUserProfile?.is_vip === 'Y';
-  
-  const isAdminOrDirector = userRole === 'SUPER_ADMIN' || userRole === 'TOURNAMENT_DIRECTOR';
-  // 🌟 一般人員判定
-  const isGeneralUser = userRole === 'USER';
-
-  const filteredRaces = races.filter(race => {
-      if (!race.date) return false;
-      const today = new Date();
-      today.setHours(0,0,0,0);
-      const raceDate = new Date(race.date);
-      const raceYear = raceDate.getFullYear();
-      
-      let matchTime = false;
-      if (timeFilter === 'CURRENT_YEAR') matchTime = raceYear === CURRENT_YEAR;
-      else if (timeFilter === 'PAST') matchTime = raceYear < CURRENT_YEAR;
-      else if (timeFilter === 'FUTURE') matchTime = raceYear > CURRENT_YEAR;
-      else if (timeFilter === 'ALL') matchTime = true;
-
-      const isPastRace = raceDate < today || ['COMPLETED', 'CANCELLED', 'CLOSED'].includes(race.status);
-      
-      const now = new Date();
-      const earlyOpenTime = race.leader_early_open_time ? new Date(race.leader_early_open_time) : null;
-      const isEarlyOpenActive = earlyOpenTime && now >= earlyOpenTime;
-      const showEarlyAccess = isEarlyOpenActive && isPrivileged && (race.status === 'NEGOTIATING' || race.status === 'UPCOMING');
-
-      let matchStatus = false;
-
-      if (statusFilter === 'ALL') {
-          matchStatus = true;
-      } else if (statusFilter === 'LEADER_EARLY') {
-          matchStatus = showEarlyAccess;
-      } else if (showEarlyAccess) {
-          matchStatus = false;
-      } else {
-          let effectiveStatus = race.status;
-          if (isPastRace) effectiveStatus = 'CLOSED_GROUP'; 
-
-          if (statusFilter === 'RECRUITING') {
-              matchStatus = ['OPEN', 'UPCOMING', 'FULL'].includes(effectiveStatus);
-          } else if (statusFilter === 'NEGOTIATING') {
-              matchStatus = effectiveStatus === 'NEGOTIATING';
-          } else if (statusFilter === 'CLOSED') {
-              matchStatus = ['SUBMITTED', 'COMPLETED', 'CANCELLED', 'CLOSED', 'CLOSED_GROUP'].includes(effectiveStatus);
-          }
-      }
-
-      return matchTime && matchStatus;
-  });
-
   const renderRoleBadge = (roleTag) => {
       if (!roleTag) return null;
       if (roleTag === '帶隊教官') return <span className="flex items-center text-[10px] bg-indigo-100 text-indigo-700 border border-indigo-300 px-1.5 py-0.5 rounded font-black"><ShieldAlert size={10} className="mr-1"/> 帶隊教官</span>;
@@ -465,6 +553,7 @@ export default function RaceEvents() {
 
     const today = new Date();
     today.setHours(0,0,0,0);
+    const now = new Date();
 
     races.forEach(race => {
       if (!race.date) return;
@@ -476,12 +565,12 @@ export default function RaceEvents() {
 
       const isPastRace = raceDate < today || ['COMPLETED', 'CANCELLED', 'CLOSED'].includes(race.status);
       
-      const now = new Date();
       const earlyOpenTime = race.leader_early_open_time ? new Date(race.leader_early_open_time) : null;
-      const isEarlyOpenActive = earlyOpenTime && now >= earlyOpenTime;
-      const showEarlyAccess = isEarlyOpenActive && isPrivileged && (race.status === 'NEGOTIATING' || race.status === 'UPCOMING');
+      const standardOpenTime = race.open_time ? new Date(race.open_time) : null;
+      const isEarlyOpenActive = earlyOpenTime && now >= earlyOpenTime && (!standardOpenTime || now < standardOpenTime);
+      const showEarlyAccess = isEarlyOpenActive && isPrivileged && !['CANCELLED', 'COMPLETED', 'CLOSED', 'SUBMITTED'].includes(race.status);
 
-      if (showEarlyAccess) {
+      if (showEarlyAccess && !isPastRace) {
           leaderEarlyCount++;
       } else if (isPastRace || ['SUBMITTED', 'COMPLETED', 'CANCELLED', 'CLOSED'].includes(race.status)) {
           closedCount++;
@@ -495,18 +584,21 @@ export default function RaceEvents() {
     return { total, currentYearCount, pastCount, futureCount, recruitingCount, negotiatingCount, closedCount, leaderEarlyCount };
   }, [races, CURRENT_YEAR, isPrivileged]);
 
-  const raceTypeColors = {
-      '馬拉松': 'bg-blue-50 text-blue-700 border-blue-200',
-      '越野賽': 'bg-green-50 text-green-700 border-green-200',
-      '自行車': 'bg-amber-50 text-amber-700 border-amber-200',
-      '鐵人三項': 'bg-red-50 text-red-700 border-red-200',
-      '其他': 'bg-slate-50 text-slate-700 border-slate-200'
-  }
-
-  const getRegistrationPhase = (openTimeStr) => {
-      if (!openTimeStr) return { phase: 2, label: '全面開放' }; 
+  // 🌟 核心修復：精準判斷賽事目前的報名階段 (支援幹部早鳥顯示)
+  const getRegistrationPhase = (race) => {
       const now = new Date();
-      const openTime = new Date(openTimeStr);
+      const openTime = race.open_time ? new Date(race.open_time) : null;
+      const earlyTime = race.leader_early_open_time ? new Date(race.leader_early_open_time) : null;
+
+      if (!openTime) {
+          if (earlyTime && now >= earlyTime) return { phase: -0.5, label: '幹部早鳥' };
+          return { phase: 2, label: '全面開放' }; 
+      }
+
+      if (earlyTime && now >= earlyTime && now < openTime) {
+          return { phase: -0.5, label: '幹部早鳥' };
+      }
+
       if (now < openTime) return { phase: -1, label: '尚未開放' }; 
 
       const midnight1 = new Date(openTime);
@@ -744,7 +836,6 @@ export default function RaceEvents() {
   return (
     <div className="min-h-screen bg-slate-50 font-sans pb-24 flex flex-col relative overflow-x-hidden">
       
-      {/* 🌟 絕對鐵壁：非當屆人員完全鎖死大廳 */}
       {showAbsoluteBlocker && (
           <div className="fixed inset-0 bg-slate-900/95 flex items-center justify-center z-[999] p-4 backdrop-blur-md">
               <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md p-8 text-center flex flex-col items-center">
@@ -758,15 +849,19 @@ export default function RaceEvents() {
                   <h3 className="text-3xl font-black text-slate-800 mb-4 tracking-tight">權限不足</h3>
                   
                   <div className="bg-rose-50 text-rose-700 p-5 rounded-2xl text-base font-bold border border-rose-100 leading-relaxed mb-8 w-full shadow-inner">
-                      要使用本系統，請加入當年度會員<br/>並完成相關程序。
+                      {blockerMessage}
                   </div>
 
-                  <button 
-                      onClick={() => navigate('/my-id')}
-                      className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-xl shadow-xl shadow-slate-900/20 transition-all active:scale-95 flex justify-center items-center gap-2"
-                  >
-                      <User size={20}/> 請洽相關人員辦理相關程序/更新會籍
-                  </button>
+                  <div className="space-y-3 w-full">
+                      {currentUserProfile?.is_current_member !== 'Y' && currentUserProfile?.is_blacklisted !== 'Y' && (
+                          <button onClick={() => window.open('https://www.ironmedic.com.tw', '_blank')} className="w-full bg-slate-900 hover:bg-slate-800 text-white font-black py-4 rounded-xl transition-all active:scale-95 shadow-lg flex justify-center items-center gap-2">
+                              前往官網辦理續會 <ExternalLink size={18}/>
+                          </button>
+                      )}
+                      <button onClick={handleLogout} className="w-full bg-white border-2 border-slate-200 hover:bg-slate-50 text-slate-700 font-black py-3.5 rounded-xl transition-all active:scale-95">
+                          登出系統
+                      </button>
+                  </div>
               </div>
           </div>
       )}
@@ -829,7 +924,7 @@ export default function RaceEvents() {
               )}
 
               <button 
-                  onClick={() => setShowNotifPanel(true)} 
+                  onClick={() => { fetchNotifs(); setShowNotifPanel(true); }} 
                   className="relative flex items-center justify-center bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 w-9 h-9 md:w-11 md:h-11 rounded-full text-white transition-all shadow-lg shadow-black/20 active:scale-95 group shrink-0"
                   title="系統通知"
               >
@@ -841,7 +936,6 @@ export default function RaceEvents() {
                   )}
               </button>
 
-              {/* 🌟 核心任務：數位 ID 按鈕加上專屬問候，維持優雅排版 */}
               <div className="flex flex-col items-center gap-1.5 animate-fade-in">
                   <button 
                       onClick={() => navigate('/my-id')} 
@@ -989,13 +1083,13 @@ export default function RaceEvents() {
                       
                       const today = new Date();
                       today.setHours(0,0,0,0);
-                      const isPastRace = new Date(race.date) < today || ['COMPLETED', 'CANCELLED', 'CLOSED'].includes(race.status);
+                      const isPastRace = new Date(race.date) < today; 
 
                       const now = new Date();
                       const earlyOpenTime = race.leader_early_open_time ? new Date(race.leader_early_open_time) : null;
-                      const isEarlyOpenActive = earlyOpenTime && now >= earlyOpenTime;
-                      
-                      const showEarlyAccess = isEarlyOpenActive && isPrivileged && (race.status === 'NEGOTIATING' || race.status === 'UPCOMING');
+                      const standardOpenTime = race.open_time ? new Date(race.open_time) : null;
+                      const isEarlyOpenActive = earlyOpenTime && now >= earlyOpenTime && (!standardOpenTime || now < standardOpenTime);
+                      const showEarlyAccess = isEarlyOpenActive && isPrivileged && !['CANCELLED', 'COMPLETED', 'CLOSED', 'SUBMITTED'].includes(race.status);
 
                       const getButtonConfig = () => {
                           if (isPastRace || ['SUBMITTED', 'COMPLETED', 'CANCELLED', 'CLOSED'].includes(race.status)) return { text: '賽事已結束 / 檢視名單', class: 'bg-slate-200 text-slate-500 border border-slate-300' }
@@ -1010,7 +1104,7 @@ export default function RaceEvents() {
                       }
                       const btnConfig = getButtonConfig();
 
-                      const phaseInfo = getRegistrationPhase(race.open_time);
+                      const phaseInfo = getRegistrationPhase(race);
 
                       return (
                       <div key={race.id} 
@@ -1080,10 +1174,11 @@ export default function RaceEvents() {
                                   <div className="flex items-center text-slate-600 text-xs md:text-sm font-medium bg-slate-50 p-2 md:p-2.5 rounded-xl"><Calendar size={14} className="text-blue-500 mr-2.5 shrink-0"/><span>{race.date}</span></div>
                                   <div className="flex items-center text-slate-600 text-xs md:text-sm font-medium bg-slate-50 p-2 md:p-2.5 rounded-xl"><MapPin size={14} className="text-red-500 mr-2.5 shrink-0"/><span className="truncate">{race.location}</span></div>
                                   
+                                  {/* 🌟 核心修復：動態顯示「幹部開放」或「開放報名」時間 */}
                                   <div className="flex items-center text-[11px] font-bold text-slate-500 bg-slate-50 px-2 md:px-2.5 py-1.5 rounded-xl border border-slate-100 gap-1.5">
                                       <Timer size={14} className="text-amber-500 shrink-0"/> 
-                                      開放報名: {race.open_time ? new Date(race.open_time).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '未設定'}
-                                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-black shrink-0 ${phaseInfo.phase === -1 ? 'bg-slate-200 text-slate-500' : phaseInfo.phase === 0 ? 'bg-indigo-100 text-indigo-700' : phaseInfo.phase === 1 ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
+                                      {showEarlyAccess ? `幹部開放: ${formatTime(race.leader_early_open_time)}` : `開放報名: ${formatTime(race.open_time)}`}
+                                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-black shrink-0 ${phaseInfo.phase === -1 ? 'bg-slate-200 text-slate-500' : phaseInfo.phase === -0.5 ? 'bg-amber-100 text-amber-700' : phaseInfo.phase === 0 ? 'bg-indigo-100 text-indigo-700' : phaseInfo.phase === 1 ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
                                           {phaseInfo.label}
                                       </span>
                                   </div>
@@ -1199,14 +1294,17 @@ export default function RaceEvents() {
 
       {quickEditRace && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4 animate-fade-in" onClick={() => { if(!isQuickSaving) setQuickEditRace(null) }}>
-              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-4xl flex flex-col max-h-[90vh] animate-bounce-in" onClick={e => e.stopPropagation()}>
+              <div className="bg-slate-50 rounded-[2rem] shadow-2xl w-full max-w-4xl flex flex-col max-h-[90vh] animate-bounce-in border border-slate-200" onClick={e => e.stopPropagation()}>
                   
                   <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center rounded-t-[2rem] shrink-0">
-                      <h3 className="text-xl font-black text-slate-800 flex items-center gap-2"><Zap className="text-amber-500"/> 賽事快速編輯 (Quick Edit)</h3>
-                      <button onClick={() => { if(!isQuickSaving) setQuickEditRace(null) }} className="p-2 text-slate-400 hover:bg-slate-200 rounded-full transition-colors"><X size={20}/></button>
+                      <div>
+                          <h3 className="text-xl font-black text-slate-800 flex items-center gap-2"><Zap className="text-blue-600"/> 快速調度中心 (Admin)</h3>
+                          <p className="text-xs text-slate-500 font-bold mt-1 truncate max-w-sm">{quickEditRace.name}</p>
+                      </div>
+                      <button onClick={() => { if(!isQuickSaving) setQuickEditRace(null) }} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors"><X size={20}/></button>
                   </div>
 
-                  <div className="p-6 overflow-y-auto custom-scrollbar flex-1 bg-slate-50 space-y-6">
+                  <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
                       
                       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-2">
                           <div className="text-sm font-bold text-slate-500 flex items-center gap-2"><Flag size={14} className="text-blue-500"/> {quickEditRace.name}</div>
@@ -1330,6 +1428,69 @@ export default function RaceEvents() {
               </datalist>
           </div>
       )}
+
+      {/* 🌟 系統通知面板 */}
+      {showNotifPanel && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex justify-end animate-fade-in" onClick={() => setShowNotifPanel(false)}>
+              <div className="bg-slate-50 w-full sm:w-[400px] h-full flex flex-col shadow-2xl animate-slide-left" onClick={e => e.stopPropagation()}>
+                  
+                  <div className="px-6 py-5 border-b border-slate-200 bg-white flex justify-between items-center shrink-0">
+                      <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
+                          <Bell className="text-blue-600"/> 系統通知
+                      </h3>
+                      <button onClick={() => setShowNotifPanel(false)} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors active:scale-95">
+                          <X size={20}/>
+                      </button>
+                  </div>
+
+                  <div className="flex bg-white px-4 pt-2 border-b border-slate-200 shrink-0">
+                      <button 
+                          onClick={() => setNotifTab('system')} 
+                          className={`flex-1 pb-3 text-sm font-bold border-b-2 transition-colors ${notifTab === 'system' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+                      >
+                          賽事通報
+                      </button>
+                      <button 
+                          onClick={() => setNotifTab('personal')} 
+                          className={`flex-1 pb-3 text-sm font-bold border-b-2 transition-colors ${notifTab === 'personal' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+                      >
+                          個人提醒
+                      </button>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                      <div className="flex justify-between items-center mb-2 px-1">
+                          <span className="text-xs font-bold text-slate-400">保留近 8 個月的通知</span>
+                          <button onClick={markAllAsRead} className="text-xs font-bold text-blue-600 hover:underline">全部標示已讀</button>
+                      </div>
+                      
+                      {notifications.filter(n => notifTab === 'personal' ? n.tab === 'personal' : n.tab !== 'personal').length > 0 ? (
+                          notifications.filter(n => notifTab === 'personal' ? n.tab === 'personal' : n.tab !== 'personal').map(notif => {
+                              const isRead = notif.is_read || notif.isRead;
+                              return (
+                              <div key={notif.id} className={`p-4 rounded-2xl border transition-all relative group ${isRead ? 'bg-slate-100/50 border-slate-200 opacity-80' : 'bg-white border-blue-200 shadow-sm'}`}>
+                                  <button onClick={(e) => { e.stopPropagation(); deleteNotification(notif.id); }} className="absolute top-2 right-2 p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={14}/></button>
+                                  <div className="flex gap-3">
+                                      <div className={`mt-0.5 w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isRead ? 'bg-slate-200 text-slate-500' : 'bg-blue-100 text-blue-600'}`}>
+                                          {getNotifIcon(notif.category)}
+                                      </div>
+                                      <div className="flex-1 pr-6">
+                                          <div className="text-[10px] text-slate-400 font-medium mb-1 flex items-center gap-1"><Clock size={10}/> {new Date(notif.created_at || notif.date).toLocaleString()}</div>
+                                          <p className={`text-sm leading-relaxed whitespace-pre-wrap break-words ${isRead ? 'text-slate-600' : 'text-slate-800 font-bold'}`}>
+                                              {notif.message}
+                                          </p>
+                                      </div>
+                                  </div>
+                              </div>
+                          )})
+                      ) : (
+                          <div className="text-center py-10 text-slate-400 font-medium text-sm">目前無任何通知</div>
+                      )}
+                  </div>
+              </div>
+          </div>
+      )}
+
     </div>
   )
 }
