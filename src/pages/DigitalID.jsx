@@ -95,7 +95,7 @@ export default function DigitalID() {
                       category: 'bell',
                       message: n.message,
                       date: n.created_at,
-                      is_read: false 
+                      is_read: n.is_read || false 
                   }));
                   allNotifs = [...allNotifs, ...adminMapped].sort((a,b) => new Date(b.date) - new Date(a.date));
               }
@@ -297,7 +297,6 @@ export default function DigitalID() {
       setFormData(prev => ({ ...prev, [name]: value }))
   }
 
-  // 🌟 智能差異比對引擎：精準產生異動日誌字串，包含換行符號
   const generateDiffMessage = (oldData, newData, section) => {
       let changes = [];
       const keysToCheck = section === 'basic' 
@@ -322,17 +321,14 @@ export default function DigitalID() {
           const updatePayload = { ...formData }
           let sectionName = section === 'basic' ? '核心基本資料' : '醫護與裝備';
 
-          // 產生差異比對字串
           const diffString = generateDiffMessage(profile, formData, section);
 
           const { data: { user } } = await supabase.auth.getUser()
           
           if (user && user.email) { 
-              // 🌟 【給管理員的機密通知】加上 [🔒 僅管理員可見] 讓使用者安心
               let adminNotifyMsg = `[🔒 僅管理員可見] 人員 [${profile.full_name}] (ID: ${user.id}) 申請修改「${sectionName}」${diffString}`;
               if (!diffString) adminNotifyMsg += `\n(系統未偵測到實質欄位變更)`;
 
-              // 🌟 【給會員本人的通知】也附上明細讓他自己留底
               let personalNotifyMsg = `您的「${sectionName}」已成功更新並送出審核。${diffString ? diffString : ''}`;
 
               if (section === 'basic') updatePayload.basic_edit_count = (profile.basic_edit_count || 0) + 1;
@@ -344,7 +340,6 @@ export default function DigitalID() {
               if (upsertError) throw upsertError;
 
               try {
-                  // 1. 強制派發給所有管理員的系統通報
                   const { data: adminProfiles } = await supabase.from('profiles').select('id, role');
                   const admins = (adminProfiles || []).filter(p => {
                       const r = (p.role || '').toUpperCase();
@@ -362,7 +357,6 @@ export default function DigitalID() {
                       await supabase.from('user_notifications').insert(adminNotifs);
                   }
                   
-                  // 同時寫入傳統的 admin_notifications 備查 (相容後台系統狀態牆)
                   try {
                       await supabase.from('admin_notifications').insert({
                           user_id: user.id, 
@@ -372,7 +366,6 @@ export default function DigitalID() {
                       });
                   } catch (e) { /* 若表不存在則略過 */ }
 
-                  // 2. 給會員本人專屬的成功通知 (放在「個人提醒」)
                   await supabase.from('user_notifications').insert({
                       user_id: user.id,
                       tab: 'personal',
@@ -407,13 +400,41 @@ export default function DigitalID() {
       } catch(e){}
   }
   
-  const markAllAsRead = async () => { 
-      setNotifications(prev => prev.map(n => ({ ...n, isRead: true, is_read: true }))); 
+  // 🌟 已讀分流與記憶儲存引擎
+  const markAllAsRead = async () => {
+      setNotifications(prev => {
+          return prev.map(n => {
+              if (notifTab === 'personal' && n.tab === 'personal') return { ...n, is_read: true, isRead: true };
+              if (notifTab === 'system' && n.tab !== 'personal') return { ...n, is_read: true, isRead: true };
+              return n;
+          });
+      });
+
       try {
-          if (profile && profile.id) {
-              await supabase.from('user_notifications').update({ is_read: true }).eq('user_id', profile.id).eq('is_read', false)
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+              if (notifTab === 'personal') {
+                  await supabase.from('user_notifications')
+                      .update({ is_read: true })
+                      .eq('user_id', user.id)
+                      .eq('tab', 'personal')
+                      .eq('is_read', false);
+              } else {
+                  await supabase.from('user_notifications')
+                      .update({ is_read: true })
+                      .eq('user_id', user.id)
+                      .neq('tab', 'personal')
+                      .eq('is_read', false);
+                  
+                  const isAdmin = profile && ['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN', '管理員', '總監'].some(r => (profile.role || '').toUpperCase().includes(r));
+                  if (isAdmin) {
+                       await supabase.from('admin_notifications')
+                           .update({ is_read: true })
+                           .eq('is_read', false);
+                  }
+              }
           }
-      } catch(e){}
+      } catch(e){ console.error('標示已讀失敗:', e) }
   }
 
   const getNotifIcon = (category) => {
@@ -431,6 +452,32 @@ export default function DigitalID() {
       if (secondChar === '1') return { text: '♂ 男', color: 'bg-blue-500/20 text-blue-300 border-blue-500/50' };
       if (secondChar === '2') return { text: '♀ 女', color: 'bg-pink-500/20 text-pink-300 border-pink-500/50' };
       return null;
+  }
+
+  // 🌟 補回缺失的 UI 工具函數
+  const getInitials = (name) => {
+      if (!name) return 'IM';
+      return name.replace(/[^a-zA-Z\u4e00-\u9fa5]/g, '').substring(0, 2).toUpperCase();
+  }
+
+  const getStatusBadge = () => {
+      if (profile?.is_current_member === 'Y') return <div className="flex items-center gap-1.5 bg-green-500/90 backdrop-blur-md text-white px-3 py-1.5 rounded-full text-[11px] font-black border border-green-400 shadow-sm"><CheckCircle size={14}/> 本屆有效會員</div>
+      return <div className="flex items-center gap-1.5 bg-red-500/90 backdrop-blur-md text-white px-3 py-1.5 rounded-full text-[11px] font-black border border-red-400 shadow-sm"><XCircle size={14}/> 權限不足/非當屆</div>
+  }
+
+  const getRoleBadge = () => {
+      const role = profile?.role || 'USER'
+      if (['SUPER_ADMIN', 'TOURNAMENT_DIRECTOR', 'RACE_ADMIN', 'ADMIN'].includes(role)) return <span className="bg-indigo-600 text-white text-[10px] px-2 py-0.5 rounded font-black border border-indigo-400 flex items-center gap-1 shadow-sm"><ShieldAlert size={10}/> 系統管理員</span>
+      if (profile?.is_vip === 'Y') return <span className="bg-amber-500 text-white text-[10px] px-2 py-0.5 rounded font-black border border-amber-300 flex items-center gap-1 shadow-sm"><Crown size={10}/> 核心 VIP</span>
+      if (profile?.is_team_leader === 'Y') return <span className="bg-blue-600 text-white text-[10px] px-2 py-0.5 rounded font-black border border-blue-400 flex items-center gap-1 shadow-sm"><Flag size={10}/> 帶隊教官</span>
+      if (profile?.is_new_member === 'Y') return <span className="bg-emerald-500 text-white text-[10px] px-2 py-0.5 rounded font-black border border-emerald-400 flex items-center gap-1 shadow-sm"><Sprout size={10}/> 當屆新人</span>
+      return <span className="bg-slate-200 text-slate-600 text-[10px] px-2 py-0.5 rounded font-black border border-slate-300 flex items-center gap-1 shadow-sm"><Activity size={10}/> 醫護鐵人</span>
+  }
+
+  const isLicenseValid = () => {
+      if (!profile?.license_expiry) return false
+      const expiry = new Date(profile.license_expiry)
+      return expiry > new Date()
   }
 
   const displayUser = profile;
@@ -470,7 +517,7 @@ export default function DigitalID() {
               <button onClick={() => { fetchNotifs(); setShowNotifPanel(true); }} className="p-2.5 bg-white/10 hover:bg-white/20 rounded-full text-white backdrop-blur-sm transition-colors cursor-pointer group active:scale-95 relative">
                   <Bell size={22} className="group-hover:animate-wiggle"/>
                   {unreadCountReal > 0 && (
-                      <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-black text-white border-2 border-slate-900 shadow-sm animate-pulse">
+                      <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[9px] font-black text-white border-2 border-slate-900 shadow-sm animate-pulse">
                           {unreadCountReal > 99 ? '99+' : unreadCountReal}
                       </span>
                   )}
@@ -488,7 +535,7 @@ export default function DigitalID() {
               <div className="flex justify-between items-start mb-8 relative z-10">
                   <div className="flex items-center gap-4">
                       <div className="w-16 h-16 md:w-20 md:h-20 bg-gradient-to-br from-blue-400 to-indigo-600 rounded-2xl flex items-center justify-center text-3xl font-black text-white shadow-lg border-2 border-slate-700">
-                          {displayUser.full_name?.charAt(0) || '?'}
+                          {getInitials(profile.full_name)}
                       </div>
                       <div>
                           <div className="flex items-center gap-2 mb-1">
@@ -660,7 +707,6 @@ export default function DigitalID() {
                               const isItemRead = notif.isRead || notif.is_read;
                               return (
                               <div key={notif.id} 
-                                   // 🌟 雷達定位：只要點擊包含 ID 的通知，瞬間飛躍到 MemberCRM
                                    onClick={() => {
                                        const match = notif.message.match(/\(ID:\s*(.*?)\)/);
                                        if (match) {
@@ -680,7 +726,6 @@ export default function DigitalID() {
                                           <div className="text-[10px] text-slate-400 font-medium mb-1 flex items-center gap-1">
                                               <Clock size={10}/> {new Date(notif.date).toLocaleDateString()}
                                           </div>
-                                          {/* 🌟 核心：套用 whitespace-pre-wrap 讓人類可讀的排版與換行生效 */}
                                           <p className={`text-sm leading-relaxed whitespace-pre-wrap break-words ${isItemRead ? 'text-slate-600' : 'text-slate-800 font-bold'}`}>
                                               {notif.message}
                                           </p>

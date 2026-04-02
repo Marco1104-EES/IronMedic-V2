@@ -76,7 +76,6 @@ export default function RaceEvents() {
       return 6;
   }
 
-  // 🌟 穩定時間格式化引擎，避免時區與瀏覽器語系亂跳
   const formatTime = (timeStr) => {
       if (!timeStr) return '未設定';
       try {
@@ -213,7 +212,7 @@ export default function RaceEvents() {
                       category: 'bell',
                       message: n.message,
                       date: n.created_at,
-                      is_read: false 
+                      is_read: n.is_read || false 
                   }));
                   allNotifs = [...allNotifs, ...adminMapped].sort((a,b) => new Date(b.date) - new Date(a.date));
               }
@@ -231,13 +230,49 @@ export default function RaceEvents() {
       }
   }
 
+  // 🌟 核心修復：智能分流的「全部標示已讀」引擎
   const markAllAsRead = async () => {
-      setNotifications(prev => prev.map(n => ({ ...n, is_read: true, isRead: true })));
-      setUnreadCount(0);
+      // 1. 畫面先行：根據當下頁籤，過濾並標記對應的通知
+      setNotifications(prev => {
+          const updated = prev.map(n => {
+              if (notifTab === 'personal' && n.tab === 'personal') return { ...n, is_read: true, isRead: true };
+              if (notifTab === 'system' && n.tab !== 'personal') return { ...n, is_read: true, isRead: true };
+              return n;
+          });
+          // 同步扣除未讀總數
+          setUnreadCount(updated.filter(n => !(n.isRead || n.is_read)).length);
+          return updated;
+      });
+
+      // 2. 背景資料庫真實寫入
       try {
           const { data: { user } } = await supabase.auth.getUser();
-          if (user) await supabase.from('user_notifications').update({ is_read: true }).eq('user_id', user.id).eq('is_read', false);
-      } catch(e){}
+          if (user) {
+              if (notifTab === 'personal') {
+                  // 只清空個人的通知
+                  await supabase.from('user_notifications')
+                      .update({ is_read: true })
+                      .eq('user_id', user.id)
+                      .eq('tab', 'personal')
+                      .eq('is_read', false);
+              } else {
+                  // 清空系統通報 (包含 user_notifications 裡的非 personal，以及 admin_notifications)
+                  await supabase.from('user_notifications')
+                      .update({ is_read: true })
+                      .eq('user_id', user.id)
+                      .neq('tab', 'personal')
+                      .eq('is_read', false);
+                  
+                  const role = localStorage.getItem('iron_medic_user_role') || 'USER';
+                  const isAdmin = ADMIN_ROLES.some(r => role.toUpperCase().includes(r));
+                  if (isAdmin) {
+                       await supabase.from('admin_notifications')
+                           .update({ is_read: true })
+                           .eq('is_read', false);
+                  }
+              }
+          }
+      } catch(e){ console.error('標示已讀失敗:', e) }
   }
 
   const deleteNotification = async (id) => {
@@ -357,7 +392,6 @@ export default function RaceEvents() {
   const isAdmin = ADMIN_ROLES.some(r => userRole.toUpperCase().includes(r));
   const isSuperAdmin = ADMIN_ROLES.some(r => userRole.toUpperCase().includes(r));
 
-  // useMemo 的變數要在之前就宣告
   const isPrivileged = currentUserProfile?.role === 'SUPER_ADMIN' || 
                        currentUserProfile?.role === 'TOURNAMENT_DIRECTOR' || 
                        currentUserProfile?.is_team_leader === 'Y' || 
@@ -411,9 +445,7 @@ export default function RaceEvents() {
             const earlyOpenTime = r.leader_early_open_time ? new Date(r.leader_early_open_time) : null;
             const standardOpenTime = r.open_time ? new Date(r.open_time) : null;
             
-            // 🌟 核心修復：早鳥期間判定（已到教官時間，且還沒到一般人的時間 或 無一般時間）
             const isEarlyOpenActive = earlyOpenTime && now >= earlyOpenTime && (!standardOpenTime || now < standardOpenTime);
-            // 🌟 核心修復：徹底解開 status 的枷鎖，只要符合時間條件與身分特權，就是早鳥！
             const earlyAccess = isEarlyOpenActive && isPrivileged && !['CANCELLED', 'COMPLETED', 'CLOSED', 'SUBMITTED'].includes(r.status);
 
             if (statusFilter === 'LEADER_EARLY') {
@@ -421,7 +453,6 @@ export default function RaceEvents() {
             }
 
             if (statusFilter === 'RECRUITING') {
-                // 只要是招募中，或是專屬您的早鳥階段，都顯示給您看
                 return (r.status === 'OPEN' || earlyAccess) && !isPastRace;
             }
 
@@ -584,7 +615,6 @@ export default function RaceEvents() {
     return { total, currentYearCount, pastCount, futureCount, recruitingCount, negotiatingCount, closedCount, leaderEarlyCount };
   }, [races, CURRENT_YEAR, isPrivileged]);
 
-  // 🌟 核心修復：精準判斷賽事目前的報名階段 (支援幹部早鳥顯示)
   const getRegistrationPhase = (race) => {
       const now = new Date();
       const openTime = race.open_time ? new Date(race.open_time) : null;
@@ -1174,7 +1204,6 @@ export default function RaceEvents() {
                                   <div className="flex items-center text-slate-600 text-xs md:text-sm font-medium bg-slate-50 p-2 md:p-2.5 rounded-xl"><Calendar size={14} className="text-blue-500 mr-2.5 shrink-0"/><span>{race.date}</span></div>
                                   <div className="flex items-center text-slate-600 text-xs md:text-sm font-medium bg-slate-50 p-2 md:p-2.5 rounded-xl"><MapPin size={14} className="text-red-500 mr-2.5 shrink-0"/><span className="truncate">{race.location}</span></div>
                                   
-                                  {/* 🌟 核心修復：動態顯示「幹部開放」或「開放報名」時間 */}
                                   <div className="flex items-center text-[11px] font-bold text-slate-500 bg-slate-50 px-2 md:px-2.5 py-1.5 rounded-xl border border-slate-100 gap-1.5">
                                       <Timer size={14} className="text-amber-500 shrink-0"/> 
                                       {showEarlyAccess ? `幹部開放: ${formatTime(race.leader_early_open_time)}` : `開放報名: ${formatTime(race.open_time)}`}
