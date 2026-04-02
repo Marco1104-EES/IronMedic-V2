@@ -1126,7 +1126,7 @@ export default function Dashboard() {
           
           <div className="bg-white rounded-[2rem] shadow-sm border border-slate-200 p-6 relative overflow-hidden group">
               <h3 className="font-black text-slate-800 mb-5 flex items-center gap-2">系統資料庫管理 / 匯入中心</h3>
-              <p className="text-slate-500 text-sm mb-6 font-medium leading-relaxed">執行年度會員資料更新、名單匯入，或是重置系統參數的專屬管理通道。</p>
+              <p className="text-slate-500 text-sm mb-6 font-medium leading-relaxed">執行年度會員資料更新、名單匯入，或是重置人員參數的專屬管理通道。</p>
               <button onClick={() => navigate('/admin/import')} className="w-full py-4 bg-amber-500 hover:bg-amber-400 text-slate-900 font-black rounded-xl text-sm transition-all active:scale-95 shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2">
                   <FileSpreadsheet size={18}/> 前往資料匯入與重置中心
               </button>
@@ -1217,7 +1217,7 @@ export default function Dashboard() {
                           <div className="flex justify-between items-start mb-2">
                               <div className="text-sm font-black text-slate-700 flex items-center gap-2">
                                   <List size={16} className={updateCount >= 5 ? 'text-rose-500' : 'text-slate-500'}/>
-                                  待發布的系統變更
+                                  系統變更項次
                               </div>
                               <div className={`text-2xl font-black ${updateCount >= 5 ? 'text-rose-600' : 'text-slate-800'}`}>
                                   {updateCount} <span className="text-sm font-medium text-slate-500">項</span>
@@ -1250,7 +1250,7 @@ export default function Dashboard() {
                                   <ShieldAlert size={16} className={errorBoundaryEnabled ? 'text-green-500' : 'text-slate-400'}/>
                                   系統異常防護網 (Error Boundary)
                               </div>
-                              <div className="text-[10px] font-bold text-slate-500 mt-1">攔截前端致命崩潰並引導重新載入</div>
+                              <div className="text-[15px] font-bold text-slate-500 mt-1">攔截前端致命崩潰並引導重新載入</div>
                           </div>
                           <button
                               onClick={handleToggleErrorBoundary}
@@ -1261,7 +1261,7 @@ export default function Dashboard() {
                       </div>
 
                       <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex-1 overflow-hidden flex flex-col min-h-[220px]">
-                          <div className="text-xs font-black text-slate-700 mb-3 flex items-center gap-2"><Radio size={14} className="text-slate-400"/> 智能備註日誌 (待發布)</div>
+                          <div className="text-xs font-black text-slate-700 mb-3 flex items-center gap-2"><Radio size={14} className="text-slate-400"/> 備註日誌 (待發布)</div>
                           <div className="overflow-y-auto custom-scrollbar flex-1 space-y-3 pr-2">
                               {Object.keys(groupedReleaseLogs).length > 0 ? (
                                   Object.entries(groupedReleaseLogs).map(([month, logs]) => {
