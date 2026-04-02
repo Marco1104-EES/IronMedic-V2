@@ -1261,7 +1261,7 @@ export default function Dashboard() {
                       </div>
 
                       <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex-1 overflow-hidden flex flex-col min-h-[220px]">
-                          <div className="text-xs font-black text-slate-700 mb-3 flex items-center gap-2"><Radio size={14} className="text-slate-400"/> 備註日誌 (待發布)</div>
+                          <div className="text-xs font-black text-slate-700 mb-3 flex items-center gap-2"><Radio size={14} className="text-slate-400"/> 系統修改備註日誌 </div>
                           <div className="overflow-y-auto custom-scrollbar flex-1 space-y-3 pr-2">
                               {Object.keys(groupedReleaseLogs).length > 0 ? (
                                   Object.entries(groupedReleaseLogs).map(([month, logs]) => {

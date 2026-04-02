@@ -1241,7 +1241,7 @@ export default function DataImportCenter() {
                         <Database className="text-blue-600"/> 資料整合匯入中心 <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold border border-slate-200">核心比對版 V10.0
                         </span>
                     </h2>
-                    <p className="text-slate-500 text-sm mt-1">深度檢查、日期轉換與黑洞收納箱(無效資訊)。</p>
+                    <p className="text-slate-500 text-sm mt-1">深度檢查、日期轉換與暫存收納箱(無效資訊)。</p>
                 </div>
                 <div className="flex bg-slate-50 p-1 rounded-lg border border-slate-200">
                     <button onClick={()=>handleModeSwitch('full')} className={`px-4 py-2 rounded-md font-bold text-sm flex items-center gap-2 transition-all ${mode==='full' ? 'bg-white shadow-sm border border-slate-200 text-blue-600' : 'text-slate-500 hover:text-slate-700'} `}><Merge size={16}/> 完整資料整合</button>
