@@ -452,7 +452,7 @@ export default function Login() {
                     className="text-lg font-black text-blue-600 hover:text-blue-800 transition-colors flex items-center justify-center gap-2 w-full py-3"
                 >
                     <UserCheck size={26} className="shrink-0"/> 
-                    <span>非Google帳號，首次使用<br className="sm:hidden"/>請點此進行帳號核對綁定</span>
+                    <span>首次使用<br className="sm:hidden"/>請點此進行帳號核對綁定</span>
                 </button>
             </div>
           </form>

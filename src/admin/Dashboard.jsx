@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { supabase } from '../supabaseClient'
+import { supabase } from '../../supabaseClient'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from 'recharts'
 import { MapContainer, TileLayer, Marker, Popup, CircleMarker } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -200,34 +200,33 @@ export default function Dashboard() {
       }
   };
 
+  // ==========================================
+  // 🚨 企業級帳號解除媒合引擎 (修復版)
+  // ==========================================
   const handleUnlinkAccount = async () => {
       if (!searchAccountResult) return;
       
-      const confirmMsg = `【系統確認】\n\n確定要將【${searchAccountResult.full_name}】解除帳號媒合狀態嗎？\n\n執行後，系統將還原其信箱並重置關聯。該人員下次登入系統時，必須重新進行身份驗證。`;
+      const confirmMsg = `【系統確認】\n\n確定要將【${searchAccountResult.full_name}】解除帳號媒合狀態嗎？\n\n執行後，系統將切斷其帳號關聯並「保留原始信箱」。該人員下次登入系統時，必須重新進行身份驗證。`;
       if (!window.confirm(confirmMsg)) return;
 
       setIsUnlinkingAccount(true);
       try {
           const unlinkedUser = { ...searchAccountResult };
           
-          // 🚨 終極智能歸復引擎：
-          // 1. 同時更新 ID，徹底斷開與 auth.users 的連結，確保 RPC 將其視為「未登入」。
-          // 2. 若有 original_email 則完美復原，若無則使用帶時間戳的唯一假信箱(避開 Duplicate Key 錯誤)。
+          // 🚨 核心修復：僅更新 ID 產生新 UUID，徹底斷開與 auth.users 的連結。
+          // 絕對不碰 email，確保資料庫與 Supabase Auth 的一致性，達成完美還原原始狀態。
           const newRandomUuid = crypto.randomUUID(); 
-          const targetEmail = unlinkedUser.original_email || `marietai+unlinked_${Date.now()}@ms1.url.com.tw`; 
 
           const { error } = await supabase
               .from('profiles')
               .update({ 
-                  id: newRandomUuid,
-                  email: targetEmail 
+                  id: newRandomUuid
               })
               .eq('id', unlinkedUser.id);
 
           if (error) throw error;
 
-          const displayEmail = unlinkedUser.original_email ? unlinkedUser.original_email : '原始登入mail';
-          alert(`🎉【${unlinkedUser.full_name}】已成功解除帳號媒合！\n狀態已還原為未登入，信箱：${displayEmail}`);
+          alert(`🎉【${unlinkedUser.full_name}】已成功解除帳號媒合！\n狀態已還原為未登入，且已安全保留原始信箱：${unlinkedUser.email}`);
           
           if (window.logSystemChange) {
               window.logSystemChange(`解除帳號媒合：${unlinkedUser.full_name}`);
@@ -283,15 +282,14 @@ export default function Dashboard() {
 
           if (allCurrentMembers) {
               allCurrentMembers.forEach(m => {
-                  // 🚨 精準過濾：抓出我們為了避開 Duplicate Key 而產生的動態假信箱
-                  const isUnlinkedFallback = m.email && m.email.toLowerCase().includes('unlinked_') && m.email.toLowerCase().includes('ms1.url.com.tw');
+                  // 保留相容性檢查：若資料庫內仍有舊版被修改為 unlinked_ 的異常資料，依舊歸類在「媒合取消」區塊供查閱
+                  const isLegacyUnlinkedFallback = m.email && m.email.toLowerCase().includes('unlinked_') && m.email.toLowerCase().includes('ms1.url.com.tw');
                   
-                  if (isUnlinkedFallback) {
-                      // 🌟 UI 視覺遮罩：在畫面上強制顯示乾淨的信箱，隱藏底層亂碼
-                      arrayUnlinked.push({ ...m, email: '原始登入mail' });
+                  if (isLegacyUnlinkedFallback) {
+                      arrayUnlinked.push({ ...m, email: '舊版異常資料(請手動修復)' });
                   } 
                   else if (rpcUnloggedIds.has(m.id)) {
-                      // 擁有 original_email 並成功被斷開 ID 的人，會自然落入此「未登入」區塊，達成「回復原狀」
+                      // 正常解除媒合後，因為 ID 不在 auth.users 內，會自然落回此「未登入」名單，達成真正的重置原始狀態
                       arrayUnlogged.push(m);
                   } 
                   else {
@@ -527,8 +525,8 @@ export default function Dashboard() {
   return (
     <div className="space-y-6 md:space-y-8 animate-fade-in pb-20 max-w-[1600px] mx-auto">
       <div className="mb-8">
-          <h2 className="text-3xl font-black text-slate-800 mb-2">數據儀表板</h2>
-          <p className="text-slate-500 font-medium">即時掌握全台會員與賽事分佈</p>
+          <h2 className="text-3xl font-black text-slate-800 mb-2">營運總覽與數據儀表板</h2>
+          <p className="text-slate-500 font-medium">即時掌握全台會員狀態與賽事分佈</p>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 md:gap-6">
@@ -558,7 +556,7 @@ export default function Dashboard() {
           <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow group relative overflow-hidden md:col-span-1 lg:col-span-1 col-span-2">
               <div className="absolute top-0 right-0 w-24 h-24 bg-blue-50 rounded-bl-full -z-10 transition-transform group-hover:scale-125"></div>
               <div className="w-12 h-12 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform relative z-10"><UserCheck size={24}/></div>
-              <h3 className="text-slate-500 font-bold text-[13px] md:text-sm whitespace-nowrap">登入 / 未登入 / 媒合取消</h3>
+              <h3 className="text-slate-500 font-bold text-[13px] md:text-sm whitespace-nowrap">登入 / 未登入 / 異常取消</h3>
               <div className="text-2xl md:text-3xl font-black text-slate-800 mt-1 flex items-baseline gap-1 relative z-10">
                   <button 
                       onClick={() => setShowLoggedModal(true)}
@@ -579,7 +577,7 @@ export default function Dashboard() {
                   <button 
                       onClick={() => setShowUnlinkedModal(true)}
                       className="text-xl md:text-2xl text-slate-500 hover:text-slate-600 hover:scale-110 transition-transform underline decoration-slate-300 decoration-2 underline-offset-4 cursor-pointer"
-                      title="點擊查看遭解除媒合名單"
+                      title="點擊查看舊版異常取消名單"
                   >
                       {stats.unlinkedCount}
                   </button>
@@ -897,14 +895,14 @@ export default function Dashboard() {
           </div>
       )}
 
-      {/* 🌟 追蹤名單：媒合取消名單 Modal */}
+      {/* 🌟 追蹤名單：舊版異常取消名單 Modal (向下相容) */}
       {showUnlinkedModal && (
           <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[200] p-4 animate-fade-in backdrop-blur-sm" onClick={() => setShowUnlinkedModal(false)}>
               <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-2xl flex flex-col max-h-[85vh] overflow-hidden animate-bounce-in" onClick={e => e.stopPropagation()}>
                   
                   <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
                       <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
-                          <UserX className="text-slate-500"/> 媒合取消名單
+                          <UserX className="text-slate-500"/> 舊版異常取消名單
                           <span className="bg-slate-200 text-slate-700 text-[10px] font-black px-2 py-0.5 rounded-full ml-2">共 {unlinkedList.length} 人</span>
                       </h3>
                       <button onClick={() => setShowUnlinkedModal(false)} className="p-2 text-slate-400 hover:bg-slate-200 rounded-full transition-colors active:scale-95"><X size={20}/></button>
@@ -913,7 +911,8 @@ export default function Dashboard() {
                   <div className="bg-slate-50 text-slate-600 text-[11px] p-4 font-bold flex items-start gap-2 border-b border-slate-200 shrink-0">
                       <Info size={16} className="shrink-0 mt-0.5"/>
                       <p className="leading-relaxed">
-                          此名單為經由管理員強制執行「解除帳號媒合」之人員，該員須於下次重新進行身份驗證，方可恢復登入狀態。
+                          此名單僅保留舊版強制修改信箱的異常帳號供查閱。<br/>
+                          💡 系統優化後：新解除帳號媒合者，將保留原始信箱，並直接歸入「未登入」名單。
                       </p>
                   </div>
 
@@ -934,7 +933,7 @@ export default function Dashboard() {
                           </div>
                       )) : (
                           <div className="text-center py-12 flex flex-col items-center justify-center gap-3">
-                              <div className="text-sm font-bold text-slate-500">目前尚無媒合取消資料</div>
+                              <div className="text-sm font-bold text-slate-500">目前尚無舊版異常取消資料</div>
                           </div>
                       )}
                   </div>
@@ -1121,7 +1120,7 @@ export default function Dashboard() {
           </div>
       )}
 
-      {/* 🌟 系統資料庫管理 / 匯入中心 + 獨立插入的控制中心與媒合區塊 */}
+      {/* 🌟 系統資料庫管理 / 匯入中心 + 獨立插入的帳號解除媒合區塊 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8 mt-6 md:mt-8">
           
           <div className="bg-white rounded-[2rem] shadow-sm border border-slate-200 p-6 relative overflow-hidden group">
