@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { Calendar, MapPin, Users, Clock, ChevronRight, Activity, Flame, ShieldAlert, Timer, CheckCircle, X, Loader2, UsersRound, Crown, Sprout, Handshake, Send, Flag, Settings, Bell, ChevronDown, ChevronUp, Trash2, AlertTriangle, Medal, ServerCrash, Menu, User, Edit3, Zap, Plus, Save, ArrowRight, Lock, Ban } from 'lucide-react'
+import { Calendar, MapPin, Users, Clock, ChevronRight, Activity, Flame, ShieldAlert, Timer, CheckCircle, X, Loader2, UsersRound, Crown, Sprout, Handshake, Send, Flag, Settings, Bell, ChevronDown, ChevronUp, Trash2, AlertTriangle, Medal, ServerCrash, Menu, User, Edit3, Zap, Plus, Save, ArrowRight, Lock, Ban, ExternalLink } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 
@@ -230,33 +230,27 @@ export default function RaceEvents() {
       }
   }
 
-  // 🌟 核心修復：智能分流的「全部標示已讀」引擎
   const markAllAsRead = async () => {
-      // 1. 畫面先行：根據當下頁籤，過濾並標記對應的通知
       setNotifications(prev => {
           const updated = prev.map(n => {
               if (notifTab === 'personal' && n.tab === 'personal') return { ...n, is_read: true, isRead: true };
               if (notifTab === 'system' && n.tab !== 'personal') return { ...n, is_read: true, isRead: true };
               return n;
           });
-          // 同步扣除未讀總數
           setUnreadCount(updated.filter(n => !(n.isRead || n.is_read)).length);
           return updated;
       });
 
-      // 2. 背景資料庫真實寫入
       try {
           const { data: { user } } = await supabase.auth.getUser();
           if (user) {
               if (notifTab === 'personal') {
-                  // 只清空個人的通知
                   await supabase.from('user_notifications')
                       .update({ is_read: true })
                       .eq('user_id', user.id)
                       .eq('tab', 'personal')
                       .eq('is_read', false);
               } else {
-                  // 清空系統通報 (包含 user_notifications 裡的非 personal，以及 admin_notifications)
                   await supabase.from('user_notifications')
                       .update({ is_read: true })
                       .eq('user_id', user.id)
@@ -803,7 +797,7 @@ export default function RaceEvents() {
   }
 
   const handleQuickKick = async (slotId, userIdToKick, userName) => {
-      if(!window.confirm(`⚠️ 賽事總監警告 ⚠️\n確定要強制將【${userName}】從此賽段踢除嗎？`)) return;
+      if(!window.confirm(`⚠️ 管理員警告 ⚠️\n確定要強制將【${userName}】從此賽段移除嗎？`)) return;
 
       let kickedUserUsedPass = false;
 
@@ -852,14 +846,14 @@ export default function RaceEvents() {
                       user_id: userIdToKick,
                       tab: 'personal',
                       category: 'alert',
-                      message: `您在【${quickEditRace.name}】的名額已被賽事總監異動，如有疑問請聯繫賽事總監。`,
+                      message: `您在【${quickEditRace.name}】的名額已被管理員異動，如有疑問請聯繫管理團隊。`,
                       is_read: false
                   }]);
-              } catch(e) { console.error("發送踢除通知失敗", e) }
+              } catch(e) { console.error("發送移除通知失敗", e) }
           }
           
           setRaces(prevRaces => prevRaces.map(r => r.id === quickEditRace.id ? updatedRace : r));
-      } catch(e) { alert("踢除寫入失敗：" + e.message) }
+      } catch(e) { alert("移除寫入失敗：" + e.message) }
   }
 
 
@@ -876,7 +870,7 @@ export default function RaceEvents() {
                       <Ban size={48}/>
                   </div>
                   
-                  <h3 className="text-3xl font-black text-slate-800 mb-4 tracking-tight">權限不足</h3>
+                  <h3 className="text-3xl font-black text-slate-800 mb-4 tracking-tight">系統防護攔截</h3>
                   
                   <div className="bg-rose-50 text-rose-700 p-5 rounded-2xl text-base font-bold border border-rose-100 leading-relaxed mb-8 w-full shadow-inner">
                       {blockerMessage}
@@ -929,7 +923,7 @@ export default function RaceEvents() {
                           onClick={() => setShowAdminMenu(!showAdminMenu)}
                           className={`w-9 h-9 md:w-11 md:h-11 rounded-full flex items-center justify-center transition-all shadow-lg active:scale-95 border backdrop-blur-md
                               ${showAdminMenu ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800/80 border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white'}`}
-                          title="管理員控制台"
+                          title="進階管理"
                       >
                           {serverStatus === 'error' ? <ServerCrash size={18} className="text-red-400 animate-pulse"/> : <Settings size={18} className={showAdminMenu ? 'animate-spin-slow' : ''}/>}
                       </button>
@@ -942,10 +936,10 @@ export default function RaceEvents() {
                               </div>
                               <div className="p-2 space-y-1">
                                   <button onClick={() => navigate('/admin/system-status')} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-slate-700 hover:bg-slate-100 transition-colors">
-                                      <Activity size={16} className="text-blue-500"/> 伺服器監控
+                                      <Activity size={16} className="text-blue-500"/> 系統監控
                                   </button>
                                   <button onClick={() => navigate('/admin/dashboard')} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-black text-indigo-700 bg-indigo-50 hover:bg-indigo-100 transition-colors">
-                                      <Menu size={16} className="text-indigo-600"/> 進入管理後台
+                                      <Menu size={16} className="text-indigo-600"/> 進入管理中心
                                   </button>
                               </div>
                           </div>
@@ -959,9 +953,9 @@ export default function RaceEvents() {
                   title="系統通知"
               >
                   <Bell size={18} className="sm:w-[22px] sm:h-[22px] text-white group-hover:text-amber-400 transition-colors group-hover:animate-wiggle"/> 
-                  {unreadCountReal > 0 && (
+                  {unreadCount > 0 && (
                       <span className="absolute -top-1 -right-1 flex h-4 w-4 sm:h-5 sm:w-5 items-center justify-center rounded-full bg-red-500 text-[9px] sm:text-[10px] font-black text-white border-2 border-slate-900 shadow-sm animate-pulse">
-                          {unreadCountReal > 99 ? '99+' : unreadCountReal}
+                          {unreadCount > 99 ? '99+' : unreadCount}
                       </span>
                   )}
               </button>
@@ -1123,8 +1117,8 @@ export default function RaceEvents() {
 
                       const getButtonConfig = () => {
                           if (isPastRace || ['SUBMITTED', 'COMPLETED', 'CANCELLED', 'CLOSED'].includes(race.status)) return { text: '賽事已結束 / 檢視名單', class: 'bg-slate-200 text-slate-500 border border-slate-300' }
-                          if (isAdminOrDirector && race.status === 'UPCOMING') return { text: '進入名額配置 (總監特權)', class: 'bg-indigo-600 text-white hover:bg-indigo-700 hover:shadow-xl hover:shadow-indigo-600/30' }
-                          if (isAdminOrDirector && race.status === 'NEGOTIATING') return { text: '進入名額配置 (總監特權)', class: 'bg-indigo-600 text-white hover:bg-indigo-700 hover:shadow-xl hover:shadow-indigo-600/30' }
+                          if (isAdminOrDirector && race.status === 'UPCOMING') return { text: '進入名額配置 (進階權限)', class: 'bg-indigo-600 text-white hover:bg-indigo-700 hover:shadow-xl hover:shadow-indigo-600/30' }
+                          if (isAdminOrDirector && race.status === 'NEGOTIATING') return { text: '進入名額配置 (進階權限)', class: 'bg-indigo-600 text-white hover:bg-indigo-700 hover:shadow-xl hover:shadow-indigo-600/30' }
                           if (race.status === 'NEGOTIATING' && !showEarlyAccess) return { text: '賽事洽談中 / 預覽', class: 'bg-amber-100 text-amber-700 hover:bg-amber-200 border border-amber-200' }
                           if (race.status === 'UPCOMING' && !showEarlyAccess) return { text: '敬請期待', class: 'bg-slate-50 text-slate-400 cursor-not-allowed border border-slate-100', disabled: true }
                           if (isFull || race.status === 'FULL') return { text: '查看報名名單 / 候補', class: 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200' }
