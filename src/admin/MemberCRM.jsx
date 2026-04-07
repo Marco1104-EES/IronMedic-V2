@@ -313,14 +313,14 @@ export default function MemberCRM() {
   // ⚡【新增】上帝捷徑：強制解除帳號綁定 (重置帳號媒合)
   // ==========================================
   const handleForceUnlockBinding = async (userId, userFullName) => {
-      const confirmMsg = `🛡️🛡️🛡️ 帳號重置警報 🛡️🛡️🛡️\n\n您確定要強制將【${userFullName}】解除帳號綁定 (重置帳號媒合狀態) 嗎？\n\n這通常用於以下情況：\n1. 您或會員【不小心帳號媒合錯誤】(綁到錯誤的 Google/信箱)。\n2. 會員更換 Email，需要重新綁定。\n\n執行後，系統將洗掉她的 ID 並將信箱強制改回資料庫建檔的原始信箱 (marietai@ms1.url.com.tw)，這會讓該人員下次登入時【重新走一次帳號媒合流程】。\n這不是刪除資料，她過去的紀錄會保留，只是身分需要重新核對。`;
+      const confirmMsg = `🛡️🛡️🛡️ 帳號重置警報 🛡️🛡️🛡️\n\n您確定要強制將【${userFullName}】解除帳號綁定 (重置帳號媒合狀態) 嗎？\n\n這通常用於以下情況：\n1. 您或會員【不小心帳號媒合錯誤】(綁到錯誤的 Google/信箱)。\n2. 會員更換 Email，需要重新綁定。\n\n執行後，系統將洗掉原來 ID 並將信箱強制改回資料庫建檔的原始信箱，這會讓該人員下次登入時【重新走一次帳號媒合流程】。\n這不是刪除資料，過去的紀錄會保留，只是身分需要重新核對。`;
       if (!window.confirm(confirmMsg)) return;
 
       setIsUnlockLoading(true);
       try {
           // 企業級安全 UUID 生成
           const newRandomUuid = crypto.randomUUID(); 
-          const originalEmail = 'marietai@ms1.url.com.tw'; // 強制恢復預設信箱
+          const originalEmail = 恢復預設信箱; // 強制恢復預設信箱
 
           const { error } = await supabase
               .from('profiles')
@@ -343,7 +343,7 @@ export default function MemberCRM() {
               setEditingMember({ ...editingMember, id: newRandomUuid, email: originalEmail });
           }
 
-          alert(`🎉【${userFullName}】已強制解除綁定！\n信箱已恢復為：${originalEmail}\nID已重置。她下次登入系統時，將會重新彈出『首次帳號核對綁定』視窗，讓她自己重新帳號媒合。`);
+          alert(`🎉【${userFullName}】已強制解除綁定！\n信箱已恢復為初始登入信箱\nID已重置。下次登入系統時，將會重新彈出『首次帳號核對綁定』視窗，自己重新帳號媒合。`);
 
       } catch (error) {
           console.error("解鎖綁定失敗:", error)
