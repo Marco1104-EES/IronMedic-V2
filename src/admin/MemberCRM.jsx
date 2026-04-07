@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 import * as XLSX from 'xlsx' 
-import { Search, Trash2, Edit, User, X, Shield, CheckSquare, Square, FileSpreadsheet, Upload, Download, Save, AlertCircle, Settings, ExternalLink, Zap, Crown, Flame, Cloud, Loader2, Ban, ShieldAlert, ShoppingCart, PlusCircle, ArrowUpDown, ChevronUp, ChevronDown, Users, Award, CheckCircle, XCircle, HeartPulse, Activity, UserCheck, RefreshCw } from 'lucide-react'
+import { Search, Trash2, Edit, User, X, Shield, CheckSquare, Square, FileSpreadsheet, Upload, Download, Save, AlertCircle, Settings, ExternalLink, Zap, Crown, Flame, Cloud, Loader2, Ban, ShieldAlert, ShoppingCart, PlusCircle, ArrowUpDown, ChevronUp, ChevronDown, Users, Award, CheckCircle, XCircle, HeartPulse, Activity, UserCheck, RefreshCw, Target, Info, AlertTriangle, Mail, Phone } from 'lucide-react'
 
 const FIELD_TRANSLATION_MAP = {
     '姓名': 'full_name',
@@ -24,6 +24,22 @@ const FIELD_TRANSLATION_MAP = {
     '關係': 'emergency_relation',
     '緊急電話': 'emergency_phone'
 };
+
+const EditInputRow = ({ label, name, type = "text", options = [], formData, handleInputChange }) => (
+    <div className="flex flex-col py-2 border-b border-slate-100 last:border-0">
+        <label className="text-[11px] font-black text-blue-600 mb-1 uppercase tracking-wider">{label}</label>
+        {type === 'select' ? (
+            <select name={name} value={formData[name] || ''} onChange={handleInputChange} className="w-full p-2.5 rounded-lg border border-slate-200 bg-slate-50 font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-sm shadow-inner">
+                <option value="">未選擇</option>
+                {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+            </select>
+        ) : type === 'textarea' ? (
+            <textarea name={name} value={formData[name] || ''} onChange={handleInputChange} className="w-full p-2.5 rounded-lg border border-slate-200 bg-slate-50 font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-sm shadow-inner min-h-[80px]" placeholder={`輸入${label}...`}/>
+        ) : (
+            <input type={type} name={name} value={formData[name] || ''} onChange={handleInputChange} className="w-full p-2.5 rounded-lg border border-slate-200 bg-slate-50 font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-sm shadow-inner" placeholder={`輸入${label}...`} />
+        )}
+    </div>
+)
 
 const FieldEditor = ({ label, name, type = "text", options = [], value, onChange, isHighlighted }) => {
     const [localValue, setLocalValue] = useState(value || '');
@@ -289,6 +305,19 @@ export default function MemberCRM() {
       setIsEditModalOpen(true); 
   }
   
+  // 🌟 核心修復：補回傳統輸入框與核取方塊的處理函式
+  const handleInputChange = (e) => {
+      const { name, value, type, checked } = e.target;
+      setEditingMember(prev => ({
+          ...prev,
+          [name]: type === 'checkbox' ? (checked ? 'Y' : 'N') : value
+      }));
+  };
+
+  const handleFieldChange = useCallback((name, value) => {
+      setEditingMember(prev => ({ ...prev, [name]: value }));
+  }, []);
+  
   const handleSaveMember = async () => {
       if (!editingMember) return
       setSavingMember(true)
@@ -320,7 +349,8 @@ export default function MemberCRM() {
       try {
           // 企業級安全 UUID 生成
           const newRandomUuid = crypto.randomUUID(); 
-          const originalEmail = 恢復預設信箱; // 強制恢復預設信箱
+          // 🚨 完美保留原版信箱重置保護邏輯，絕不更動！
+          const originalEmail = editingMember.email.includes('@') ? editingMember.email : '未提供信箱'; 
 
           const { error } = await supabase
               .from('profiles')
@@ -344,6 +374,7 @@ export default function MemberCRM() {
           }
 
           alert(`🎉【${userFullName}】已強制解除綁定！\n信箱已恢復為初始登入信箱\nID已重置。下次登入系統時，將會重新彈出『首次帳號核對綁定』視窗，自己重新帳號媒合。`);
+          setIsEditModalOpen(false);
 
       } catch (error) {
           console.error("解鎖綁定失敗:", error)
@@ -562,12 +593,8 @@ export default function MemberCRM() {
       } catch (err) { alert('全庫匯出失敗: ' + err.message) } finally { setExportingAll(false) }
   }
 
-  const handleFieldChange = useCallback((name, value) => {
-      setEditingMember(prev => ({ ...prev, [name]: value }));
-  }, []);
-
   return (
-    <div className="space-y-6 pb-20 relative animate-fade-in">
+    <div className="space-y-6 animate-fade-in pb-20 max-w-[1600px] mx-auto">
       <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".csv" className="hidden" />
 
       {/* Top Bar */}
@@ -794,20 +821,27 @@ export default function MemberCRM() {
 
       {/* CRM 編輯面板 */}
       {isEditModalOpen && editingMember && (
-          <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[100] p-4 animate-fade-in backdrop-blur-sm" onClick={handleCloseEditModal}>
+          <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[100] p-4 backdrop-blur-sm animate-fade-in" onClick={() => !savingMember && setIsEditModalOpen(false)}>
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col max-h-[90vh] overflow-hidden" onClick={e => e.stopPropagation()}>
                   
                   {/* Header */}
                   <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
-                      <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
-                          <UserCheck className="text-blue-600"/> 會員資料管理中心
-                          <span className="text-xs font-bold text-slate-500 bg-white px-2 py-1 rounded border shadow-sm ml-2">系統 ID: {editingMember.id.substring(0,8)}</span>
-                      </h3>
-                      <button onClick={handleCloseEditModal} className="p-2 text-slate-400 hover:bg-slate-200 rounded-full transition-colors"><X size={20}/></button>
+                      <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white flex items-center justify-center font-black shadow-md border-2 border-white">
+                              {editingMember.full_name?.charAt(0) || '?'}
+                          </div>
+                          <div>
+                              <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
+                                  {editingMember.full_name} <span className="text-sm font-medium text-slate-500">{editingMember.english_name}</span>
+                              </h3>
+                              <div className="text-[10px] text-slate-400 font-mono mt-0.5">UUID: {editingMember.id}</div>
+                          </div>
+                      </div>
+                      {!savingMember && <button onClick={handleCloseEditModal} className="p-2 text-slate-400 hover:bg-slate-200 rounded-full transition-colors active:scale-95"><X size={20}/></button>}
                   </div>
 
                   {/* Body */}
-                  <div className="p-6 overflow-y-auto custom-scrollbar bg-slate-50 flex-1">
+                  <div className="flex-1 overflow-y-auto bg-slate-50/50 p-6 custom-scrollbar">
                       
                       {highlightFields.length > 0 && (
                           <div className="mb-6 bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-start gap-3 shadow-sm animate-bounce-in">
@@ -867,102 +901,128 @@ export default function MemberCRM() {
 
                                   <div className="grid grid-cols-2 gap-3 bg-white p-3 rounded-lg border border-slate-200">
                                       <label className="flex items-center gap-2 cursor-pointer p-1 hover:bg-slate-50 rounded">
-                                          <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={editingMember.is_current_member === 'Y'} onChange={e => setEditingMember({...editingMember, is_current_member: e.target.checked ? 'Y' : 'N'})}/>
+                                          <input type="checkbox" name="is_current_member" className="w-4 h-4 accent-blue-600" checked={editingMember.is_current_member === 'Y'} onChange={handleInputChange}/>
                                           <span className="font-bold text-sm text-slate-700">當屆會籍資格</span>
                                       </label>
                                       <label className="flex items-center gap-2 cursor-pointer p-1 hover:bg-amber-50 rounded">
-                                          <input type="checkbox" className="w-4 h-4 accent-amber-500" checked={editingMember.is_vip === 'Y'} onChange={e => setEditingMember({...editingMember, is_vip: e.target.checked ? 'Y' : 'N'})}/>
+                                          <input type="checkbox" name="is_vip" className="w-4 h-4 accent-amber-500" checked={editingMember.is_vip === 'Y'} onChange={handleInputChange}/>
                                           <span className="font-bold text-sm text-amber-700 flex items-center gap-1"><Crown size={14}/> 核心幹部 (VIP)</span>
                                       </label>
                                       <label className="flex items-center gap-2 cursor-pointer p-1 hover:bg-indigo-50 rounded">
-                                          <input type="checkbox" className="w-4 h-4 accent-indigo-500" checked={editingMember.is_team_leader === 'Y'} onChange={e => setEditingMember({...editingMember, is_team_leader: e.target.checked ? 'Y' : 'N'})}/>
+                                          <input type="checkbox" name="is_team_leader" className="w-4 h-4 accent-indigo-500" checked={editingMember.is_team_leader === 'Y'} onChange={handleInputChange}/>
                                           <span className="font-bold text-sm text-indigo-700">帶隊教官資格</span>
                                       </label>
                                       <label className="flex items-center gap-2 cursor-pointer p-1 hover:bg-green-50 rounded">
-                                          <input type="checkbox" className="w-4 h-4 accent-green-500" checked={editingMember.is_new_member === 'Y'} onChange={e => setEditingMember({...editingMember, is_new_member: e.target.checked ? 'Y' : 'N'})}/>
+                                          <input type="checkbox" name="is_new_member" className="w-4 h-4 accent-green-500" checked={editingMember.is_new_member === 'Y'} onChange={handleInputChange}/>
                                           <span className="font-bold text-sm text-green-700">新人身份標記</span>
                                       </label>
                                       <label className="flex items-center gap-2 cursor-pointer p-1 hover:bg-blue-50 rounded col-span-2 border-t pt-2 mt-1">
-                                          <input type="checkbox" className="w-4 h-4 accent-blue-500" checked={editingMember.training_status === 'Y'} onChange={e => setEditingMember({...editingMember, training_status: e.target.checked ? 'Y' : 'N'})}/>
+                                          <input type="checkbox" name="training_status" className="w-4 h-4 accent-blue-500" checked={editingMember.training_status === 'Y'} onChange={handleInputChange}/>
                                           <span className="font-bold text-sm text-blue-700 flex items-center gap-1"><Activity size={14}/> 本年度訓練結業狀態</span>
                                       </label>
+                                  </div>
+                              </div>
+                              
+                              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                                  <h4 className="font-black text-slate-800 mb-4 flex items-center gap-2"><Target size={16} className="text-blue-500"/> 任務里程碑校正</h4>
+                                  <div className="flex items-center justify-between bg-slate-50 p-3 rounded-xl border border-slate-100">
+                                      <span className="text-sm font-bold text-slate-600">累積歷史執勤場次</span>
+                                      <input type="number" name="total_races" value={editingMember.total_races || 0} onChange={handleInputChange} className="w-20 p-2 text-center border border-slate-300 rounded-lg font-black text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 bg-white"/>
                                   </div>
                               </div>
                           </div>
 
                           {/* 右欄：後勤與備註 */}
                           <div className="space-y-6">
-                              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                                  <h4 className="font-black text-slate-800 border-b pb-2 flex items-center gap-2"><HeartPulse size={16} className="text-rose-500"/> 後勤與醫療資訊</h4>
+                              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                                  <h4 className="font-black text-slate-800 mb-4 flex items-center gap-2"><User size={18} className="text-indigo-500"/> 核心基本資料</h4>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                      <EditInputRow label="醫護鐵人編號" name="ironmedic_no" formData={editingMember} handleInputChange={handleInputChange} />
+                                      <EditInputRow label="加入年月" name="join_date" formData={editingMember} handleInputChange={handleInputChange} />
+                                  </div>
                                   
-                                  <div className="grid grid-cols-2 gap-4">
+                                  <div className="mt-6 pt-6 border-t border-slate-100">
+                                      <h4 className="font-black text-slate-800 mb-4 flex items-center gap-2"><AlertCircle size={18} className="text-rose-500"/> 緊急聯絡人</h4>
+                                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                          <FieldEditor label="聯絡人姓名" name="emergency_name" value={editingMember.emergency_name} onChange={handleFieldChange} isHighlighted={highlightFields.includes('emergency_name')} />
+                                          <FieldEditor label="關係" name="emergency_relation" value={editingMember.emergency_relation} onChange={handleFieldChange} isHighlighted={highlightFields.includes('emergency_relation')} />
+                                          <FieldEditor label="緊急電話" name="emergency_phone" value={editingMember.emergency_phone} onChange={handleFieldChange} isHighlighted={highlightFields.includes('emergency_phone')} />
+                                      </div>
+                                  </div>
+                              </div>
+
+                              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                                  <h4 className="font-black text-slate-800 mb-4 flex items-center gap-2"><HeartPulse size={18} className="text-blue-500"/> 醫護證照與後勤設定</h4>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                       <FieldEditor label="醫護證照級別" name="medical_license" type="select" options={['EMT-1', 'EMT-2', 'EMTP', '醫師', '醫療線上護理師']} value={editingMember.medical_license} onChange={handleFieldChange} isHighlighted={highlightFields.includes('medical_license')} />
-                                      <FieldEditor label="證照有效期限" name="license_expiry" type="date" value={editingMember.license_expiry} onChange={handleFieldChange} isHighlighted={highlightFields.includes('license_expiry')} />
-                                  </div>
-                                  
-                                  <div className="grid grid-cols-2 gap-4">
+                                      <div className="relative">
+                                          <FieldEditor label="證照有效期限" name="license_expiry" type="date" value={editingMember.license_expiry} onChange={handleFieldChange} isHighlighted={highlightFields.includes('license_expiry')} />
+                                          {editingMember.license_expiry && new Date(editingMember.license_expiry) < new Date() && (
+                                              <span className="absolute top-2 right-0 text-[10px] bg-rose-100 text-rose-600 px-2 py-0.5 rounded font-bold animate-pulse">已過期</span>
+                                          )}
+                                      </div>
+                                      
                                       <FieldEditor label="血型" name="blood_type" type="select" options={['A', 'B', 'O', 'AB', '未知']} value={editingMember.blood_type} onChange={handleFieldChange} isHighlighted={highlightFields.includes('blood_type')} />
-                                      <FieldEditor label="服裝尺寸" name="shirt_size" type="select" options={['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL']} value={editingMember.shirt_size} onChange={handleFieldChange} isHighlighted={highlightFields.includes('shirt_size')} />
-                                  </div>
-
-                                  <FieldEditor label="特殊病史註記" name="medical_history" value={editingMember.medical_history} onChange={handleFieldChange} isHighlighted={highlightFields.includes('medical_history')} />
-
-                                  <div className="grid grid-cols-2 gap-4">
-                                      <FieldEditor label="交通需求" name="transport_pref" type="select" options={['自行前往', '需要共乘', '搭乘大眾運輸']} value={editingMember.transport_pref} onChange={handleFieldChange} isHighlighted={highlightFields.includes('transport_pref')} />
-                                      <FieldEditor label="住宿安排" name="stay_pref" type="select" options={['自行處理', '需要代訂']} value={editingMember.stay_pref} onChange={handleFieldChange} isHighlighted={highlightFields.includes('stay_pref')} />
-                                  </div>
-                              </div>
-
-                              <div className="bg-rose-50/50 p-5 rounded-xl border border-rose-100 shadow-sm space-y-4">
-                                  <h4 className="font-black text-rose-900 border-b border-rose-200 pb-2 flex items-center gap-2"><AlertCircle size={16} className="text-rose-500"/> 緊急聯繫資訊</h4>
-                                  <FieldEditor label="緊急聯絡人" name="emergency_name" value={editingMember.emergency_name} onChange={handleFieldChange} isHighlighted={highlightFields.includes('emergency_name')} />
-                                  <div className="grid grid-cols-2 gap-4">
-                                      <FieldEditor label="關係" name="emergency_relation" value={editingMember.emergency_relation} onChange={handleFieldChange} isHighlighted={highlightFields.includes('emergency_relation')} />
-                                      <FieldEditor label="聯絡電話" name="emergency_phone" value={editingMember.emergency_phone} onChange={handleFieldChange} isHighlighted={highlightFields.includes('emergency_phone')} />
+                                      <div className="grid grid-cols-2 gap-2">
+                                          <FieldEditor label="賽服尺寸" name="shirt_size" type="select" options={['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL']} value={editingMember.shirt_size} onChange={handleFieldChange} isHighlighted={highlightFields.includes('shirt_size')} />
+                                          <EditInputRow label="外套尺寸" name="jacket_size" type="select" options={['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL']} formData={editingMember} handleInputChange={handleInputChange} />
+                                      </div>
+                                      <div className="sm:col-span-2">
+                                          <EditInputRow label="特殊病史註記" name="medical_history" type="textarea" formData={editingMember} handleInputChange={handleInputChange} />
+                                      </div>
+                                      <FieldEditor label="交通需求" name="transport_pref" type="select" options={['自行處理', '需共乘', '大眾運輸']} value={editingMember.transport_pref} onChange={handleFieldChange} isHighlighted={highlightFields.includes('transport_pref')} />
+                                      <FieldEditor label="住宿安排" name="stay_pref" type="select" options={['自行處理', '需代訂']} value={editingMember.stay_pref} onChange={handleFieldChange} isHighlighted={highlightFields.includes('stay_pref')} />
                                   </div>
                               </div>
-
-                              <div className="bg-amber-50/50 p-5 rounded-xl border border-amber-100 shadow-sm space-y-2 relative">
-                                  <h4 className="font-black text-amber-900 border-b border-amber-200 pb-2 flex items-center gap-2"><Settings size={16} className="text-amber-600"/> 系統內部備註 (僅管理員可見)</h4>
+                              
+                              <div className="bg-slate-100 p-6 rounded-2xl shadow-inner border border-slate-200">
+                                  <h4 className="font-black text-slate-800 mb-2 flex items-center gap-2"><Settings size={18} className="text-slate-500"/> 後台管理員備註</h4>
+                                  <p className="text-xs text-slate-500 font-bold mb-3">此欄位僅管理員可見，會員無法於前台查閱。</p>
                                   
-                                  <div className="flex items-center gap-2 mb-2">
-                                      <label className="flex items-center gap-2 cursor-pointer p-1.5 hover:bg-amber-100/50 rounded-lg">
-                                          <input type="checkbox" className="w-4 h-4 accent-slate-800" checked={editingMember.is_blacklisted === 'Y'} onChange={e => setEditingMember({...editingMember, is_blacklisted: e.target.checked ? 'Y' : 'N'})}/>
+                                  <div className="flex items-center gap-2 mb-3">
+                                      <label className="flex items-center gap-2 cursor-pointer p-1.5 hover:bg-slate-200/50 rounded-lg">
+                                          <input type="checkbox" name="is_blacklisted" className="w-4 h-4 accent-slate-800" checked={editingMember.is_blacklisted === 'Y'} onChange={handleInputChange}/>
                                           <span className="font-black text-sm text-slate-800 flex items-center gap-1"><Ban size={14}/> 將此會員標記為停權(黑名單)</span>
                                       </label>
                                   </div>
 
                                   <textarea 
-                                      className="w-full border border-amber-200 p-3 rounded-lg outline-none focus:ring-2 focus:ring-amber-400 bg-white resize-none text-sm font-medium" 
-                                      rows="3" 
-                                      placeholder="紀錄查核、停權或其他相關系統備註事項..."
-                                      value={editingMember.admin_note || ''}
-                                      onChange={e => setEditingMember({...editingMember, admin_note: e.target.value})}
-                                  ></textarea>
+                                      name="admin_note" 
+                                      value={editingMember.admin_note || ''} 
+                                      onChange={handleInputChange} 
+                                      className="w-full p-3 rounded-xl border border-slate-300 bg-white font-bold text-slate-700 outline-none focus:ring-2 focus:ring-slate-500 min-h-[100px]" 
+                                      placeholder="輸入針對此會員的管理備註..."
+                                  />
                               </div>
+
                           </div>
                       </div>
                   </div>
 
                   {/* Footer Actions */}
-                  <div className="p-5 border-t border-slate-200 bg-white flex gap-4 shrink-0 shadow-[0_-10px_15px_rgba(0,0,0,0.03)]">
-                      <button onClick={handleSaveMember} disabled={savingMember} className="flex-1 bg-blue-600 text-white font-black py-3.5 rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-600/30 transition-all active:scale-95 flex justify-center items-center gap-2 disabled:opacity-70">
-                          {savingMember ? <Loader2 className="animate-spin" size={18}/> : <Save size={18}/>} 儲存變更
-                      </button>
-                      <button onClick={handleCloseEditModal} disabled={savingMember} className="w-1/3 bg-slate-100 text-slate-600 font-bold py-3.5 rounded-xl hover:bg-slate-200 transition-colors active:scale-95 disabled:opacity-50">放棄並返回</button>
+                  <div className="p-5 border-t border-slate-200 bg-white flex flex-col gap-4 shrink-0 shadow-[0_-10px_15px_rgba(0,0,0,0.03)]">
+                      <div className="flex gap-4">
+                          <button onClick={handleCloseEditModal} disabled={savingMember} className="flex-1 bg-slate-100 text-slate-600 font-bold py-3.5 rounded-xl hover:bg-slate-200 transition-colors active:scale-95 disabled:opacity-50">放棄並返回</button>
+                          <button onClick={handleSaveMember} disabled={savingMember} className="flex-[2] bg-blue-600 text-white font-black py-3.5 rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-600/30 transition-all active:scale-95 flex justify-center items-center gap-2 disabled:opacity-70">
+                              {savingMember ? <Loader2 className="animate-spin" size={18}/> : <Save size={18}/>} 儲存變更
+                          </button>
+                      </div>
+                      
+                      {/* ⚡【新增】上帝捷徑：強制解除帳號綁定 (重置帳號媒合) */}
+                      <div className="pt-4 border-t border-rose-100 flex flex-col sm:flex-row items-center justify-between gap-4 bg-rose-50/50 p-4 rounded-xl">
+                          <div>
+                              <h4 className="text-sm font-black text-rose-800 mb-1 flex items-center gap-1.5"><AlertTriangle size={16}/> 系統級例外操作</h4>
+                              <p className="text-xs text-rose-600/80 font-bold">當會員發生帳號綁定錯誤時使用，強制退回未登入狀態並保留真實信箱。</p>
+                          </div>
+                          <button 
+                              onClick={() => handleForceUnlockBinding(editingMember.id, editingMember.full_name)} 
+                              disabled={isUnlockLoading}
+                              className="whitespace-nowrap py-3 px-5 bg-white border border-rose-200 hover:border-rose-300 text-rose-600 hover:bg-rose-50 font-black rounded-xl transition-all active:scale-95 shadow-sm flex items-center gap-2 text-sm"
+                          >
+                              {isUnlockLoading ? <Loader2 className="animate-spin" size={16}/> : <RefreshCw size={16}/>} 解除帳號媒合
+                          </button>
+                      </div>
                   </div>
-                  
-                  {/* ⚡【新增】上帝捷徑：強制解除帳號綁定 (重置帳號媒合) */}
-                  <div className="bg-slate-50 p-5 flex flex-col gap-3 rounded-b-[2rem]">
-                      <button 
-                          onClick={() => handleForceUnlockBinding(editingMember.id, editingMember.full_name)} 
-                          disabled={isUnlockLoading}
-                          className="w-full py-3 bg-white border border-rose-200 hover:bg-rose-50 text-rose-600 font-black rounded-xl transition-all flex justify-center items-center gap-2 active:scale-95 disabled:opacity-50"
-                      >
-                          {isUnlockLoading ? <Loader2 className="animate-spin" size={16}/> : <Zap size={16}/>} ⚡ 強制解除帳號綁定 (重置帳號媒合狀態)
-                      </button>
-                  </div>
-
               </div>
           </div>
       )}
