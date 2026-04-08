@@ -923,13 +923,13 @@ export default function MemberCRM() {
                                   </div>
                               </div>
                               
-                              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                               {/*<div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
                                   <h4 className="font-black text-slate-800 mb-4 flex items-center gap-2"><Target size={16} className="text-blue-500"/> 任務里程碑校正</h4>
                                   <div className="flex items-center justify-between bg-slate-50 p-3 rounded-xl border border-slate-100">
                                       <span className="text-sm font-bold text-slate-600">累積歷史執勤場次</span>
                                       <input type="number" name="total_races" value={editingMember.total_races || 0} onChange={handleInputChange} className="w-20 p-2 text-center border border-slate-300 rounded-lg font-black text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 bg-white"/>
                                   </div>
-                              </div>
+                              </div>*/}
                           </div>
 
                           {/* 右欄：後勤與備註 */}
@@ -965,7 +965,7 @@ export default function MemberCRM() {
                                       <FieldEditor label="血型" name="blood_type" type="select" options={['A', 'B', 'O', 'AB', '未知']} value={editingMember.blood_type} onChange={handleFieldChange} isHighlighted={highlightFields.includes('blood_type')} />
                                       <div className="grid grid-cols-2 gap-2">
                                           <FieldEditor label="賽服尺寸" name="shirt_size" type="select" options={['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL']} value={editingMember.shirt_size} onChange={handleFieldChange} isHighlighted={highlightFields.includes('shirt_size')} />
-                                          <EditInputRow label="外套尺寸" name="jacket_size" type="select" options={['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL']} formData={editingMember} handleInputChange={handleInputChange} />
+                                          {/*<EditInputRow label="外套尺寸" name="jacket_size" type="select" options={['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL']} formData={editingMember} handleInputChange={handleInputChange} />*/}
                                       </div>
                                       <div className="sm:col-span-2">
                                           <EditInputRow label="特殊病史註記" name="medical_history" type="textarea" formData={editingMember} handleInputChange={handleInputChange} />
